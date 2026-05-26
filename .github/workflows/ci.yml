@@ -18,8 +18,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -46,14 +46,11 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Build
-        run: npm run build
 
       - name: Pack tarball
         run: npm pack
@@ -63,9 +60,9 @@ jobs:
         run: |
           TARBALL=$(ls pi-drykiss-*.tgz)
           echo "Checking tarball: $TARBALL"
-          tar -tzf "$TARBALL" | grep -E "dist/index\.js|dist/index\.d\.ts|package\.json|README\.md|LICENSE" | sort
-          tar -tzf "$TARBALL" | grep "dist/index.js" || \
-            (echo "ERROR: dist/index.js missing from tarball" && exit 1)
+          tar -tzf "$TARBALL" | grep -E "index\.ts|package\.json|README\.md|LICENSE" | sort
+          tar -tzf "$TARBALL" | grep "index.ts" || \
+            (echo "ERROR: index.ts missing from tarball" && exit 1)
 
       - name: Verify package.json entry points exist in tarball
         shell: bash
@@ -116,7 +113,7 @@ jobs:
         run: |
           INSTALL_DIR=$(npm root -g)/pi-drykiss
           cd "$INSTALL_DIR"
-          npx tsx dist/index.js 2>&1 | tee /tmp/tsx-output.txt || true
+          npx tsx index.ts 2>&1 | tee /tmp/tsx-output.txt || true
           if grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module" /tmp/tsx-output.txt; then
             echo "FAILED: missing module dependency detected"
             cat /tmp/tsx-output.txt

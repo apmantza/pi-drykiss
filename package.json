@@ -4,7 +4,11 @@
   "description": "Clear-context KISS/DRY reviewer subagents for Pi. Multi-lens code review that prioritizes quality over speed.",
   "type": "module",
   "license": "MIT",
-  "author": "R3LiC",
+  "author": "Apostolos Mantzaris",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/R3LiC/pi-drykiss.git"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -22,33 +26,38 @@
     "node": ">=18"
   },
   "files": [
-    "dist",
+    "index.ts",
     "src",
     "!src/**/*.test.ts",
     "README.md",
     "LICENSE"
   ],
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "pi": {
     "extensions": [
-      "src/index.ts"
+      "./index.ts"
     ]
   },
   "scripts": {
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src/",
-    "check": "vitest run && eslint src/ && tsc --noEmit",
-    "prepublishOnly": "npm run build && npm run check",
-    "prepack": "test -d dist || { echo 'Error: dist/ missing. Run npm run build first.' && exit 1; }"
+    "check": "vitest run && eslint src/ && tsc --noEmit"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0 <0.76.0",
     "@earendil-works/pi-ai": ">=0.74.0 <0.76.0",
     "@earendil-works/pi-tui": ">=0.74.0 <0.76.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

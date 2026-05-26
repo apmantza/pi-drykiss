@@ -42,7 +42,7 @@ src/
 
 ## Important Conventions
 
-- **Pi extension entry point**: `src/index.ts` (declared in `package.json` under `pi.extensions`). Pi loads this via jiti, so TypeScript works without compilation.
+- **Pi extension entry point**: `index.ts` (declared in `package.json` under `pi.extensions`). Pi loads this via jiti, so TypeScript works without compilation.
 - **Peer dependencies**: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui` are peer deps. Do not bundle them.
 - **Config directory**: `.pi/drykiss/` (created per-project). Holds `config.json` and persisted review results.
 - **Severity order**: `critical > high > medium > low > nit`
@@ -58,8 +58,7 @@ src/
 
 ## Build & CI
 
-- TypeScript compilation: `npm run build` (outputs to `dist/`)
 - Type check only: `npm run typecheck`
 - Lint: `npm run lint`
 - Full check: `npm run check` (tests + lint + typecheck)
-- CI runs on GitHub Actions (`.github/workflows/ci.yml`) — tests, typecheck, and build verification.
+- CI runs on GitHub Actions (`.github/workflows/ci.yml`) — tests, typecheck, and lint verification.
