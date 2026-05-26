@@ -1,6 +1,6 @@
 {
   "name": "pi-drykiss",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Clear-context KISS/DRY reviewer subagents for Pi. Multi-lens code review that prioritizes quality over speed.",
   "type": "module",
   "license": "MIT",
