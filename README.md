@@ -186,9 +186,6 @@ After every turn with `Write` or `Edit`, a lightweight KISS/DRY checklist is aut
 - [Nolan Lawson — Using AI to write better code more slowly](https://nolanlawson.com/2026/05/25/using-ai-to-write-better-code-more-slowly/)
 - [KISS principle](https://en.wikipedia.org/wiki/KISS_principle)
 - [DRY principle](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself)
-- [Addy Osmani — Code Review and Quality Agent Skills](https://github.com/addyosmani/agent-skills)
-- [pi-simplify](https://github.com/MattDevy/pi-extensions/tree/main/packages/pi-simplify)
-- [pi-code-review](https://github.com/MattDevy/pi-extensions/tree/main/packages/pi-code-review)
 
 ## License
 
