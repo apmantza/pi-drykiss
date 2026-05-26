@@ -21,12 +21,6 @@ Most AI coding tools optimize for speed and volume. `pi-drykiss` optimizes for *
 pi install npm:pi-drykiss
 ```
 
-Or load directly:
-
-```bash
-pi -e ./src/index.ts
-```
-
 ## Commands
 
 ### `/drykiss` — Full multi-lens review
