@@ -5,8 +5,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { getChangedFiles, getFileDiff } from "./git-diff.js";
-import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
+import { getChangedFiles, getFileDiff, getFileContent, getProjectIndex } from "./git-diff.js";
+import { buildReviewPrompts, buildSynthesisPrompt, ensureDefaultPrompts } from "./prompt-builder.js";
 import { callLLM } from "./llm.js";
 import { saveReview, formatReviewForDisplay } from "./persist.js";
 import { loadConfig } from "./config.js";
@@ -15,6 +15,8 @@ import type { ReviewLens, ReviewOptions, ChangedFile, Finding, SynthesisResult, 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
 export const DRY_COMMAND_NAME = "drykiss-dry";
+export const RESILIENCE_COMMAND_NAME = "drykiss-resilience";
+export const ARCH_COMMAND_NAME = "drykiss-arch";
 
 const MAX_FILES = 12;
 
@@ -60,6 +62,18 @@ async function gatherDiffs(
     }
   }
   return diffs;
+}
+
+async function gatherContents(
+  cwd: string,
+  files: ChangedFile[],
+): Promise<Map<string, { content: string; lineCount: number; truncated: boolean }>> {
+  const contents = new Map<string, { content: string; lineCount: number; truncated: boolean }>();
+  for (const file of files) {
+    const result = await getFileContent(cwd, file.path);
+    if (result) contents.set(file.path, result);
+  }
+  return contents;
 }
 
 function parseFindingsJson(raw: string, lens: ReviewLens): Finding[] {
@@ -124,9 +138,16 @@ async function runLensReview(
   files: ChangedFile[],
   diffs: Map<string, string>,
   lens: ReviewLens,
-  modelHint?: string,
+  options: {
+    modelHint?: string;
+    contents?: Map<string, { content: string; lineCount: number; truncated: boolean }>;
+    projectIndex?: import("./git-diff.js").ProjectIndexEntry[];
+  } = {},
 ): Promise<{ lens: ReviewLens; findings: Finding[]; rawOutput: string; modelName: string }> {
-  const prompts = await buildReviewPrompts(files, diffs, lens);
+  const prompts = await buildReviewPrompts(cwd, files, diffs, lens, {
+    contents: options.contents,
+    projectIndex: options.projectIndex,
+  });
   const prompt = prompts[0];
   if (!prompt) return { lens, findings: [], rawOutput: "", modelName: "none" };
 
@@ -138,7 +159,7 @@ async function runLensReview(
     prompt.systemPrompt,
     prompt.userPrompt,
     { temperature: 0.2, maxTokens: 4000, signal: ctx.signal },
-    modelHint ? undefined : lens,
+    options.modelHint ? undefined : lens,
   );
 
   const findings = parseFindingsJson(rawOutput, lens);
@@ -151,7 +172,7 @@ async function runSynthesis(
   lensReviews: Array<{ lens: ReviewLens; rawOutput: string }>,
   modelHint?: string,
 ): Promise<SynthesisResult> {
-  const { systemPrompt, userPrompt } = buildSynthesisPrompt(lensReviews);
+  const { systemPrompt, userPrompt } = await buildSynthesisPrompt(cwd, lensReviews);
 
   ctx.ui.notify(`[DRYKISS] Synthesizing findings...`, "info");
 
@@ -200,15 +221,23 @@ export async function handleDrykissCommand(
     return;
   }
 
-  const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-  const fileList = files.map((f) => f.path).join(", ");
   const config = await loadConfig(ctx.cwd);
+
+  // Ensure default prompts exist on disk so users can customize
+  await ensureDefaultPrompts(ctx.cwd);
+
+  const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+  const projectIndex = config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
+
+  const fileList = files.map((f) => f.path).join(", ");
 
   // Confirmation (respect config)
   if (config.confirmBeforeRun !== false) {
+    const contextLabel = config.contextMode === "diff" ? "diff only" : "full file + project index";
     const ok = await ctx.ui.confirm(
       "DRYKISS Review",
-      `Review ${files.length} file(s) with 3 parallel lens reviews + synthesis.\n\nFiles: ${fileList}\n\nProceed?`,
+      `Review ${files.length} file(s) with 5 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
     );
     if (!ok) {
       ctx.ui.notify("Review cancelled.", "info");
@@ -217,9 +246,15 @@ export async function handleDrykissCommand(
   }
 
   try {
-    const lenses: ReviewLens[] = ["simplicity", "deduplication", "clarity"];
+    const lenses: ReviewLens[] = ["simplicity", "deduplication", "clarity", "resilience", "architecture"];
     const lensReviews = await Promise.all(
-      lenses.map((lens) => runLensReview(ctx, ctx.cwd, files, diffs, lens, options.model)),
+      lenses.map((lens) =>
+        runLensReview(ctx, ctx.cwd, files, diffs, lens, {
+          modelHint: options.model,
+          contents,
+          projectIndex,
+        }),
+      ),
     );
 
     const synthesis = await runSynthesis(
@@ -261,10 +296,16 @@ export async function handleKissCommand(
     return;
   }
 
+  await ensureDefaultPrompts(ctx.cwd);
   const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
 
   try {
-    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "simplicity", options.model);
+    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "simplicity", {
+      modelHint: options.model,
+      contents,
+    });
     const display = review.findings
       .map((f) => `[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`)
       .join("\n") || "No simplicity concerns found.";
@@ -287,10 +328,18 @@ export async function handleDryCommand(
     return;
   }
 
+  await ensureDefaultPrompts(ctx.cwd);
   const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+  const projectIndex = config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
 
   try {
-    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "deduplication", options.model);
+    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "deduplication", {
+      modelHint: options.model,
+      contents,
+      projectIndex,
+    });
     const display = review.findings
       .map((f) => `[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`)
       .join("\n") || "No duplication concerns found.";
@@ -300,10 +349,76 @@ export async function handleDryCommand(
   }
 }
 
+export async function handleResilienceCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  const options = parseArgs(args);
+  const files = await getChangedFiles(pi, ctx.cwd, options);
+
+  if (files.length === 0) {
+    ctx.ui.notify("No changed files found.", "info");
+    return;
+  }
+
+  await ensureDefaultPrompts(ctx.cwd);
+  const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+
+  try {
+    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "resilience", {
+      modelHint: options.model,
+      contents,
+    });
+    const display = review.findings
+      .map((f) => `[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`)
+      .join("\n") || "No resilience concerns found.";
+    ctx.ui.notify(`## Resilience Review (${review.modelName})\n\n${display}`, "info");
+  } catch (err: any) {
+    ctx.ui.notify(`Resilience review failed: ${err.message}`, "error");
+  }
+}
+
+export async function handleArchCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  const options = parseArgs(args);
+  const files = await getChangedFiles(pi, ctx.cwd, options);
+
+  if (files.length === 0) {
+    ctx.ui.notify("No changed files found.", "info");
+    return;
+  }
+
+  await ensureDefaultPrompts(ctx.cwd);
+  const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+  const projectIndex = config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
+
+  try {
+    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "architecture", {
+      modelHint: options.model,
+      contents,
+      projectIndex,
+    });
+    const display = review.findings
+      .map((f) => `[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`)
+      .join("\n") || "No architecture concerns found.";
+    ctx.ui.notify(`## Architecture Review (${review.modelName})\n\n${display}`, "info");
+  } catch (err: any) {
+    ctx.ui.notify(`Architecture review failed: ${err.message}`, "error");
+  }
+}
+
 // ── Tool parameter schema ─────────────────────────────────
 
 export const DrykissReviewParams = Type.Object({
-  lens: StringEnum(["simplicity", "deduplication", "clarity"] as const, {
+  lens: StringEnum(["simplicity", "deduplication", "clarity", "resilience", "architecture"] as const, {
     description: "Which review lens to apply",
   }),
   files: Type.Array(Type.String(), {
@@ -318,7 +433,7 @@ export const DrykissReviewParams = Type.Object({
 
 export async function executeDrykissReviewTool(
   params: {
-    lens: "simplicity" | "deduplication" | "clarity";
+    lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture";
     files: string[];
     model?: string;
   },
@@ -338,8 +453,19 @@ export async function executeDrykissReviewTool(
     language: null,
   }));
 
+  await ensureDefaultPrompts(ctx.cwd);
   const diffs = await gatherDiffs(pi, ctx.cwd, filesToReview, options);
-  const review = await runLensReview(ctx, ctx.cwd, filesToReview, diffs, params.lens, params.model);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, filesToReview) : undefined;
+  const projectIndex = config.contextMode !== "diff" && (params.lens === "deduplication" || params.lens === "architecture")
+    ? await getProjectIndex(ctx.cwd)
+    : undefined;
+
+  const review = await runLensReview(ctx, ctx.cwd, filesToReview, diffs, params.lens, {
+    modelHint: params.model,
+    contents,
+    projectIndex,
+  });
 
   return {
     content: [{ type: "text", text: JSON.stringify(review.findings, null, 2) }],

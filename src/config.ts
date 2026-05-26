@@ -9,12 +9,16 @@ export interface DrykissConfig {
     simplicity?: string;
     deduplication?: string;
     clarity?: string;
+    resilience?: string;
+    architecture?: string;
     synthesis?: string;
   };
   /** Whether to prompt for model selection on first use */
   interactive?: boolean;
   /** Whether to ask for confirmation before running reviews */
   confirmBeforeRun?: boolean;
+  /** Context mode: "diff" = changed hunks only, "full" = full file + diff (default) */
+  contextMode?: "diff" | "full";
 }
 
 const CONFIG_DIR = ".pi/drykiss";

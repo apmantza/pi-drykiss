@@ -14,7 +14,7 @@ const mockDiffs = new Map<string, string>([
 
 describe("buildReviewPrompts", () => {
   it("returns single prompt for simplicity lens", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "simplicity");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "simplicity");
     expect(prompts).toHaveLength(1);
     expect(prompts[0].lens).toBe("simplicity");
     expect(prompts[0].systemPrompt).toContain("Simplicity Auditor");
@@ -24,7 +24,7 @@ describe("buildReviewPrompts", () => {
   });
 
   it("returns single prompt for deduplication lens", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "deduplication");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "deduplication");
     expect(prompts).toHaveLength(1);
     expect(prompts[0].lens).toBe("deduplication");
     expect(prompts[0].systemPrompt).toContain("Duplication Hunter");
@@ -32,7 +32,7 @@ describe("buildReviewPrompts", () => {
   });
 
   it("returns single prompt for clarity lens", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "clarity");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "clarity");
     expect(prompts).toHaveLength(1);
     expect(prompts[0].lens).toBe("clarity");
     expect(prompts[0].systemPrompt).toContain("Clarity & Quality Auditor");
@@ -40,37 +40,58 @@ describe("buildReviewPrompts", () => {
     expect(prompts[0].systemPrompt).toContain("Performance Check");
   });
 
-  it("returns all three prompts for 'all' lens", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "all");
-    expect(prompts).toHaveLength(3);
+  it("returns single prompt for resilience lens", async () => {
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "resilience");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].lens).toBe("resilience");
+    expect(prompts[0].systemPrompt).toContain("Resilience Auditor");
+    expect(prompts[0].systemPrompt).toContain("silent failures");
+  });
+
+  it("returns single prompt for architecture lens", async () => {
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "architecture");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].lens).toBe("architecture");
+    expect(prompts[0].systemPrompt).toContain("Architecture Auditor");
+    expect(prompts[0].systemPrompt).toContain("SOLID");
+    expect(prompts[0].systemPrompt).toContain("Depth");
+    expect(prompts[0].systemPrompt).toContain("Seam");
+    expect(prompts[0].systemPrompt).toContain("Locality");
+  });
+
+  it("returns all five prompts for 'all' lens", async () => {
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "all");
+    expect(prompts).toHaveLength(5);
     const lenses = prompts.map((p) => p.lens);
     expect(lenses).toContain("simplicity");
     expect(lenses).toContain("deduplication");
     expect(lenses).toContain("clarity");
+    expect(lenses).toContain("resilience");
+    expect(lenses).toContain("architecture");
   });
 
   it("includes diff content in user prompt", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "simplicity");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "simplicity");
     expect(prompts[0].userPrompt).toContain("console.log('hello')");
     expect(prompts[0].userPrompt).toContain("export const x = 1");
   });
 
   it("handles missing diffs gracefully", async () => {
     const emptyDiffs = new Map<string, string>();
-    const prompts = await buildReviewPrompts(mockFiles, emptyDiffs, "simplicity");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, emptyDiffs, "simplicity");
     expect(prompts[0].userPrompt).toContain("(diff not available)");
   });
 
   it("requires JSON output in system prompts", async () => {
-    const prompts = await buildReviewPrompts(mockFiles, mockDiffs, "simplicity");
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "simplicity");
     expect(prompts[0].systemPrompt).toContain("Output findings as a single JSON array");
     expect(prompts[0].systemPrompt).toContain("Output ONLY the JSON array");
   });
 });
 
 describe("buildSynthesisPrompt", () => {
-  it("returns system and user prompts", () => {
-    const result = buildSynthesisPrompt([
+  it("returns system and user prompts", async () => {
+    const result = await buildSynthesisPrompt("/cwd", [
       { lens: "simplicity", rawOutput: "[{\"file\":\"a.ts\",\"severity\":\"high\"}]" },
       { lens: "deduplication", rawOutput: "[{\"file\":\"b.ts\",\"severity\":\"medium\"}]" },
     ]);
@@ -104,5 +125,8 @@ describe("buildAutoInjectBlock", () => {
     expect(block).toContain("Do they explain WHY, not WHAT?");
     expect(block).toContain("Edge cases");
     expect(block).toContain("Security");
+    expect(block).toContain("Resilience");
+    expect(block).toContain("Architecture");
+    expect(block).toContain("deep module");
   });
 });

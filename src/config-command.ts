@@ -1,6 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, saveConfig, setLensModel, setDefaultModel } from "./config.js";
 import { selectModel } from "./model-selector.js";
+import { resetPrompts } from "./prompt-builder.js";
 
 export async function handleConfigCommand(
   args: string,
@@ -20,18 +21,24 @@ export async function handleConfigCommand(
       `  simplicity:     ${config.lensModels?.simplicity ?? "(inherits default)"}`,
       `  deduplication:  ${config.lensModels?.deduplication ?? "(inherits default)"}`,
       `  clarity:        ${config.lensModels?.clarity ?? "(inherits default)"}`,
+      `  resilience:     ${config.lensModels?.resilience ?? "(inherits default)"}`,
+      `  architecture:   ${config.lensModels?.architecture ?? "(inherits default)"}`,
       `  synthesis:      ${config.lensModels?.synthesis ?? "(inherits default)"}`,
       "",
       `**Interactive prompts:** ${config.interactive !== false ? "enabled" : "disabled"}`,
       `**Confirm before run:** ${config.confirmBeforeRun !== false ? "enabled" : "disabled"}`,
+      `**Context mode:** ${config.contextMode ?? "full"}`,
       "",
       "Config file: `.pi/drykiss/config.json`",
+      "Prompts dir: `.pi/drykiss/prompts/`",
       "",
       "Usage:",
       "  /drykiss-config set-default <model>",
       "  /drykiss-config set-lens <lens> <model>",
       "  /drykiss-config interactive <on|off>",
       "  /drykiss-config confirm <on|off>",
+      "  /drykiss-config context-mode <diff|full>",
+      "  /drykiss-config reset-prompts",
     ];
     ctx.ui.notify(lines.join("\n"), "info");
     return;
@@ -61,7 +68,7 @@ export async function handleConfigCommand(
   if (subcommand === "set-lens") {
     const lens = tokens[1];
     const model = tokens[2];
-    const validLenses = ["simplicity", "deduplication", "clarity", "synthesis"];
+    const validLenses = ["simplicity", "deduplication", "clarity", "resilience", "architecture", "synthesis"];
     if (!validLenses.includes(lens)) {
       ctx.ui.notify(`Invalid lens: ${lens}. Valid: ${validLenses.join(", ")}`, "error");
       return;
@@ -104,6 +111,26 @@ export async function handleConfigCommand(
     }
     await saveConfig(ctx.cwd, config);
     ctx.ui.notify(`Pre-run confirmation ${config.confirmBeforeRun ? "enabled" : "disabled"}.`, "info");
+    return;
+  }
+
+  if (subcommand === "context-mode") {
+    const val = tokens[1]?.toLowerCase();
+    const config = await loadConfig(ctx.cwd);
+    if (val === "diff" || val === "full") {
+      config.contextMode = val;
+    } else {
+      ctx.ui.notify("Usage: /drykiss-config context-mode <diff|full>", "warning");
+      return;
+    }
+    await saveConfig(ctx.cwd, config);
+    ctx.ui.notify(`Context mode set to ${config.contextMode}.`, "info");
+    return;
+  }
+
+  if (subcommand === "reset-prompts") {
+    await resetPrompts(ctx.cwd);
+    ctx.ui.notify("Default prompt templates regenerated in `.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.", "info");
     return;
   }
 

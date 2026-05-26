@@ -8,11 +8,15 @@ import {
   handleDrykissCommand,
   handleKissCommand,
   handleDryCommand,
+  handleResilienceCommand,
+  handleArchCommand,
   executeDrykissReviewTool,
   DrykissReviewParams,
   COMMAND_NAME,
   KISS_COMMAND_NAME,
   DRY_COMMAND_NAME,
+  RESILIENCE_COMMAND_NAME,
+  ARCH_COMMAND_NAME,
 } from "./review-command.js";
 import { handleConfigCommand } from "./config-command.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
@@ -62,7 +66,7 @@ export default function (pi: ExtensionAPI): void {
   // ── /drykiss — Full multi-lens KISS/DRY review ─────────
   pi.registerCommand(COMMAND_NAME, {
     description:
-      "Run a full KISS/DRY review on changed files using 3 parallel lens reviews + synthesis. Supports --model=hint. Configure defaults with /drykiss-config.",
+      "Run a full KISS/DRY review on changed files using 5 parallel lens reviews + synthesis. Supports --model=hint. Configure defaults with /drykiss-config.",
     handler: (args: string, ctx: ExtensionCommandContext) =>
       handleDrykissCommand(args, ctx, pi),
   });
@@ -81,6 +85,22 @@ export default function (pi: ExtensionAPI): void {
       "Review changed files through the DRY lens. Supports --model=hint. Configure defaults with /drykiss-config.",
     handler: (args: string, ctx: ExtensionCommandContext) =>
       handleDryCommand(args, ctx, pi),
+  });
+
+  // ── /drykiss-resilience — Error handling review ────────
+  pi.registerCommand(RESILIENCE_COMMAND_NAME, {
+    description:
+      "Review changed files through the resilience lens (error handling, silent failures). Supports --model=hint.",
+    handler: (args: string, ctx: ExtensionCommandContext) =>
+      handleResilienceCommand(args, ctx, pi),
+  });
+
+  // ── /drykiss-arch — Architecture review ────────────────
+  pi.registerCommand(ARCH_COMMAND_NAME, {
+    description:
+      "Review changed files through the architecture lens (SOLID, type design, dependencies). Supports --model=hint.",
+    handler: (args: string, ctx: ExtensionCommandContext) =>
+      handleArchCommand(args, ctx, pi),
   });
 
   // ── /drykiss-config — Configure defaults and models ────
@@ -144,7 +164,7 @@ export default function (pi: ExtensionAPI): void {
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       return executeDrykissReviewTool(
-        params as { lens: "simplicity" | "deduplication" | "clarity"; files: string[]; model?: string },
+        params as { lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture"; files: string[]; model?: string },
         ctx,
         pi,
       );

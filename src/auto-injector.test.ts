@@ -8,6 +8,7 @@ describe("buildKissDryInjectionBlock", () => {
         { path: "src/app.ts", language: "TypeScript" },
         { path: "src/utils.ts", language: "TypeScript" },
       ],
+      turnIndex: 1,
     };
     const block = buildKissDryInjectionBlock(edits);
     expect(block).toContain("KISS/DRY Quick Check");
@@ -22,7 +23,7 @@ describe("buildKissDryInjectionBlock", () => {
   });
 
   it("handles single file", () => {
-    const block = buildKissDryInjectionBlock({ files: [{ path: "main.py", language: "Python" }] });
+    const block = buildKissDryInjectionBlock({ files: [{ path: "main.py", language: "Python" }], turnIndex: 1 });
     expect(block).toContain("main.py");
   });
 });

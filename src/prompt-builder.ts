@@ -1,10 +1,15 @@
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ChangedFile, ReviewLens } from "./types.js";
+import type { ProjectIndexEntry } from "./git-diff.js";
 
 export interface ReviewPrompt {
   readonly lens: ReviewLens;
   readonly systemPrompt: string;
   readonly userPrompt: string;
 }
+
+const PROMPTS_DIR = ".pi/drykiss/prompts";
 
 const JSON_OUTPUT_INSTRUCTIONS = `
 ## Output Format — REQUIRED
@@ -31,7 +36,37 @@ Rules:
 - Every finding must have a non-empty category and summary
 `;
 
-const LENS_SYSTEM_PROMPTS: Record<ReviewLens, string> = {
+const SYNTHESIS_JSON_INSTRUCTIONS = `
+## Output Format
+Output the final report as a single JSON object:
+
+{
+  "summary": "One sentence describing the top concern",
+  "verdict": "Approve|Request changes|Needs security review",
+  "findings": [
+    {
+      "file": "path/to/file.ts",
+      "line": 42,
+      "severity": "critical|high|medium|low|nit",
+      "category": "SQL Injection Risk",
+      "summary": "One-line description",
+      "detail": "Detailed explanation with impact",
+      "suggestion": "Specific fix",
+      "confidence": "confirmed|likely|suspect"
+    }
+  ]
+}
+
+Rules:
+- Output ONLY the JSON object. No markdown code fences, no extra commentary.
+- Findings must be sorted by severity (critical first, then high, medium, low, nit)
+- confidence must be one of: confirmed, likely, suspect
+- verdict must be one of: Approve, Request changes, Needs security review
+`;
+
+// ── Default prompt bodies (without JSON output instructions) ────────────
+
+const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
   simplicity: `You are a Simplicity Auditor. Your ONLY job is to find unnecessary complexity in code.
 
 ## Principles (KISS)
@@ -59,14 +94,21 @@ const LENS_SYSTEM_PROMPTS: Record<ReviewLens, string> = {
 - Comments explaining "what" the code does (delete them — the code should explain what)
 - Over-simplification traps: inlining too aggressively, combining unrelated logic, removing abstractions that exist for testability/extensibility
 
+## Surgical Change Check (Karpathy)
+- Features beyond what was asked — speculative functionality that wasn't requested
+- Single-use abstractions — wrappers, helpers, or utilities used in exactly one place
+- "Flexibility" or "configurability" that has no present consumer
+- Error handling for impossible scenarios (defensive coding that obscures the happy path)
+- Refactoring of adjacent code, comments, or formatting that wasn't part of the task
+- Changes to existing style or patterns without justification
+- Pre-existing dead code left behind by OTHER changes — note it, don't silently delete it
+
 ## Severity Labels
 - **Critical:** Blocks merge — security vulnerability, data loss, broken functionality hidden by complexity
 - **High:** Significant maintainability impact — wrong abstraction that will haunt the codebase
 - **Medium:** Clear improvement worth making — unnecessary layer, clever one-liner, dead code
 - **Low:** Nice-to-have — minor style preference, optional simplification
-- **Nit:** Very minor, author may ignore
-
-${JSON_OUTPUT_INSTRUCTIONS}`,
+- **Nit:** Very minor, author may ignore`,
 
   deduplication: `You are a Duplication Hunter. Your ONLY job is to find repeated code, logic, or knowledge.
 
@@ -95,9 +137,7 @@ ${JSON_OUTPUT_INSTRUCTIONS}`,
 - **High:** Significant risk — business logic duplicated, will diverge and cause bugs
 - **Medium:** Clear improvement — repeated boilerplate, magic values, parallel conditionals
 - **Low:** Nice-to-have — minor pattern repetition
-- **Nit:** Very minor, author may ignore
-
-${JSON_OUTPUT_INSTRUCTIONS}`,
+- **Nit:** Very minor, author may ignore`,
 
   clarity: `You are a Clarity & Quality Auditor. Your ONLY job is to find readability, correctness, architecture, security, and maintainability issues.
 
@@ -151,49 +191,104 @@ ${JSON_OUTPUT_INSTRUCTIONS}`,
 - **High:** Significant impact — missing auth checks, N+1 queries, unbounded fetching, architectural misfit
 - **Medium:** Clear improvement — unclear names, missing edge cases, missing pagination
 - **Low:** Nice-to-have — formatting inconsistency, minor comment issues
-- **Nit:** Very minor, author may ignore
+- **Nit:** Very minor, author may ignore`,
 
-${JSON_OUTPUT_INSTRUCTIONS}`,
+  resilience: `You are a Resilience Auditor. Your ONLY job is to find inadequate error handling, silent failures, and unreliable fallback behavior.
 
-  all: "", // unused — "all" spawns parallel lenses
+## Principles
+- Silent failures are unacceptable — any error without proper logging and user feedback is a critical defect
+- Users deserve actionable feedback — every error message must say what went wrong and what to do
+- Fallbacks must be explicit and justified — hiding problems behind fallback behavior creates confusion
+- Catch blocks must be specific — broad exception catching hides unrelated errors and makes debugging impossible
+- Mock/fake implementations belong only in tests — production code falling back to mocks indicates architectural problems
+
+## What to Flag
+- Swallowed exceptions (catch blocks that log and continue without proper handling)
+- Overly broad catch blocks that could suppress unrelated errors
+- Missing error handling on async operations, promise chains, or event handlers
+- Fallback logic that masks underlying problems without user awareness
+- Empty catch blocks or catch blocks that only re-throw without adding context
+- Errors logged but execution continues without user notification
+- Optional chaining or null coalescing that hides errors (e.g., \`foo?.bar?.baz ?? default\` when an error should be surfaced)
+- Unhandled promise rejections or async errors that bubble silently
+- Missing validation at system boundaries (user input, external data, API responses)
+- Error messages that are generic and unhelpful ("An error occurred")
+- Error propagation that is cut off when it should bubble to a higher-level handler
+- Race conditions in error handling (concurrent access, check-then-act)
+- Missing cleanup in error paths (resource leaks, open connections, temp files)
+
+## Severity Labels
+- **Critical:** Blocks merge — silent data loss, swallowed security errors, missing auth failure handling
+- **High:** Significant reliability impact — broad catch blocks, missing async error handling, unhandled rejections
+- **Medium:** Clear improvement — generic error messages, missing validation at boundaries, inadequate logging
+- **Low:** Nice-to-have — error message wording, minor logging improvements
+- **Nit:** Very minor, author may ignore`,
+
+  architecture: `You are an Architecture Auditor. Your ONLY job is to find structural design issues, shallow modules, missing seams, and type design problems.
+
+## Core Concepts (Pocock)
+- **Module** — anything with an interface and an implementation (function, class, package, slice)
+- **Interface** — everything a caller must know to use the module: types, invariants, error modes, ordering, config. Not just the type signature
+- **Depth** — leverage at the interface: a lot of behavior behind a small interface. Deep = high leverage. Shallow = interface nearly as complex as the implementation
+- **Seam** — where an interface lives; a place behaviour can be altered without editing in place
+- **Locality** — what maintainers get from depth: change, bugs, knowledge concentrated in one place
+- Deep modules are the goal. Shallow modules create drag.
+
+## Depth Check
+- Shallow modules: interface is nearly as complex as the implementation (many parameters, many methods, lots of config for little behavior)
+- Missing depth: a module that does one trivial thing but exposes 5 configuration options
+- Low leverage: callers must know too much to use the module effectively
+- Poor locality: a change requires touching many files because knowledge is scattered
+- Missing seams: behavior is hard-wired and can't be swapped or tested without editing the source
+- God classes / god modules: they know too much and force callers to know too much too
+
+## SOLID Check
+- **SRP**: Overloaded modules with unrelated responsibilities. Functions/classes doing too many things.
+- **OCP**: Frequent edits to add behavior instead of extension points. Switch statements that grow with every new case.
+- **LSP**: Subclasses that break expectations or require type checks. Violations of substitutability.
+- **ISP**: Wide interfaces with unused methods. Clients forced to depend on methods they don't use.
+- **DIP**: High-level logic tied to low-level implementations. Direct instantiation of dependencies.
+
+## Type Design Check
+- Anemic domain models with no behavior (just data bags with getters/setters)
+- Types that expose mutable internals (public setters on fields with invariants)
+- Invariants enforced only through documentation rather than code
+- Types with too many responsibilities
+- Missing validation at construction boundaries
+- Inconsistent enforcement across mutation methods
+- Types that rely on external code to maintain invariants
+- Missing encapsulation — internal implementation details visible
+- Wide interfaces that could be split into smaller, focused ones
+- Primitive obsession — using strings/numbers instead of domain types
+
+## Dependency & Structure Check
+- Circular dependencies between modules/packages
+- Dependencies flowing in the wrong direction (low-level depending on high-level)
+- Feature envy — a function that manipulates data belonging to another module
+- Missing abstraction boundaries (leaky abstractions)
+- Inappropriate intimacy — classes/modules that know too much about each other's internals
+- Tangled callers: a change in one place forces changes across unrelated modules
+
+## Removal Candidates
+- Dead code: unused exports, unreachable branches, feature-flagged code that is permanently off
+- Redundant abstractions: interfaces with only one implementation, abstract classes with one subclass
+- Unused dependencies in package manifests
+
+## Goal-Driven Execution Check (Karpathy)
+- Changes without verifiable success criteria — "make it work" is not a criterion
+- Missing tests that define what "correct" means for this change
+- Multi-step changes without intermediate verification checkpoints
+- Changes that can't trace every modified line directly to the user's request
+
+## Severity Labels
+- **Critical:** Blocks merge — circular dependencies in core modules, broken invariant enforcement, missing constructor validation for security-sensitive types
+- **High:** Significant structural impact — SRP violations in core modules, shallow modules with wide interfaces, missing seams that prevent testing
+- **Medium:** Clear improvement — primitive obsession, missing encapsulation, minor SOLID violations, missing test coverage for new behavior
+- **Low:** Nice-to-have — style consistency in type design, optional refactors
+- **Nit:** Very minor, author may ignore`,
 };
 
-function buildFileContext(files: ChangedFile[], diffs: Map<string, string>): string {
-  const sections: string[] = [];
-  for (const file of files) {
-    const diff = diffs.get(file.path) ?? "";
-    sections.push(`--- ${file.path} (${file.status}${file.language ? ", " + file.language : ""}) ---\n${diff || "(diff not available)"}`);
-  }
-  return sections.join("\n\n");
-}
-
-export async function buildReviewPrompts(
-  files: ChangedFile[],
-  diffs: Map<string, string>,
-  lens: ReviewLens,
-): Promise<ReviewPrompt[]> {
-  const context = buildFileContext(files, diffs);
-
-  if (lens !== "all") {
-    return [{
-      lens,
-      systemPrompt: LENS_SYSTEM_PROMPTS[lens],
-      userPrompt: `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}`,
-    }];
-  }
-
-  const lenses: ReviewLens[] = ["simplicity", "deduplication", "clarity"];
-  return lenses.map((l) => ({
-    lens: l,
-    systemPrompt: LENS_SYSTEM_PROMPTS[l],
-    userPrompt: `Review the following code changes. Output findings as JSON only.\n\n${context}`,
-  }));
-}
-
-export function buildSynthesisPrompt(
-  lensReviews: Array<{ lens: ReviewLens; rawOutput: string }>,
-): { systemPrompt: string; userPrompt: string } {
-  const systemPrompt = `You are a Senior Engineer Synthesizer. Your job is to review the findings from three independent code reviewers and produce a single, ranked, actionable report.
+const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your job is to review the findings from five independent code reviewers and produce a single, ranked, actionable report.
 
 ## Rules
 1. Do your own analysis. Rule out false positives. If two reviewers flagged the same issue, note it once with higher confidence.
@@ -207,33 +302,148 @@ export function buildSynthesisPrompt(
 9. Present findings grouped by severity, then by file.
 10. Include a brief summary at the top: total counts and top concern.
 11. Apply the approval standard: approve a change when it definitely improves overall code health, even if it isn't perfect. Don't block on personal preference.
-12. Be honest. Don't rubber-stamp. Quantify problems when possible.
+12. Be honest. Don't rubber-stamp. Quantify problems when possible.`;
 
-## Output Format
-Output the final report as a single JSON object:
+// ── Prompt loading & default management ─────────────────────────────────
 
-{
-  "summary": "One sentence describing the top concern",
-  "verdict": "Approve|Request changes|Needs security review",
-  "findings": [
-    {
-      "file": "path/to/file.ts",
-      "line": 42,
-      "severity": "critical|high|medium|low|nit",
-      "category": "SQL Injection Risk",
-      "summary": "One-line description",
-      "detail": "Detailed explanation with impact",
-      "suggestion": "Specific fix",
-      "confidence": "confirmed|likely|suspect"
-    }
-  ]
+export function getPromptPath(cwd: string, lens: ReviewLens | "synthesis"): string {
+  return join(cwd, PROMPTS_DIR, `${lens}.md`);
 }
 
-Rules:
-- Output ONLY the JSON object. No markdown code fences, no extra commentary.
-- Findings must be sorted by severity (critical first, then high, medium, low, nit)
-- confidence must be one of: confirmed, likely, suspect
-- verdict must be one of: Approve, Request changes, Needs security review`;
+async function loadPromptBody(cwd: string, lens: ReviewLens | "synthesis"): Promise<string> {
+  try {
+    const raw = await readFile(getPromptPath(cwd, lens), "utf8");
+    return raw.trim();
+  } catch {
+    return lens === "synthesis"
+      ? DEFAULT_SYNTHESIS_PROMPT
+      : DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+  }
+}
+
+export async function loadLensSystemPrompt(cwd: string, lens: Exclude<ReviewLens, "all">): Promise<string> {
+  const body = await loadPromptBody(cwd, lens);
+  return body + "\n" + JSON_OUTPUT_INSTRUCTIONS;
+}
+
+export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {
+  const body = await loadPromptBody(cwd, "synthesis");
+  return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
+}
+
+export async function ensureDefaultPrompts(cwd: string): Promise<void> {
+  const dir = join(cwd, PROMPTS_DIR);
+  await mkdir(dir, { recursive: true });
+
+  for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
+    const path = join(dir, `${lens}.md`);
+    try {
+      await readFile(path, "utf8");
+      // already exists, don't overwrite
+    } catch {
+      await writeFile(path, body.trim() + "\n", "utf8");
+    }
+  }
+
+  const synthesisPath = join(dir, "synthesis.md");
+  try {
+    await readFile(synthesisPath, "utf8");
+  } catch {
+    await writeFile(synthesisPath, DEFAULT_SYNTHESIS_PROMPT.trim() + "\n", "utf8");
+  }
+}
+
+export async function resetPrompts(cwd: string): Promise<void> {
+  const dir = join(cwd, PROMPTS_DIR);
+  await mkdir(dir, { recursive: true });
+
+  for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
+    await writeFile(join(dir, `${lens}.md`), body.trim() + "\n", "utf8");
+  }
+  await writeFile(join(dir, "synthesis.md"), DEFAULT_SYNTHESIS_PROMPT.trim() + "\n", "utf8");
+}
+
+// ── Context building ────────────────────────────────────────────────────
+
+export interface FileContext {
+  readonly diff: string;
+  readonly content?: string;
+  readonly lineCount?: number;
+  readonly truncated?: boolean;
+}
+
+function buildFileContext(
+  files: ChangedFile[],
+  diffs: Map<string, string>,
+  contents?: Map<string, { content: string; lineCount: number; truncated: boolean }>,
+): string {
+  const sections: string[] = [];
+  for (const file of files) {
+    const diff = diffs.get(file.path) ?? "";
+    const full = contents?.get(file.path);
+    const parts: string[] = [];
+
+    parts.push(`--- ${file.path} (${file.status}${file.language ? ", " + file.language : ""}) ---`);
+
+    if (full) {
+      parts.push(`\n### Full file (${full.lineCount} lines${full.truncated ? ", truncated to 500" : ""})\n${full.content}`);
+    }
+
+    parts.push(`\n### Diff\n${diff || "(diff not available)"}`);
+    sections.push(parts.join("\n"));
+  }
+  return sections.join("\n\n");
+}
+
+function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
+  if (index.length === 0) return "";
+  const lines: string[] = ["\n### Project Index — Existing modules and exports\n"];
+  for (const entry of index) {
+    lines.push(`- ${entry.path}: ${entry.exports.slice(0, 12).join(", ")}${entry.exports.length > 12 ? " ..." : ""}`);
+  }
+  return lines.join("\n");
+}
+
+// ── Public API ──────────────────────────────────────────────────────────
+
+export async function buildReviewPrompts(
+  cwd: string,
+  files: ChangedFile[],
+  diffs: Map<string, string>,
+  lens: ReviewLens,
+  options?: {
+    contents?: Map<string, { content: string; lineCount: number; truncated: boolean }>;
+    projectIndex?: ProjectIndexEntry[];
+  },
+): Promise<ReviewPrompt[]> {
+  const context = buildFileContext(files, diffs, options?.contents);
+  const indexBlock = options?.projectIndex ? buildProjectIndexContext(options.projectIndex) : "";
+
+  if (lens !== "all") {
+    const systemPrompt = await loadLensSystemPrompt(cwd, lens);
+    const userPrompt = lens === "deduplication" && indexBlock
+      ? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
+      : `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}`;
+    return [{ lens, systemPrompt, userPrompt }];
+  }
+
+  const lenses: Exclude<ReviewLens, "all">[] = ["simplicity", "deduplication", "clarity", "resilience", "architecture"];
+  const prompts: ReviewPrompt[] = [];
+  for (const l of lenses) {
+    const systemPrompt = await loadLensSystemPrompt(cwd, l);
+    const userPrompt = l === "deduplication" && indexBlock
+      ? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
+      : `Review the following code changes. Output findings as JSON only.\n\n${context}`;
+    prompts.push({ lens: l, systemPrompt, userPrompt });
+  }
+  return prompts;
+}
+
+export async function buildSynthesisPrompt(
+  cwd: string,
+  lensReviews: Array<{ lens: ReviewLens; rawOutput: string }>,
+): Promise<{ systemPrompt: string; userPrompt: string }> {
+  const systemPrompt = await loadSynthesisSystemPrompt(cwd);
 
   let userPrompt = "# Independent Reviewer Findings\n\n";
   for (const review of lensReviews) {
@@ -250,13 +460,15 @@ export function buildAutoInjectBlock(edits: { files: ReadonlyArray<{ path: strin
 
 You edited: ${fileList}. Before proceeding, briefly verify:
 
-- [ ] **KISS**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners?
+- [ ] **KISS**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners? No speculative features?
 - [ ] **DRY**: Is knowledge represented once? No copy-pasted logic or scattered conditionals?
 - [ ] **Names**: Do variables/functions reveal intent, not mechanism? (No 'temp', 'data', 'result' without context)
 - [ ] **Size**: Are functions focused on one thing? Any function worth splitting?
 - [ ] **Comments**: Do they explain WHY, not WHAT?
 - [ ] **Edge cases**: Are null, empty, and boundary values handled?
 - [ ] **Security**: Is user input validated at boundaries? No raw SQL concatenation?
+- [ ] **Resilience**: Are errors handled specifically, not swallowed? Are async failures caught?
+- [ ] **Architecture**: Does the change follow existing patterns? Is the interface small and the behavior rich (deep module)?
 
 Fix any quick wins, then continue.`;
 }

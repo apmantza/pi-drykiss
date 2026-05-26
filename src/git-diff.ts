@@ -1,3 +1,5 @@
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
 
@@ -109,4 +111,149 @@ export async function getFileDiff(
 
   const result = await pi.exec("git", args);
   return result.stdout;
+}
+
+const MAX_FILE_LINES = 500;
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "out", ".next", "coverage", "vendor"]);
+const CODE_EXTS = new Set(["ts", "tsx", "js", "jsx", "py", "go", "rs", "java", "kt", "php", "rb", "swift", "cs", "cpp", "c", "scala"]);
+
+export interface FileContent {
+  readonly content: string;
+  readonly lineCount: number;
+  readonly truncated: boolean;
+}
+
+export async function getFileContent(cwd: string, filePath: string): Promise<FileContent | null> {
+  try {
+    const raw = await readFile(join(cwd, filePath), "utf8");
+    const lines = raw.split("\n");
+    const truncated = lines.length > MAX_FILE_LINES;
+    const content = truncated
+      ? lines.slice(0, MAX_FILE_LINES).join("\n") + "\n\n... (truncated: " + (lines.length - MAX_FILE_LINES) + " more lines) ...\n"
+      : raw;
+    return { content, lineCount: lines.length, truncated };
+  } catch {
+    return null;
+  }
+}
+
+export interface ProjectIndexEntry {
+  readonly path: string;
+  readonly exports: readonly string[];
+}
+
+async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
+  const entries = await readdir(join(cwd, dir), { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      yield* walkDir(cwd, join(dir, entry.name));
+    } else if (entry.isFile()) {
+      const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
+      if (CODE_EXTS.has(ext)) {
+        yield join(dir, entry.name);
+      }
+    }
+  }
+}
+
+function extractExports(content: string, ext: string): string[] {
+  const exports: string[] = [];
+  const seen = new Set<string>();
+
+  // TypeScript/JavaScript: export function/class/const/interface/type/enum name
+  const declRe = /export\s+(?:default\s+)?(?:function\s+(?:\*\s*)?|class\s+|const\s+|let\s+|var\s+|interface\s+|type\s+|enum\s+)(\w+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(content)) !== null) {
+    if (!seen.has(m[1])) {
+      seen.add(m[1]);
+      exports.push(m[1]);
+    }
+  }
+
+  // Named exports: export { foo, bar }
+  const namedRe = /export\s+\{([^}]+)\}/g;
+  while ((m = namedRe.exec(content)) !== null) {
+    for (const name of m[1].split(",")) {
+      const clean = name.trim().split(/\s+as\s+/)[0].trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        exports.push(clean);
+      }
+    }
+  }
+
+  // Python: def/class name
+  if (ext === "py") {
+    const pyRe = /^(?:def|class)\s+(\w+)/gm;
+    while ((m = pyRe.exec(content)) !== null) {
+      if (!seen.has(m[1])) {
+        seen.add(m[1]);
+        exports.push(m[1]);
+      }
+    }
+  }
+
+  // Go: func Name
+  if (ext === "go") {
+    const goRe = /^func\s+(?:\([^)]+\)\s+)?(\w+)/gm;
+    while ((m = goRe.exec(content)) !== null) {
+      if (!seen.has(m[1])) {
+        seen.add(m[1]);
+        exports.push(m[1]);
+      }
+    }
+  }
+
+  // Rust: pub fn/struct/enum/trait/const/static/type name
+  if (ext === "rs") {
+    const rsRe = /pub\s+(?:fn|struct|enum|trait|const|static|type)\s+(\w+)/g;
+    while ((m = rsRe.exec(content)) !== null) {
+      if (!seen.has(m[1])) {
+        seen.add(m[1]);
+        exports.push(m[1]);
+      }
+    }
+  }
+
+  return exports;
+}
+
+export async function getProjectIndex(cwd: string, maxFiles = 200): Promise<ProjectIndexEntry[]> {
+  const sourceDirs = ["src", "lib", "app", "packages"];
+  const dirsToWalk: string[] = [];
+  for (const d of sourceDirs) {
+    try {
+      const s = await stat(join(cwd, d));
+      if (s.isDirectory()) dirsToWalk.push(d);
+    } catch {
+      // skip
+    }
+  }
+  if (dirsToWalk.length === 0) dirsToWalk.push(".");
+
+  const entries: ProjectIndexEntry[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const dir of dirsToWalk) {
+    for await (const filePath of walkDir(cwd, dir)) {
+      if (seenPaths.has(filePath)) continue;
+      seenPaths.add(filePath);
+      if (entries.length >= maxFiles) break;
+
+      try {
+        const raw = await readFile(join(cwd, filePath), "utf8");
+        const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+        const exports = extractExports(raw, ext);
+        if (exports.length > 0) {
+          entries.push({ path: filePath.replace(/\\/g, "/"), exports });
+        }
+      } catch {
+        // skip unreadable
+      }
+    }
+    if (entries.length >= maxFiles) break;
+  }
+
+  return entries;
 }

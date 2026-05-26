@@ -16,7 +16,7 @@ export interface LensReview {
   readonly rawOutput: string;
 }
 
-export type ReviewLens = "simplicity" | "deduplication" | "clarity" | "all";
+export type ReviewLens = "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture" | "all";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "nit";
 
