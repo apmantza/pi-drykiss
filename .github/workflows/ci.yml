@@ -114,10 +114,16 @@ jobs:
           INSTALL_DIR=$(npm root -g)/pi-drykiss
           cd "$INSTALL_DIR"
           npx tsx index.ts 2>&1 | tee /tmp/tsx-output.txt || true
-          # Filter out expected missing peer deps (provided by pi at runtime)
-          if grep -v -E "(typebox|@earendil-works/(pi-coding-agent|pi-ai|pi-tui))" /tmp/tsx-output.txt | grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module"; then
-            echo "FAILED: unexpected missing module dependency detected"
-            cat /tmp/tsx-output.txt
+          # Build expected-peers list and check for unexpected missing deps
+          printf 'typebox\n@earendil-works/pi-coding-agent\n'  >/tmp/expected.txt
+          printf '@earendil-works/pi-ai\n@earendil-works/pi-tui\n' >>/tmp/expected.txt
+          grep -oE "Cannot find (package|module) '[^']+'" \
+            /tmp/tsx-output.txt 2>/dev/null \
+            | sed "s/.*'\(.*\)'/\1/" | sort -u >/tmp/missing.txt
+          UNEXPECTED=$(comm -23 /tmp/missing.txt /tmp/expected.txt 2>/dev/null || true)
+          if [ -n "$UNEXPECTED" ]; then
+            echo "FAILED: unexpected missing dependency detected:"
+            echo "$UNEXPECTED"
             exit 1
           fi
           echo "Extension import check passed"
