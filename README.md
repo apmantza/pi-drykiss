@@ -240,3 +240,7 @@ After every turn with `Write` or `Edit`, a lightweight KISS/DRY checklist is aut
 ## License
 
 MIT
+
+---
+
+*Built with clear-context reviewer subagents, full-file context, and customizable prompts.*
