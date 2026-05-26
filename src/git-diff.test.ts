@@ -1,0 +1,97 @@
+import { describe, it, expect, vi } from "vitest";
+import { getChangedFiles, getFileDiff } from "./git-diff.js";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+function mockPi(stdout: string): ExtensionAPI {
+  return {
+    exec: vi.fn().mockResolvedValue({ stdout, stderr: "", code: 0, killed: false }),
+  } as unknown as ExtensionAPI;
+}
+
+describe("getChangedFiles", () => {
+  it("returns explicit files when provided", async () => {
+    const pi = mockPi("");
+    const files = await getChangedFiles(pi, "/cwd", {
+      files: ["src/foo.ts", "lib/bar.py"],
+      ref: "HEAD",
+      staged: false,
+    });
+    expect(files).toHaveLength(2);
+    expect(files[0]).toMatchObject({ path: "src/foo.ts", status: "modified", language: "TypeScript" });
+    expect(files[1]).toMatchObject({ path: "lib/bar.py", status: "modified", language: "Python" });
+  });
+
+  it("parses git diff --name-status output", async () => {
+    const pi = mockPi("M\tsrc/index.ts\nA\tsrc/new.tsx\nD\told.js\nR100\tsrc/old.ts\tsrc/new.ts");
+    const files = await getChangedFiles(pi, "/cwd", { files: [], ref: "HEAD", staged: false });
+    expect(files).toHaveLength(4);
+    expect(files[0]).toMatchObject({ path: "src/index.ts", status: "modified", language: "TypeScript" });
+    expect(files[1]).toMatchObject({ path: "src/new.tsx", status: "added", language: "TypeScript/React" });
+    expect(files[2]).toMatchObject({ path: "old.js", status: "deleted", language: "JavaScript" });
+    expect(files[3]).toMatchObject({ path: "src/old.ts", status: "renamed", language: "TypeScript" });
+  });
+
+  it("filters unknown status codes", async () => {
+    const pi = mockPi("M\tvalid.ts\n?\tuntracked.txt\n\t\n");
+    const files = await getChangedFiles(pi, "/cwd", { files: [], ref: "HEAD", staged: false });
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("valid.ts");
+  });
+
+  it("handles staged flag", async () => {
+    const pi = mockPi("M\tstaged.ts");
+    await getChangedFiles(pi, "/cwd", { files: [], ref: "HEAD", staged: true });
+    expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "--cached", "--name-status"]);
+  });
+
+  it("handles ref comparison", async () => {
+    const pi = mockPi("M\tref.ts");
+    await getChangedFiles(pi, "/cwd", { files: [], ref: "main", staged: false });
+    expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "--name-status", "main...HEAD"]);
+  });
+
+  it("detects language from file extension", async () => {
+    const pi = mockPi(
+      "M\tapp.ts\nM\tapp.tsx\nM\tscript.js\nM\tscript.jsx\nM\tmain.py\nM\tserver.go\nM\tlib.rs\nM\tquery.sql\nM\tpage.html\nM\tstyle.css\nM\tstyle.scss\nM\tdata.json\nM\tconfig.yaml\nM\treadme.md\nM\tdeploy.sh\nM\tunknown.xyz",
+    );
+    const files = await getChangedFiles(pi, "/cwd", { files: [], ref: "HEAD", staged: false });
+    const map = Object.fromEntries(files.map((f) => [f.path, f.language]));
+    expect(map["app.ts"]).toBe("TypeScript");
+    expect(map["app.tsx"]).toBe("TypeScript/React");
+    expect(map["script.js"]).toBe("JavaScript");
+    expect(map["script.jsx"]).toBe("JavaScript/React");
+    expect(map["main.py"]).toBe("Python");
+    expect(map["server.go"]).toBe("Go");
+    expect(map["lib.rs"]).toBe("Rust");
+    expect(map["query.sql"]).toBe("SQL");
+    expect(map["page.html"]).toBe("HTML");
+    expect(map["style.css"]).toBe("CSS");
+    expect(map["style.scss"]).toBe("SCSS");
+    expect(map["data.json"]).toBe("JSON");
+    expect(map["config.yaml"]).toBe("YAML");
+    expect(map["readme.md"]).toBe("Markdown");
+    expect(map["deploy.sh"]).toBe("Shell");
+    expect(map["unknown.xyz"]).toBeNull();
+  });
+});
+
+describe("getFileDiff", () => {
+  it("fetches diff for a single file", async () => {
+    const pi = mockPi("@@ -1,3 +1,4 @@\n+new line\n old content");
+    const diff = await getFileDiff(pi, "/cwd", "src/foo.ts", { files: [], ref: "HEAD", staged: false });
+    expect(diff).toContain("new line");
+    expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "HEAD", "--", "src/foo.ts"]);
+  });
+
+  it("uses staged flag in diff command", async () => {
+    const pi = mockPi("staged diff");
+    await getFileDiff(pi, "/cwd", "src/foo.ts", { files: [], ref: "HEAD", staged: true });
+    expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "--cached", "--", "src/foo.ts"]);
+  });
+
+  it("uses ref comparison in diff command", async () => {
+    const pi = mockPi("ref diff");
+    await getFileDiff(pi, "/cwd", "src/foo.ts", { files: [], ref: "main", staged: false });
+    expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "main...HEAD", "--", "src/foo.ts"]);
+  });
+});

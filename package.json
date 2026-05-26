@@ -1,0 +1,58 @@
+{
+  "name": "pi-drykiss",
+  "version": "0.1.1",
+  "description": "Clear-context KISS/DRY reviewer subagents for Pi. Multi-lens code review that prioritizes quality over speed.",
+  "type": "module",
+  "license": "MIT",
+  "author": "R3LiC",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "code-review",
+    "kiss",
+    "dry",
+    "simplicity",
+    "refactor",
+    "ai",
+    "llm",
+    "coding-assistant"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "pi": {
+    "extensions": [
+      "dist/index.js"
+    ]
+  },
+  "scripts": {
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/",
+    "check": "vitest run && eslint src/ && tsc --noEmit",
+    "prepublishOnly": "npm run build && npm run check",
+    "prepack": "test -d dist || { echo 'Error: dist/ missing. Run npm run build first.' && exit 1; }"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-ai": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-tui": ">=0.74.0 <0.76.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
