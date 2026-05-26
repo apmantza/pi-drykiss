@@ -1,45 +1,180 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
+import {
+	Box,
+	type SelectItem,
+	SelectList,
+	Spacer,
+	Text,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
+
+const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
+
+function formatModelLabel(m: Model<Api>): string {
+	const name = m.name && m.name !== m.id ? m.name : m.id;
+	const providerLower = m.provider.toLowerCase();
+	const nameLower = name.toLowerCase();
+	// Strip provider prefix from name if already present to avoid duplication
+	if (
+		nameLower.startsWith(`${providerLower} `) ||
+		nameLower.startsWith(`${providerLower}-`)
+	) {
+		return name.slice(m.provider.length + 1).trim();
+	}
+	return name;
+}
+
+function buildModelDescription(m: Model<Api>): string {
+	const parts: string[] = [];
+	if (m.id !== formatModelLabel(m)) parts.push(m.id);
+	if (m.cost) {
+		const { input, output } = m.cost;
+		if (input === 0 && output === 0) parts.push("free");
+		else parts.push(`$${input}/$${output}`);
+	}
+	return parts.join(" • ");
+}
+
+function calculatePopupWidth(items: SelectItem[], title: string): number {
+	const prefixWidth = 2; // "→ " or "  "
+	const primaryGap = 2;
+	const boxPadding = 2;
+	const safetyMargin = 2;
+
+	const maxLabelWidth = Math.max(
+		...items.map((i) => visibleWidth(i.label ?? "")),
+		visibleWidth(title),
+	);
+
+	const itemsWithDesc = items.filter((i) => i.description);
+	const maxDescWidth =
+		itemsWithDesc.length > 0
+			? Math.max(...itemsWithDesc.map((i) => visibleWidth(i.description || "")))
+			: 0;
+
+	const helpWidth = visibleWidth("↑↓ navigate • enter select • esc cancel");
+
+	const contentWidth =
+		maxDescWidth > 0
+			? prefixWidth + Math.max(maxLabelWidth + primaryGap, 20) + maxDescWidth
+			: prefixWidth + maxLabelWidth;
+
+	return Math.min(
+		Math.max(
+			contentWidth + boxPadding + safetyMargin,
+			helpWidth + boxPadding,
+			40,
+		),
+		120,
+	);
+}
 
 export async function selectModel(
-  ctx: ExtensionContext,
-  title: string,
-  message: string,
+	ctx: ExtensionContext,
+	title: string,
+	message: string,
 ): Promise<Model<Api> | undefined> {
-  const available = ctx.modelRegistry.getAvailable();
-  if (available.length === 0) return undefined;
+	const available = ctx.modelRegistry.getAvailable();
+	if (available.length === 0) return undefined;
 
-  const choices = available.map((m) => `${m.provider}/${m.id} — ${m.name}`);
-  const selected = await ctx.ui.select(`${title}: ${message}`, choices);
-  if (!selected) return undefined;
+	const items: SelectItem[] = available.map((m) => {
+		const label = `[${m.provider}] ${formatModelLabel(m)}`;
+		const description = buildModelDescription(m);
+		return {
+			value: `${m.provider}/${m.id}`,
+			label,
+			description,
+		};
+	});
 
-  const idx = choices.indexOf(selected);
-  return available[idx];
+	const optimalWidth = calculatePopupWidth(items, title);
+
+	const selectedValue = await ctx.ui.custom<string | null>(
+		(_tui, theme, _kb, done) => {
+			const box = new Box(1, 1, bgColor);
+			box.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
+
+			// Handle multi-line message
+			if (message) {
+				for (const line of message.split("\n")) {
+					box.addChild(new Text(theme.fg("dim", line), 1, 0));
+				}
+			}
+			box.addChild(new Spacer(1));
+
+			const selectList = new (SelectList as any)(
+				items,
+				Math.min(items.length, 15),
+				{
+					selectedPrefix: (t: string) => theme.fg("accent", t),
+					selectedText: (t: string) => theme.fg("accent", t),
+					description: (t: string) => theme.fg("muted", t),
+					scrollInfo: (t: string) => theme.fg("dim", t),
+					noMatch: (t: string) => theme.fg("warning", t),
+				},
+				{ minPrimaryColumnWidth: 20 },
+			);
+
+			selectList.onSelect = (item: SelectItem) => done(item.value);
+			selectList.onCancel = () => done(null);
+			box.addChild(selectList);
+
+			box.addChild(new Spacer(1));
+			box.addChild(
+				new Text(
+					theme.fg("dim", "↑↓ navigate • enter select • esc cancel"),
+					1,
+					0,
+				),
+			);
+
+			return {
+				render: (w: number) => box.render(w),
+				invalidate: () => box.invalidate(),
+				handleInput: (data: string) => selectList.handleInput(data),
+			};
+		},
+		{
+			overlay: true,
+			overlayOptions: { width: optimalWidth, anchor: "center" },
+		},
+	);
+
+	if (!selectedValue) return undefined;
+
+	const slashIndex = selectedValue.indexOf("/");
+	if (slashIndex === -1) return undefined;
+
+	return ctx.modelRegistry.find(
+		selectedValue.slice(0, slashIndex),
+		selectedValue.slice(slashIndex + 1),
+	);
 }
 
 export function isQuotaError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  return (
-    msg.includes("quota") ||
-    msg.includes("rate limit") ||
-    msg.includes("ratelimit") ||
-    msg.includes("429") ||
-    msg.includes("too many requests") ||
-    msg.includes("insufficient_quota") ||
-    msg.includes("capacity") ||
-    msg.includes("overloaded")
-  );
+	if (!(err instanceof Error)) return false;
+	const msg = err.message.toLowerCase();
+	return (
+		msg.includes("quota") ||
+		msg.includes("rate limit") ||
+		msg.includes("ratelimit") ||
+		msg.includes("429") ||
+		msg.includes("too many requests") ||
+		msg.includes("insufficient_quota") ||
+		msg.includes("capacity") ||
+		msg.includes("overloaded")
+	);
 }
 
 export function isAuthError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  return (
-    msg.includes("api key") ||
-    msg.includes("authentication") ||
-    msg.includes("unauthorized") ||
-    msg.includes("401") ||
-    msg.includes("403")
-  );
+	if (!(err instanceof Error)) return false;
+	const msg = err.message.toLowerCase();
+	return (
+		msg.includes("api key") ||
+		msg.includes("authentication") ||
+		msg.includes("unauthorized") ||
+		msg.includes("401") ||
+		msg.includes("403")
+	);
 }
