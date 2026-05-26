@@ -35,7 +35,7 @@ export const RESILIENCE_COMMAND_NAME = "drykiss-resilience";
 export const ARCH_COMMAND_NAME = "drykiss-arch";
 export const TESTS_COMMAND_NAME = "drykiss-tests";
 
-const MAX_FILES = 12;
+const MAX_FILES = 20;
 
 export interface ParsedArgs extends ReviewOptions {
 	readonly model?: string;
@@ -258,11 +258,11 @@ export async function handleDrykissCommand(
 		return;
 	}
 
-	if (files.length > MAX_FILES) {
-		const msg = options.all
-			? `Found ${files.length} source files. DRYKISS reviews max ${MAX_FILES} files at a time. Run with specific files to review others.`
-			: `Too many changed files (${files.length}). DRYKISS reviews max ${MAX_FILES} files at a time.`;
-		ctx.ui.notify(msg, "warning");
+	if (!options.all && files.length > MAX_FILES) {
+		ctx.ui.notify(
+			`Too many changed files (${files.length}). DRYKISS reviews max ${MAX_FILES} files at a time. Run with specific files to review others.`,
+			"warning",
+		);
 		return;
 	}
 

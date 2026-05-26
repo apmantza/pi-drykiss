@@ -114,8 +114,9 @@ jobs:
           INSTALL_DIR=$(npm root -g)/pi-drykiss
           cd "$INSTALL_DIR"
           npx tsx index.ts 2>&1 | tee /tmp/tsx-output.txt || true
-          if grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module" /tmp/tsx-output.txt; then
-            echo "FAILED: missing module dependency detected"
+          # Filter out expected missing peer deps (provided by pi at runtime)
+          if grep -v -E "(typebox|@earendil-works/(pi-coding-agent|pi-ai|pi-tui))" /tmp/tsx-output.txt | grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module"; then
+            echo "FAILED: unexpected missing module dependency detected"
             cat /tmp/tsx-output.txt
             exit 1
           fi
