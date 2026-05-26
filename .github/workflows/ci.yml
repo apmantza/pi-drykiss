@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  typecheck-and-test:
+    name: Type-check & unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+  install-test:
+    name: Install test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [typecheck-and-test]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack tarball
+        run: npm pack
+
+      - name: Verify required files in tarball
+        shell: bash
+        run: |
+          TARBALL=$(ls pi-drykiss-*.tgz)
+          echo "Checking tarball: $TARBALL"
+          tar -tzf "$TARBALL" | grep -E "dist/index\.js|dist/index\.d\.ts|package\.json|README\.md|LICENSE" | sort
+          tar -tzf "$TARBALL" | grep "dist/index.js" || \
+            (echo "ERROR: dist/index.js missing from tarball" && exit 1)
+
+      - name: Verify package.json entry points exist in tarball
+        shell: bash
+        run: |
+          TARBALL=$(ls pi-drykiss-*.tgz)
+          TMPDIR=$(mktemp -d)
+          tar -xzf "$TARBALL" -C "$TMPDIR"
+
+          check_field() {
+            local field="$1" value="$2"
+            if [ ! -f "$TMPDIR/package/$value" ]; then
+              echo "ERROR: package.json '$field' points to '$value' which is missing from the tarball"
+              exit 1
+            fi
+            echo "OK: $field -> $value"
+          }
+
+          export PI_DRYKISS_PKG_DIR="$TMPDIR/package"
+          MAIN=$(node -p "require(process.env.PI_DRYKISS_PKG_DIR + '/package.json').main || ''" 2>/dev/null)
+          [ -n "$MAIN" ] && check_field "main" "$MAIN"
+
+          TYPES=$(node -p "require(process.env.PI_DRYKISS_PKG_DIR + '/package.json').types || ''" 2>/dev/null)
+          [ -n "$TYPES" ] && check_field "types" "$TYPES"
+
+          # Check pi.extensions entries
+          node -e "
+            const path = require('path');
+            const fs = require('fs');
+            const pkgDir = process.env.PI_DRYKISS_PKG_DIR;
+            const pkg = require(path.join(pkgDir, 'package.json'));
+            const extensions = pkg.pi?.extensions || [];
+            extensions.forEach(f => {
+              const full = path.join(pkgDir, f);
+              if (!fs.existsSync(full)) { console.error('ERROR: pi.extensions entry missing from tarball: ' + f); process.exit(1); }
+              else { console.log('OK: pi.extensions -> ' + f); }
+            });
+          "
+          rm -rf "$TMPDIR"
+
+      - name: Install from tarball (simulates pi install npm:pi-drykiss)
+        shell: bash
+        run: |
+          TARBALL=$(ls pi-drykiss-*.tgz)
+          npm install -g "$TARBALL"
+
+      - name: Verify extension loads via tsx (catches missing deps)
+        shell: bash
+        run: |
+          INSTALL_DIR=$(npm root -g)/pi-drykiss
+          cd "$INSTALL_DIR"
+          npx tsx dist/index.js 2>&1 | tee /tmp/tsx-output.txt || true
+          if grep -q "ERR_MODULE_NOT_FOUND\|Cannot find module" /tmp/tsx-output.txt; then
+            echo "FAILED: missing module dependency detected"
+            cat /tmp/tsx-output.txt
+            exit 1
+          fi
+          echo "Extension import check passed"
