@@ -43,13 +43,14 @@ pi install npm:pi-drykiss
 /drykiss src/foo.ts         # review specific files
 ```
 
-Runs five independent reviewer subagents in **parallel**, each with an isolated context window:
+Runs six independent reviewer subagents in **parallel**, each with an isolated context window:
 
 1. **Simplicity (KISS)** — unnecessary complexity, premature abstraction, over-engineering, Chesterton's Fence, speculative features, surgical-change violations
 2. **Deduplication (DRY)** — repeated logic, magic values, copy-paste, scattered knowledge. Sees a project index of existing utilities so it can spot cross-file duplication.
 3. **Clarity & Quality** — naming, correctness, security, performance (N+1 queries, XSS, SQL injection, etc.)
 4. **Resilience** — error handling, silent failures, swallowed exceptions, overly broad catch blocks, missing async error handling
 5. **Architecture** — SOLID principles, type design, dependency direction, removal candidates, goal-driven execution checks
+6. **Tests** — missing test coverage, untested branches, edge cases, boundary values, test quality (fragile assertions, shared mutable state)
 
 Then a synthesizer deduplicates, ranks by severity, assigns confidence, and produces a final verdict.
 
@@ -60,6 +61,7 @@ Then a synthesizer deduplicates, ranks by severity, assigns confidence, and prod
 /drykiss-dry               # DRY-only review
 /drykiss-resilience        # Error handling only
 /drykiss-arch              # Architecture / SOLID only
+/drykiss-tests             # Test coverage only
 ```
 
 All support `--model=sonnet` and other flags.
@@ -88,6 +90,7 @@ Config is persisted to `.pi/drykiss/config.json`:
     "clarity": "sonnet",
     "resilience": "sonnet",
     "architecture": "sonnet",
+    "tests": "sonnet",
     "synthesis": "sonnet"
   },
   "interactive": true,
@@ -157,6 +160,7 @@ Every reviewer system prompt is stored as an editable Markdown file:
   clarity.md         # Quality reviewer instructions
   resilience.md      # Error handling reviewer instructions
   architecture.md    # SOLID / type design reviewer instructions
+  tests.md           # Test coverage reviewer instructions
   synthesis.md       # Final synthesis instructions
 ```
 
@@ -177,6 +181,7 @@ To reset to defaults:
 | **Clarity** | Quality | Unclear names, missing edge cases, SQL injection, XSS, N+1 queries, unbounded fetching, missing indexes |
 | **Resilience** | Error handling | Swallowed exceptions, overly broad catch blocks, unhandled promise rejections, missing async error handling, generic error messages |
 | **Architecture** | SOLID + types | SRP violations, wide interfaces, anemic domain models, circular dependencies, missing constructor validation, removal candidates, untestable changes |
+| **Tests** | Coverage + quality | Missing tests for new code, untested branches, untested error paths, missing boundary values, fragile assertions, tests with shared mutable state |
 
 ## Severity Levels
 
