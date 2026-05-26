@@ -68,7 +68,7 @@ export async function handleConfigCommand(
   if (subcommand === "set-lens") {
     const lens = tokens[1];
     const model = tokens[2];
-    const validLenses = ["simplicity", "deduplication", "clarity", "resilience", "architecture", "synthesis"];
+    const validLenses = ["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests", "synthesis"];
     if (!validLenses.includes(lens)) {
       ctx.ui.notify(`Invalid lens: ${lens}. Valid: ${validLenses.join(", ")}`, "error");
       return;

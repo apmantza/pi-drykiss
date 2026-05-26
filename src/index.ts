@@ -10,6 +10,7 @@ import {
   handleDryCommand,
   handleResilienceCommand,
   handleArchCommand,
+  handleTestsCommand,
   executeDrykissReviewTool,
   DrykissReviewParams,
   COMMAND_NAME,
@@ -17,6 +18,7 @@ import {
   DRY_COMMAND_NAME,
   RESILIENCE_COMMAND_NAME,
   ARCH_COMMAND_NAME,
+  TESTS_COMMAND_NAME,
 } from "./review-command.js";
 import { handleConfigCommand } from "./config-command.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
@@ -66,7 +68,7 @@ export default function (pi: ExtensionAPI): void {
   // ── /drykiss — Full multi-lens KISS/DRY review ─────────
   pi.registerCommand(COMMAND_NAME, {
     description:
-      "Run a full KISS/DRY review on changed files using 5 parallel lens reviews + synthesis. Supports --model=hint. Configure defaults with /drykiss-config.",
+      "Run a full KISS/DRY review on changed files using 6 parallel lens reviews + synthesis. Supports --model=hint. Configure defaults with /drykiss-config.",
     handler: (args: string, ctx: ExtensionCommandContext) =>
       handleDrykissCommand(args, ctx, pi),
   });
@@ -101,6 +103,14 @@ export default function (pi: ExtensionAPI): void {
       "Review changed files through the architecture lens (SOLID, type design, dependencies). Supports --model=hint.",
     handler: (args: string, ctx: ExtensionCommandContext) =>
       handleArchCommand(args, ctx, pi),
+  });
+
+  // ── /drykiss-tests — Test coverage review ──────────────
+  pi.registerCommand(TESTS_COMMAND_NAME, {
+    description:
+      "Review changed files through the tests lens (missing coverage, edge cases, test quality). Supports --model=hint.",
+    handler: (args: string, ctx: ExtensionCommandContext) =>
+      handleTestsCommand(args, ctx, pi),
   });
 
   // ── /drykiss-config — Configure defaults and models ────
@@ -164,7 +174,7 @@ export default function (pi: ExtensionAPI): void {
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       return executeDrykissReviewTool(
-        params as { lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture"; files: string[]; model?: string },
+        params as { lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture" | "tests"; files: string[]; model?: string },
         ctx,
         pi,
       );

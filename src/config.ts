@@ -11,6 +11,7 @@ export interface DrykissConfig {
     clarity?: string;
     resilience?: string;
     architecture?: string;
+    tests?: string;
     synthesis?: string;
   };
   /** Whether to prompt for model selection on first use */

@@ -17,6 +17,7 @@ export const KISS_COMMAND_NAME = "drykiss-kiss";
 export const DRY_COMMAND_NAME = "drykiss-dry";
 export const RESILIENCE_COMMAND_NAME = "drykiss-resilience";
 export const ARCH_COMMAND_NAME = "drykiss-arch";
+export const TESTS_COMMAND_NAME = "drykiss-tests";
 
 const MAX_FILES = 12;
 
@@ -237,7 +238,7 @@ export async function handleDrykissCommand(
     const contextLabel = config.contextMode === "diff" ? "diff only" : "full file + project index";
     const ok = await ctx.ui.confirm(
       "DRYKISS Review",
-      `Review ${files.length} file(s) with 5 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
+      `Review ${files.length} file(s) with 6 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
     );
     if (!ok) {
       ctx.ui.notify("Review cancelled.", "info");
@@ -246,7 +247,7 @@ export async function handleDrykissCommand(
   }
 
   try {
-    const lenses: ReviewLens[] = ["simplicity", "deduplication", "clarity", "resilience", "architecture"];
+    const lenses: ReviewLens[] = ["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests"];
     const lensReviews = await Promise.all(
       lenses.map((lens) =>
         runLensReview(ctx, ctx.cwd, files, diffs, lens, {
@@ -381,6 +382,38 @@ export async function handleResilienceCommand(
   }
 }
 
+export async function handleTestsCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+  pi: ExtensionAPI,
+): Promise<void> {
+  const options = parseArgs(args);
+  const files = await getChangedFiles(pi, ctx.cwd, options);
+
+  if (files.length === 0) {
+    ctx.ui.notify("No changed files found.", "info");
+    return;
+  }
+
+  await ensureDefaultPrompts(ctx.cwd);
+  const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+  const config = await loadConfig(ctx.cwd);
+  const contents = config.contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+
+  try {
+    const review = await runLensReview(ctx, ctx.cwd, files, diffs, "tests", {
+      modelHint: options.model,
+      contents,
+    });
+    const display = review.findings
+      .map((f) => `[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`)
+      .join("\n") || "No test coverage gaps found.";
+    ctx.ui.notify(`## Test Coverage Review (${review.modelName})\n\n${display}`, "info");
+  } catch (err: any) {
+    ctx.ui.notify(`Test coverage review failed: ${err.message}`, "error");
+  }
+}
+
 export async function handleArchCommand(
   args: string,
   ctx: ExtensionCommandContext,
@@ -418,7 +451,7 @@ export async function handleArchCommand(
 // ── Tool parameter schema ─────────────────────────────────
 
 export const DrykissReviewParams = Type.Object({
-  lens: StringEnum(["simplicity", "deduplication", "clarity", "resilience", "architecture"] as const, {
+  lens: StringEnum(["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests"] as const, {
     description: "Which review lens to apply",
   }),
   files: Type.Array(Type.String(), {
@@ -433,7 +466,7 @@ export const DrykissReviewParams = Type.Object({
 
 export async function executeDrykissReviewTool(
   params: {
-    lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture";
+    lens: "simplicity" | "deduplication" | "clarity" | "resilience" | "architecture" | "tests";
     files: string[];
     model?: string;
   },

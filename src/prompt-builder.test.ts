@@ -74,15 +74,24 @@ describe("buildReviewPrompts", () => {
     expect(prompts[0].systemPrompt).toContain("Locality");
   });
 
-  it("returns all five prompts for 'all' lens", async () => {
+  it("returns single prompt for tests lens", async () => {
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "tests");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].lens).toBe("tests");
+    expect(prompts[0].systemPrompt).toContain("Test Coverage Auditor");
+    expect(prompts[0].systemPrompt).toContain("Given-When-Then");
+  });
+
+  it("returns all six prompts for 'all' lens", async () => {
     const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "all");
-    expect(prompts).toHaveLength(5);
+    expect(prompts).toHaveLength(6);
     const lenses = prompts.map((p) => p.lens);
     expect(lenses).toContain("simplicity");
     expect(lenses).toContain("deduplication");
     expect(lenses).toContain("clarity");
     expect(lenses).toContain("resilience");
     expect(lenses).toContain("architecture");
+    expect(lenses).toContain("tests");
   });
 
   it("includes diff content in user prompt", async () => {
@@ -190,7 +199,7 @@ describe("prompt template management", () => {
     vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
     await ensureDefaultPrompts("/cwd");
     expect(mkdir).toHaveBeenCalled();
-    expect(writeFile).toHaveBeenCalledTimes(6); // 5 lenses + synthesis
+    expect(writeFile).toHaveBeenCalledTimes(7); // 6 lenses + synthesis
   });
 
   it("ensureDefaultPrompts does not overwrite existing files", async () => {
@@ -204,6 +213,6 @@ describe("prompt template management", () => {
     vi.mocked(readFile).mockResolvedValue("existing content");
     await resetPrompts("/cwd");
     expect(mkdir).toHaveBeenCalled();
-    expect(writeFile).toHaveBeenCalledTimes(6);
+    expect(writeFile).toHaveBeenCalledTimes(7); // 6 lenses + synthesis
   });
 });
