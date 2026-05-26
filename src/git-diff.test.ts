@@ -1,6 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
-import { getChangedFiles, getFileDiff } from "./git-diff.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { getChangedFiles, getFileDiff, getFileContent, getProjectIndex } from "./git-diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFile, readdir, stat } from "node:fs/promises";
+
+vi.mock("node:fs/promises", () => ({
+  readFile: vi.fn(),
+  readdir: vi.fn(),
+  stat: vi.fn(),
+}));
 
 function mockPi(stdout: string): ExtensionAPI {
   return {
@@ -93,5 +100,149 @@ describe("getFileDiff", () => {
     const pi = mockPi("ref diff");
     await getFileDiff(pi, "/cwd", "src/foo.ts", { files: [], ref: "main", staged: false });
     expect(pi.exec).toHaveBeenCalledWith("git", ["-C", "/cwd", "diff", "main...HEAD", "--", "src/foo.ts"]);
+  });
+});
+
+describe("getFileContent", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns full content for small files", async () => {
+    vi.mocked(readFile).mockResolvedValue("line1\nline2\nline3");
+    const result = await getFileContent("/cwd", "src/app.ts");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("line1\nline2\nline3");
+    expect(result!.lineCount).toBe(3);
+    expect(result!.truncated).toBe(false);
+  });
+
+  it("truncates files over 500 lines", async () => {
+    const lines = Array.from({ length: 600 }, (_, i) => `line${i + 1}`);
+    vi.mocked(readFile).mockResolvedValue(lines.join("\n"));
+    const result = await getFileContent("/cwd", "src/big.ts");
+    expect(result).not.toBeNull();
+    expect(result!.truncated).toBe(true);
+    expect(result!.lineCount).toBe(600);
+    expect(result!.content).toContain("... (truncated: 100 more lines) ...");
+    expect(result!.content).not.toContain("line600");
+  });
+
+  it("returns null when file cannot be read", async () => {
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+    const result = await getFileContent("/cwd", "src/missing.ts");
+    expect(result).toBeNull();
+  });
+});
+
+describe("getProjectIndex", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  function mockDirent(name: string, isDir: boolean) {
+    return {
+      name,
+      isDirectory: () => isDir,
+      isFile: () => !isDir,
+    } as any;
+  }
+
+  it("walks source dirs and extracts TypeScript exports", async () => {
+    vi.mocked(stat)
+      .mockResolvedValueOnce({ isDirectory: () => true } as any)   // src
+      .mockResolvedValueOnce({ isDirectory: () => false } as any)  // lib
+      .mockResolvedValueOnce({ isDirectory: () => false } as any)  // app
+      .mockResolvedValueOnce({ isDirectory: () => false } as any); // packages
+    vi.mocked(readdir)
+      .mockResolvedValueOnce([mockDirent("utils.ts", false), mockDirent("helpers", true)])
+      .mockResolvedValueOnce([]); // helpers dir is empty
+    vi.mocked(readFile).mockResolvedValue("export function foo() {}\nexport const bar = 1;");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(1);
+    expect(index[0].path).toMatch(/^src[/\\]utils\.ts$/);
+    expect(index[0].exports).toContain("foo");
+    expect(index[0].exports).toContain("bar");
+  });
+
+  it("skips node_modules and other excluded dirs", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(readdir).mockResolvedValue([
+      mockDirent("node_modules", true),
+      mockDirent("dist", true),
+      mockDirent("app.ts", false),
+    ]);
+    vi.mocked(readFile).mockResolvedValue("export const x = 1;");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index.length).toBeGreaterThanOrEqual(1);
+    expect(index[0].path).toMatch(/app\.ts$/);
+  });
+
+  it("falls back to root when no source dirs exist", async () => {
+    vi.mocked(stat).mockRejectedValue(new Error("ENOENT"));
+    vi.mocked(readdir).mockResolvedValueOnce([mockDirent("index.ts", false)]);
+    vi.mocked(readFile).mockResolvedValue("export default function main() {}");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(1);
+    expect(index[0].path).toMatch(/index\.ts$/);
+    expect(index[0].exports).toContain("main");
+  });
+
+  it("extracts Python exports", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+    vi.mocked(readdir).mockResolvedValue([mockDirent("app.py", false)]);
+    vi.mocked(readFile).mockResolvedValue("def foo():\n    pass\nclass Bar:\n    pass");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(1);
+    expect(index[0].exports).toContain("foo");
+    expect(index[0].exports).toContain("Bar");
+  });
+
+  it("extracts Go exports", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+    vi.mocked(readdir).mockResolvedValue([mockDirent("main.go", false)]);
+    vi.mocked(readFile).mockResolvedValue("func Foo() {}\nfunc (r *Receiver) Bar() {}");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(1);
+    expect(index[0].exports).toContain("Foo");
+    expect(index[0].exports).toContain("Bar");
+  });
+
+  it("extracts Rust exports", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+    vi.mocked(readdir).mockResolvedValue([mockDirent("lib.rs", false)]);
+    vi.mocked(readFile).mockResolvedValue("pub fn foo() {}\npub struct Bar;");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(1);
+    expect(index[0].exports).toContain("foo");
+    expect(index[0].exports).toContain("Bar");
+  });
+
+  it("respects maxFiles limit", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => true } as any);
+    vi.mocked(readdir).mockResolvedValue([
+      mockDirent("a.ts", false),
+      mockDirent("b.ts", false),
+      mockDirent("c.ts", false),
+    ]);
+    vi.mocked(readFile).mockResolvedValue("export const x = 1;");
+
+    const index = await getProjectIndex("/cwd", 2);
+    expect(index).toHaveLength(2);
+  });
+
+  it("skips files with no exports", async () => {
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+    vi.mocked(readdir).mockResolvedValue([mockDirent("styles.css", false)]);
+    vi.mocked(readFile).mockResolvedValue("body { color: red; }");
+
+    const index = await getProjectIndex("/cwd");
+    expect(index).toHaveLength(0);
   });
 });

@@ -1,6 +1,21 @@
-import { describe, it, expect } from "vitest";
-import { buildReviewPrompts, buildSynthesisPrompt, buildAutoInjectBlock } from "./prompt-builder.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  buildReviewPrompts,
+  buildSynthesisPrompt,
+  buildAutoInjectBlock,
+  ensureDefaultPrompts,
+  resetPrompts,
+  loadLensSystemPrompt,
+  getPromptPath,
+} from "./prompt-builder.js";
 import type { ChangedFile } from "./types.js";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+
+vi.mock("node:fs/promises", () => ({
+  readFile: vi.fn(),
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
 
 const mockFiles: ChangedFile[] = [
   { path: "src/app.ts", status: "modified", language: "TypeScript" },
@@ -87,6 +102,20 @@ describe("buildReviewPrompts", () => {
     expect(prompts[0].systemPrompt).toContain("Output findings as a single JSON array");
     expect(prompts[0].systemPrompt).toContain("Output ONLY the JSON array");
   });
+
+  it("includes project index for deduplication lens", async () => {
+    const index = [{ path: "src/lib.ts", exports: ["helper", "util"] }];
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "deduplication", { projectIndex: index });
+    expect(prompts[0].userPrompt).toContain("Project Index");
+    expect(prompts[0].userPrompt).toContain("src/lib.ts");
+  });
+
+  it("includes full file content when provided", async () => {
+    const contents = new Map([["src/app.ts", { content: "export const x = 1;", lineCount: 1, truncated: false }]]);
+    const prompts = await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "simplicity", { contents });
+    expect(prompts[0].userPrompt).toContain("Full file");
+    expect(prompts[0].userPrompt).toContain("export const x = 1;");
+  });
 });
 
 describe("buildSynthesisPrompt", () => {
@@ -128,5 +157,53 @@ describe("buildAutoInjectBlock", () => {
     expect(block).toContain("Resilience");
     expect(block).toContain("Architecture");
     expect(block).toContain("deep module");
+  });
+});
+
+describe("prompt template management", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("getPromptPath returns correct path", () => {
+    const path = getPromptPath("/cwd", "simplicity");
+    expect(path).toMatch(/\.pi[/\\]drykiss[/\\]prompts[/\\]simplicity\.md$/);
+  });
+
+  it("loadLensSystemPrompt loads custom prompt from disk", async () => {
+    vi.mocked(readFile).mockResolvedValue("Custom prompt body\n");
+    const prompt = await loadLensSystemPrompt("/cwd", "simplicity");
+    expect(prompt).toContain("Custom prompt body");
+    expect(prompt).toContain("Output findings as a single JSON array");
+    expect(readFile).toHaveBeenCalled();
+  });
+
+  it("loadLensSystemPrompt falls back to default when file missing", async () => {
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+    const prompt = await loadLensSystemPrompt("/cwd", "simplicity");
+    expect(prompt).toContain("Simplicity Auditor");
+    expect(prompt).toContain("KISS");
+    expect(prompt).toContain("Output findings as a single JSON array");
+  });
+
+  it("ensureDefaultPrompts creates missing prompt files", async () => {
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+    await ensureDefaultPrompts("/cwd");
+    expect(mkdir).toHaveBeenCalled();
+    expect(writeFile).toHaveBeenCalledTimes(6); // 5 lenses + synthesis
+  });
+
+  it("ensureDefaultPrompts does not overwrite existing files", async () => {
+    vi.mocked(readFile).mockResolvedValue("existing content");
+    await ensureDefaultPrompts("/cwd");
+    expect(mkdir).toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it("resetPrompts overwrites all prompt files", async () => {
+    vi.mocked(readFile).mockResolvedValue("existing content");
+    await resetPrompts("/cwd");
+    expect(mkdir).toHaveBeenCalled();
+    expect(writeFile).toHaveBeenCalledTimes(6);
   });
 });
