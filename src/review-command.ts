@@ -13,11 +13,10 @@ import {
 } from "./git-diff.js";
 import {
 	buildReviewPrompts,
-	buildSynthesisPrompt,
 	ensureDefaultPrompts,
 } from "./prompt-builder.js";
 
-import { saveReview, formatReviewForDisplay } from "./persist.js";
+
 import { loadConfig } from "./config.js";
 import { findModelByHint } from "./llm.js";
 import type {
@@ -25,10 +24,8 @@ import type {
 	ReviewOptions,
 	ChangedFile,
 	Finding,
-	SynthesisResult,
 	Severity,
 } from "./types.js";
-import type { ReviewProgressWidget } from "./review-widget.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -124,45 +121,7 @@ function parseFindingsJson(raw: string, lens: ReviewLens): Finding[] {
 	}
 }
 
-function parseSynthesisJson(raw: string): SynthesisResult | null {
-	try {
-		const jsonMatch = raw.match(/\{[\s\S]*\}/);
-		const jsonStr = jsonMatch ? jsonMatch[0] : raw;
-		const parsed = JSON.parse(jsonStr);
-		if (typeof parsed !== "object" || parsed === null) return null;
 
-		const findings = Array.isArray(parsed.findings)
-			? (parsed.findings as any[]).map((f: any) => ({
-					file: String(f.file ?? "unknown"),
-					line: typeof f.line === "number" ? f.line : undefined,
-					severity: String(f.severity ?? "medium") as Severity,
-					category: String(f.category ?? ""),
-					summary: String(f.summary ?? ""),
-					detail: String(f.detail ?? f.summary ?? ""),
-					suggestion: String(f.suggestion ?? ""),
-					confidence: String(f.confidence ?? "likely") as
-						| "confirmed"
-						| "likely"
-						| "suspect",
-				}))
-			: [];
-
-		return {
-			findings,
-			summary: String(parsed.summary ?? ""),
-			verdict: String(
-				parsed.verdict ?? "Request changes",
-			) as SynthesisResult["verdict"],
-			criticalCount: findings.filter((f) => f.severity === "critical").length,
-			highCount: findings.filter((f) => f.severity === "high").length,
-			mediumCount: findings.filter((f) => f.severity === "medium").length,
-			lowCount: findings.filter((f) => f.severity === "low").length,
-			nitCount: findings.filter((f) => f.severity === "nit").length,
-		};
-	} catch {
-		return null;
-	}
-}
 
 async function runLensReview(
 	ctx: ExtensionContext,
@@ -197,7 +156,8 @@ async function runLensReview(
 	);
 	const available = ctx.modelRegistry.getAvailable();
 	const model = options.modelHint
-		? findModelByHint(available, options.modelHint) ?? await resolveModel(ctx, cwd, lens)
+		? (findModelByHint(available, options.modelHint) ??
+			(await resolveModel(ctx, cwd, lens)))
 		: await resolveModel(ctx, cwd, lens);
 
 	ctx.ui.notify(
@@ -221,61 +181,13 @@ async function runLensReview(
 	return { lens, findings, rawOutput, modelName: result.modelName };
 }
 
-async function runSynthesis(
-	ctx: ExtensionContext,
-	cwd: string,
-	lensReviews: Array<{ lens: string; rawOutput: string }>,
-	_modelHint?: string,
-): Promise<SynthesisResult> {
-	const { systemPrompt, userPrompt } = await buildSynthesisPrompt(
-		cwd,
-		lensReviews,
-	);
 
-	// Use subagent runner for visible Pi subagent spawning
-	const { resolveModel, runLensSubagent } = await import(
-		"./subagent-runner.js"
-	);
-	const model = await resolveModel(ctx, cwd, "synthesis");
-
-	ctx.ui.notify(
-		`[DRYKISS] Launching synthesis subagent with ${model.name}...`,
-		"info",
-	);
-
-	const runResult = await runLensSubagent(
-		ctx,
-		cwd,
-		model,
-		systemPrompt,
-		userPrompt,
-		"synthesis",
-	);
-
-	const rawOutput = runResult.errorMessage
-		? `ERROR: ${runResult.errorMessage}`
-		: runResult.text;
-
-	const result = parseSynthesisJson(rawOutput);
-	if (result) return result;
-
-	return {
-		findings: [],
-		summary:
-			"Synthesis returned non-JSON output. Raw response available in logs.",
-		verdict: "Request changes",
-		criticalCount: 0,
-		highCount: 0,
-		mediumCount: 0,
-		lowCount: 0,
-		nitCount: 0,
-	};
-}
 
 export async function handleDrykissCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -327,133 +239,22 @@ export async function handleDrykissCommand(
 		}
 	}
 
-	let widget: ReviewProgressWidget | undefined;
 	try {
-		const lenses: ReviewLens[] = [
-			"simplicity",
-			"deduplication",
-			"clarity",
-			"resilience",
-			"architecture",
-			"tests",
-		];
-
-		// Resolve models sequentially FIRST to avoid TUI overlay clashes
-		const { resolveAllModels } = await import("./subagent-runner.js");
-		let modelMap;
-		if (options.model) {
-			const available = ctx.modelRegistry.getAvailable();
-			const m = findModelByHint(available, options.model);
-			if (!m) {
-				ctx.ui.notify(`Model "${options.model}" not found.`, "error");
-				return;
-			}
-			modelMap = new Map(lenses.map((l) => [l, m]));
-		} else {
-			modelMap = await resolveAllModels(ctx, ctx.cwd, lenses);
-		}
-
-		// Build prompts for all lenses
-		const allPrompts = await buildReviewPrompts(ctx.cwd, files, diffs, "all", {
+		const jobId = await manager.startReview(
+			ctx,
+			pi,
+			ctx.cwd,
+			files,
+			diffs,
 			contents,
 			projectIndex,
-		});
-		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
-
-		// Launch each lens as a separate Pi subagent (parallel)
-		const { ReviewProgressWidget } = await import("./review-widget.js");
-		widget = new ReviewProgressWidget(lenses, modelMap);
-		widget.attach(ctx.ui);
-
-		const { runLensSubagent } = await import("./subagent-runner.js");
-		const subagentResults = await Promise.all(
-			lenses.map(async (lens) => {
-				const w = widget!; // assigned above, TS loses it in closure
-				const prompt = promptMap.get(lens);
-				if (!prompt) {
-					w.setLensError(lens, "No prompt generated");
-					return {
-						lens,
-						text: "",
-						modelName: "none",
-						durationMs: 0,
-						errorMessage: "No prompt generated",
-					};
-				}
-				const model = modelMap.get(lens);
-				if (!model) {
-					w.setLensError(lens, "No model resolved");
-					return {
-						lens,
-						text: "",
-						modelName: "none",
-						durationMs: 0,
-						errorMessage: "No model resolved",
-					};
-				}
-				w.setLensRunning(lens);
-				const result = await runLensSubagent(
-					ctx,
-					ctx.cwd,
-					model,
-					prompt.systemPrompt,
-					prompt.userPrompt,
-					lens,
-				);
-				if (result.errorMessage) {
-					w.setLensError(lens, result.errorMessage);
-				} else {
-					let count = 0;
-					try {
-						const arr = JSON.parse(
-							(result.text.match(/\[[\s\S]*\]/)?.[0] ?? result.text) || "[]",
-						);
-						count = Array.isArray(arr) ? arr.length : 0;
-					} catch {
-						/* ignore parse errors */
-					}
-					w.setLensDone(lens, result.durationMs, count);
-				}
-				return result;
-			}),
+			options,
 		);
-
-		// Synthesize results
-		widget.setSynthesizing();
-		const synthesis = await runSynthesis(
-			ctx,
-			ctx.cwd,
-			subagentResults.map((r) => ({
-				lens: r.lens,
-				rawOutput: r.errorMessage ? `ERROR: ${r.errorMessage}` : r.text || "[]",
-			})),
-			options.model,
-		);
-		widget.setSynthesisDone();
-
-		const persistPath = await saveReview(
-			ctx.cwd,
-			files.map((f) => f.path),
-			synthesis,
-		);
-
-		const report = formatReviewForDisplay({
-			timestamp: new Date().toISOString(),
-			files: files.map((f) => f.path),
-			...synthesis,
-		});
-
 		ctx.ui.notify(
-			report,
-			synthesis.criticalCount > 0
-				? "error"
-				: synthesis.highCount > 0
-					? "warning"
-					: "info",
+			`DRYKISS review **${jobId}** started in background. Watch the widget above the editor for live progress. Results will appear here when complete.`,
+			"info",
 		);
-		ctx.ui.notify(`Review persisted to: ${persistPath}`, "info");
 	} catch (err: any) {
-		widget?.dispose();
 		ctx.ui.notify(`DRYKISS review failed: ${err.message}`, "error");
 	}
 }

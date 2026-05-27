@@ -2,6 +2,7 @@ import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { createEditTracker } from "./edit-tracker.js";
 import { handleBeforeAgentStart } from "./auto-injector.js";
 import {
@@ -22,12 +23,139 @@ import {
 } from "./review-command.js";
 import { handleConfigCommand } from "./config-command.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
+import { ReviewManager } from "./review-manager.js";
+import { ReviewProgressWidget } from "./review-widget.js";
+import type { ReviewJob } from "./review-manager.js";
 
 export default function (pi: ExtensionAPI): void {
 	const tracker = createEditTracker();
 
+	// ── Background review manager + live widget ────────────
+	const widget = new ReviewProgressWidget();
+	const manager = new ReviewManager(
+		(job) => widget.setJobs(manager.listJobs()),
+		(job) => {
+			widget.setJobs(manager.listJobs());
+			sendReviewNotification(pi, job);
+		},
+	);
+	manager.startCleanup();
+
+	// Grab UI context from tool executions so widget renders even when no
+	// command is active (matches pi-subagents pattern).
+	pi.on("tool_execution_start", (_event: any, ctx: any) => {
+		widget.attach(ctx.ui);
+		widget.setJobs(manager.listJobs());
+	});
+
+	// ── Custom notification renderer for completed reviews ─
+	pi.registerMessageRenderer<ReviewJob>(
+		"drykiss-review-complete",
+		(message: any, { expanded }: { expanded: boolean }, theme: any) => {
+			const job = message.details;
+			if (!job) return undefined;
+
+			const s = job.synthesisResult;
+			const hasError =
+				job.overallStatus === "error" ||
+				job.lenses.some((l: string) => job.states.get(l)!.status === "error");
+			const hasCritical = s && s.criticalCount > 0;
+			const hasHigh = s && s.highCount > 0;
+
+			const icon = hasCritical
+				? theme.fg("error", "✗")
+				: hasError
+					? theme.fg("error", "✗")
+					: hasHigh
+						? theme.fg("warning", "◐")
+						: theme.fg("success", "✓");
+
+			const statusText =
+				job.overallStatus === "error" ? "completed with errors"
+				: "completed";
+
+			let line = `${icon} ${theme.bold(`DRYKISS Review`)} ${theme.fg("dim", statusText)}`;
+
+			// Stats line
+			const parts: string[] = [];
+			if (s) {
+				parts.push(`${s.findings.length} findings`);
+				if (s.criticalCount > 0) parts.push(`${s.criticalCount} critical`);
+				if (s.highCount > 0) parts.push(`${s.highCount} high`);
+			}
+			if (job.completedAt) {
+				parts.push(`${((job.completedAt - job.startedAt) / 1000).toFixed(1)}s`);
+			}
+			if (parts.length) {
+				line +=
+					"\n  " +
+					parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `);
+			}
+
+			// Verdict
+			if (s?.verdict) {
+				line += `\n  ${theme.fg("accent", `Verdict: ${s.verdict}`)}`;
+			}
+
+			// Result preview (collapsed) or full report (expanded)
+			if (expanded && s) {
+				const reportLines = formatReviewForDisplay({
+					timestamp: new Date(job.startedAt).toISOString(),
+					files: job.files,
+					findings: s.findings,
+					summary: s.summary,
+					verdict: s.verdict,
+					criticalCount: s.criticalCount,
+					highCount: s.highCount,
+					mediumCount: s.mediumCount,
+					lowCount: s.lowCount,
+					nitCount: s.nitCount,
+				}).split("\n");
+				for (const rl of reportLines.slice(0, 40)) {
+					line += "\n" + theme.fg("dim", `  ${rl}`);
+				}
+				if (reportLines.length > 40) {
+					line += "\n" + theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
+				}
+			} else if (s?.summary) {
+				line +=
+					"\n  " + theme.fg("dim", `⎿  ${s.summary.slice(0, 80)}`);
+			}
+
+			return new Text(line, 0, 0);
+		},
+	);
+
+	function sendReviewNotification(piRef: ExtensionAPI, job: ReviewJob) {
+		const s = job.synthesisResult;
+		const report = s
+			? formatReviewForDisplay({
+					timestamp: new Date(job.startedAt).toISOString(),
+					files: job.files,
+					findings: s.findings,
+					summary: s.summary,
+					verdict: s.verdict,
+					criticalCount: s.criticalCount,
+					highCount: s.highCount,
+					mediumCount: s.mediumCount,
+					lowCount: s.lowCount,
+					nitCount: s.nitCount,
+				})
+			: "Review completed but synthesis produced no output.";
+
+		piRef.sendMessage<ReviewJob>(
+			{
+				customType: "drykiss-review-complete",
+				content: report,
+				display: true,
+				details: job,
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+	}
+
 	// ── Track file edits across turns ──────────────────────
-	pi.on("tool_execution_end", (event, _ctx) => {
+	pi.on("tool_execution_end", (event: any, _ctx: any) => {
 		try {
 			const { toolName, result } = event as {
 				type: "tool_execution_end";
@@ -40,7 +168,7 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("turn_end", (event, _ctx) => {
+	pi.on("turn_end", (event: any, _ctx: any) => {
 		try {
 			const { turnIndex } = event as { type: "turn_end"; turnIndex: number };
 			tracker.onTurnEnd(turnIndex);
@@ -50,7 +178,7 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	// ── Auto-inject KISS/DRY checklist before next turn ────
-	pi.on("before_agent_start", (event, _ctx) => {
+	pi.on("before_agent_start", (event: any, _ctx: any) => {
 		try {
 			const lastEdits = tracker.getLastTurnEdits();
 			if (!lastEdits || lastEdits.files.length === 0) return;
@@ -74,7 +202,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Run a full KISS/DRY review on changed files using 6 parallel lens reviews + synthesis. Supports --all, --staged, --ref=branch, --model=hint. Configure defaults with /drykiss-config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleDrykissCommand(args, ctx, pi),
+			handleDrykissCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-kiss — Focused simplicity review ──────────

@@ -1,4 +1,5 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
+import type { ReviewJob, LensStatus } from "./review-manager.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -7,14 +8,6 @@ type Theme = {
 	bold(text: string): string;
 };
 
-interface LensState {
-	status: "pending" | "running" | "done" | "error";
-	modelName: string;
-	durationMs: number;
-	errorMessage?: string;
-	findingsCount: number;
-}
-
 export class ReviewProgressWidget {
 	private uiCtx: any;
 	private widgetKey = "drykiss-review";
@@ -22,68 +15,17 @@ export class ReviewProgressWidget {
 	private tui: any;
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private frame = 0;
-
-	private lenses: readonly string[];
-	private states: Map<string, LensState>;
-	private synthesisStatus: "idle" | "running" | "done" = "idle";
-
-	constructor(
-		lenses: readonly string[],
-		modelMap: Map<string, { name: string }>,
-	) {
-		this.lenses = lenses;
-		this.states = new Map(
-			lenses.map((l) => [
-				l,
-				{
-					status: "pending",
-					modelName: modelMap.get(l)?.name ?? "unknown",
-					durationMs: 0,
-					findingsCount: 0,
-				},
-			]),
-		);
-	}
+	private jobs: ReviewJob[] = [];
 
 	attach(uiCtx: any) {
-		if (!uiCtx?.setWidget) return; // graceful degradation on older Pi
+		if (!uiCtx?.setWidget) return;
 		this.uiCtx = uiCtx;
 		this.ensureTimer();
 		this.update();
 	}
 
-	setLensRunning(lens: string) {
-		const s = this.states.get(lens);
-		if (s) s.status = "running";
-		this.update();
-	}
-
-	setLensDone(lens: string, durationMs: number, findingsCount: number) {
-		const s = this.states.get(lens);
-		if (s) {
-			s.status = "done";
-			s.durationMs = durationMs;
-			s.findingsCount = findingsCount;
-		}
-		this.update();
-	}
-
-	setLensError(lens: string, errorMessage: string) {
-		const s = this.states.get(lens);
-		if (s) {
-			s.status = "error";
-			s.errorMessage = errorMessage;
-		}
-		this.update();
-	}
-
-	setSynthesizing() {
-		this.synthesisStatus = "running";
-		this.update();
-	}
-
-	setSynthesisDone() {
-		this.synthesisStatus = "done";
+	setJobs(jobs: ReviewJob[]) {
+		this.jobs = jobs;
 		this.update();
 	}
 
@@ -100,63 +42,42 @@ export class ReviewProgressWidget {
 		const w = _tui.terminal?.columns ?? 80;
 		const truncate = (line: string) => truncateToWidth(line, w);
 		const frame = SPINNER[this.frame % SPINNER.length];
+		const lines: string[] = [];
 
-		const lines: string[] = [
-			truncate(theme.fg("accent", theme.bold("● DRYKISS Review"))),
-		];
+		for (const job of this.jobs) {
+			if (
+				job.overallStatus !== "running" &&
+				job.overallStatus !== "queued"
+			) {
+				continue;
+			}
 
-		for (let i = 0; i < this.lenses.length; i++) {
-			const lens = this.lenses[i];
-			const s = this.states.get(lens)!;
-			const isLast =
-				i === this.lenses.length - 1 && this.synthesisStatus === "idle";
-			const branch = isLast ? "└─" : "├─";
+			const heading =
+				job.overallStatus === "running"
+					? theme.fg("accent", theme.bold("● DRYKISS Review"))
+					: theme.fg("dim", theme.bold("○ DRYKISS Review (queued)"));
+			lines.push(truncate(heading));
 
-			let icon: string;
-			let statusText: string;
-			if (s.status === "pending") {
-				icon = theme.fg("dim", "○");
-				statusText = theme.fg("dim", "pending");
-			} else if (s.status === "running") {
-				icon = theme.fg("accent", frame);
-				statusText = theme.fg("accent", "running");
-			} else if (s.status === "done") {
-				icon = theme.fg("success", "✓");
-				const findings =
-					s.findingsCount > 0 ? ` · ${s.findingsCount} findings` : "";
-				statusText = theme.fg(
-					"dim",
-					`${(s.durationMs / 1000).toFixed(1)}s${findings}`,
-				);
-			} else {
-				icon = theme.fg("error", "✗");
-				statusText = theme.fg(
-					"error",
-					s.errorMessage ? s.errorMessage.slice(0, 40) : "error",
+			for (let i = 0; i < job.lenses.length; i++) {
+				const lens = job.lenses[i];
+				const s = job.states.get(lens)!;
+				const isLast =
+					i === job.lenses.length - 1 &&
+					job.synthesisStatus === "idle";
+				const branch = isLast ? "└─" : "├─";
+				lines.push(
+					truncate(this.renderLensLine(branch, lens, s, theme, frame)),
 				);
 			}
 
-			const name = lens.charAt(0).toUpperCase() + lens.slice(1);
-			const model = theme.fg("dim", `@ ${s.modelName}`);
-			lines.push(
-				truncate(
-					`${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}`,
-				),
-			);
-		}
-
-		if (this.synthesisStatus !== "idle") {
-			const branch = "└─";
-			if (this.synthesisStatus === "running") {
+			if (job.synthesisStatus !== "idle") {
+				const icon =
+					job.synthesisStatus === "running"
+						? theme.fg("accent", frame)
+						: theme.fg("success", "✓");
 				lines.push(
 					truncate(
-						`${theme.fg("dim", branch)} ${theme.fg("accent", frame)} ${theme.bold("Synthesis")} ${theme.fg("dim", "· running")}`,
-					),
-				);
-			} else {
-				lines.push(
-					truncate(
-						`${theme.fg("dim", branch)} ${theme.fg("success", "✓")} ${theme.bold("Synthesis")} ${theme.fg("dim", "· done")}`,
+						`${theme.fg("dim", "└─")} ${icon} ${theme.bold("Synthesis")} ${theme.fg("dim", "· " + job.synthesisStatus)}`,
 					),
 				);
 			}
@@ -165,16 +86,49 @@ export class ReviewProgressWidget {
 		return lines;
 	}
 
+	private renderLensLine(
+		branch: string,
+		lens: string,
+		state: { status: LensStatus; modelName: string; durationMs: number; errorMessage?: string; findingsCount: number },
+		theme: Theme,
+		frame: string,
+	): string {
+		let icon: string;
+		let statusText: string;
+		if (state.status === "queued") {
+			icon = theme.fg("dim", "○");
+			statusText = theme.fg("dim", "queued");
+		} else if (state.status === "running") {
+			icon = theme.fg("accent", frame);
+			statusText = theme.fg("accent", "running");
+		} else if (state.status === "done") {
+			icon = theme.fg("success", "✓");
+			const findings =
+				state.findingsCount > 0
+					? ` · ${state.findingsCount} findings`
+					: "";
+			statusText = theme.fg("dim", `${(state.durationMs / 1000).toFixed(1)}s${findings}`);
+		} else {
+			icon = theme.fg("error", "✗");
+			statusText = theme.fg(
+				"error",
+				state.errorMessage ? state.errorMessage.slice(0, 40) : "error",
+			);
+		}
+
+		const name = lens.charAt(0).toUpperCase() + lens.slice(1);
+		const model = theme.fg("dim", `@ ${state.modelName}`);
+		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}`;
+	}
+
 	private update() {
 		if (!this.uiCtx?.setWidget) return;
 
-		const allDone =
-			this.lenses.every((l) => {
-				const s = this.states.get(l)!;
-				return s.status === "done" || s.status === "error";
-			}) && this.synthesisStatus === "done";
+		const hasActive = this.jobs.some(
+			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
+		);
 
-		if (allDone) {
+		if (!hasActive) {
 			this.dispose();
 			return;
 		}
@@ -210,5 +164,6 @@ export class ReviewProgressWidget {
 		}
 		this.widgetRegistered = false;
 		this.tui = undefined;
+		this.jobs = [];
 	}
 }
