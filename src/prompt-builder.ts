@@ -4,9 +4,9 @@ import type { ChangedFile, ReviewLens } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 
 export interface ReviewPrompt {
-  readonly lens: ReviewLens;
-  readonly systemPrompt: string;
-  readonly userPrompt: string;
+	readonly lens: ReviewLens;
+	readonly systemPrompt: string;
+	readonly userPrompt: string;
 }
 
 const PROMPTS_DIR = ".pi/drykiss/prompts";
@@ -67,7 +67,7 @@ Rules:
 // ── Default prompt bodies (without JSON output instructions) ────────────
 
 const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
-  simplicity: `You are a Simplicity Auditor. Your ONLY job is to find unnecessary complexity in code.
+	simplicity: `You are a Simplicity Auditor. Your ONLY job is to find unnecessary complexity in code.
 
 ## Principles (KISS)
 - Keep It Simple, Stupid: the simplest solution that works is the best solution
@@ -110,7 +110,7 @@ const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
 - **Low:** Nice-to-have — minor style preference, optional simplification
 - **Nit:** Very minor, author may ignore`,
 
-  deduplication: `You are a Duplication Hunter. Your ONLY job is to find repeated code, logic, or knowledge.
+	deduplication: `You are a Duplication Hunter. Your ONLY job is to find repeated code, logic, or knowledge.
 
 ## Principles (DRY)
 - Don't Repeat Yourself: every piece of knowledge must have a single, unambiguous representation
@@ -139,7 +139,7 @@ const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
 - **Low:** Nice-to-have — minor pattern repetition
 - **Nit:** Very minor, author may ignore`,
 
-  clarity: `You are a Clarity & Quality Auditor. Your ONLY job is to find readability, correctness, architecture, security, and maintainability issues.
+	clarity: `You are a Clarity & Quality Auditor. Your ONLY job is to find readability, correctness, architecture, security, and maintainability issues.
 
 ## Principles
 - Code is read far more often than it is written
@@ -193,7 +193,7 @@ const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
 - **Low:** Nice-to-have — formatting inconsistency, minor comment issues
 - **Nit:** Very minor, author may ignore`,
 
-  resilience: `You are a Resilience Auditor. Your ONLY job is to find inadequate error handling, silent failures, and unreliable fallback behavior.
+	resilience: `You are a Resilience Auditor. Your ONLY job is to find inadequate error handling, silent failures, and unreliable fallback behavior.
 
 ## Principles
 - Silent failures are unacceptable — any error without proper logging and user feedback is a critical defect
@@ -224,7 +224,7 @@ const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
 - **Low:** Nice-to-have — error message wording, minor logging improvements
 - **Nit:** Very minor, author may ignore`,
 
-  architecture: `You are an Architecture Auditor. Your ONLY job is to find structural design issues, shallow modules, missing seams, and type design problems.
+	architecture: `You are an Architecture Auditor. Your ONLY job is to find structural design issues, shallow modules, missing seams, and type design problems.
 
 ## Core Concepts (Pocock)
 - **Module** — anything with an interface and an implementation (function, class, package, slice)
@@ -287,7 +287,7 @@ const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
 - **Low:** Nice-to-have — style consistency in type design, optional refactors
 - **Nit:** Very minor, author may ignore`,
 
-  tests: `You are a Test Coverage Auditor. Your ONLY job is to identify missing test cases for changed code.
+	tests: `You are a Test Coverage Auditor. Your ONLY job is to identify missing test cases for changed code.
 
 ## Principles
 - Untested code is broken code waiting to happen
@@ -369,157 +369,201 @@ const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your jo
 
 // ── Prompt loading & default management ─────────────────────────────────
 
-export function getPromptPath(cwd: string, lens: ReviewLens | "synthesis"): string {
-  return join(cwd, PROMPTS_DIR, `${lens}.md`);
+export function getPromptPath(
+	cwd: string,
+	lens: ReviewLens | "synthesis",
+): string {
+	return join(cwd, PROMPTS_DIR, `${lens}.md`);
 }
 
-async function loadPromptBody(cwd: string, lens: ReviewLens | "synthesis"): Promise<string> {
-  try {
-    const raw = await readFile(getPromptPath(cwd, lens), "utf8");
-    return raw.trim();
-  } catch {
-    return lens === "synthesis"
-      ? DEFAULT_SYNTHESIS_PROMPT
-      : DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
-  }
+async function loadPromptBody(
+	cwd: string,
+	lens: ReviewLens | "synthesis",
+): Promise<string> {
+	try {
+		const raw = await readFile(getPromptPath(cwd, lens), "utf8");
+		return raw.trim();
+	} catch {
+		return lens === "synthesis"
+			? DEFAULT_SYNTHESIS_PROMPT
+			: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+	}
 }
 
-export async function loadLensSystemPrompt(cwd: string, lens: Exclude<ReviewLens, "all">): Promise<string> {
-  const body = await loadPromptBody(cwd, lens);
-  return body + "\n" + JSON_OUTPUT_INSTRUCTIONS;
+export async function loadLensSystemPrompt(
+	cwd: string,
+	lens: Exclude<ReviewLens, "all">,
+): Promise<string> {
+	const body = await loadPromptBody(cwd, lens);
+	return body + "\n" + JSON_OUTPUT_INSTRUCTIONS;
 }
 
 export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {
-  const body = await loadPromptBody(cwd, "synthesis");
-  return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
+	const body = await loadPromptBody(cwd, "synthesis");
+	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
 }
 
 export async function ensureDefaultPrompts(cwd: string): Promise<void> {
-  const dir = join(cwd, PROMPTS_DIR);
-  await mkdir(dir, { recursive: true });
+	const dir = join(cwd, PROMPTS_DIR);
+	await mkdir(dir, { recursive: true });
 
-  for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
-    const path = join(dir, `${lens}.md`);
-    try {
-      await readFile(path, "utf8");
-      // already exists, don't overwrite
-    } catch {
-      await writeFile(path, body.trim() + "\n", "utf8");
-    }
-  }
+	for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
+		const path = join(dir, `${lens}.md`);
+		try {
+			await readFile(path, "utf8");
+			// already exists, don't overwrite
+		} catch {
+			await writeFile(path, body.trim() + "\n", "utf8");
+		}
+	}
 
-  const synthesisPath = join(dir, "synthesis.md");
-  try {
-    await readFile(synthesisPath, "utf8");
-  } catch {
-    await writeFile(synthesisPath, DEFAULT_SYNTHESIS_PROMPT.trim() + "\n", "utf8");
-  }
+	const synthesisPath = join(dir, "synthesis.md");
+	try {
+		await readFile(synthesisPath, "utf8");
+	} catch {
+		await writeFile(
+			synthesisPath,
+			DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
+			"utf8",
+		);
+	}
 }
 
 export async function resetPrompts(cwd: string): Promise<void> {
-  const dir = join(cwd, PROMPTS_DIR);
-  await mkdir(dir, { recursive: true });
+	const dir = join(cwd, PROMPTS_DIR);
+	await mkdir(dir, { recursive: true });
 
-  for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
-    await writeFile(join(dir, `${lens}.md`), body.trim() + "\n", "utf8");
-  }
-  await writeFile(join(dir, "synthesis.md"), DEFAULT_SYNTHESIS_PROMPT.trim() + "\n", "utf8");
+	for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
+		await writeFile(join(dir, `${lens}.md`), body.trim() + "\n", "utf8");
+	}
+	await writeFile(
+		join(dir, "synthesis.md"),
+		DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
+		"utf8",
+	);
 }
 
 // ── Context building ────────────────────────────────────────────────────
 
 export interface FileContext {
-  readonly diff: string;
-  readonly content?: string;
-  readonly lineCount?: number;
-  readonly truncated?: boolean;
+	readonly diff: string;
+	readonly content?: string;
+	readonly lineCount?: number;
+	readonly truncated?: boolean;
 }
 
 function buildFileContext(
-  files: ChangedFile[],
-  diffs: Map<string, string>,
-  contents?: Map<string, { content: string; lineCount: number; truncated: boolean }>,
+	files: ChangedFile[],
+	diffs: Map<string, string>,
+	contents?: Map<
+		string,
+		{ content: string; lineCount: number; truncated: boolean }
+	>,
 ): string {
-  const sections: string[] = [];
-  for (const file of files) {
-    const diff = diffs.get(file.path) ?? "";
-    const full = contents?.get(file.path);
-    const parts: string[] = [];
+	const sections: string[] = [];
+	for (const file of files) {
+		const diff = diffs.get(file.path) ?? "";
+		const full = contents?.get(file.path);
+		const parts: string[] = [];
 
-    parts.push(`--- ${file.path} (${file.status}${file.language ? ", " + file.language : ""}) ---`);
+		parts.push(
+			`--- ${file.path} (${file.status}${file.language ? ", " + file.language : ""}) ---`,
+		);
 
-    if (full) {
-      parts.push(`\n### Full file (${full.lineCount} lines${full.truncated ? ", truncated to 500" : ""})\n${full.content}`);
-    }
+		if (full) {
+			parts.push(
+				`\n### Full file (${full.lineCount} lines${full.truncated ? ", truncated to 500" : ""})\n${full.content}`,
+			);
+		}
 
-    parts.push(`\n### Diff\n${diff || "(diff not available)"}`);
-    sections.push(parts.join("\n"));
-  }
-  return sections.join("\n\n");
+		parts.push(`\n### Diff\n${diff || "(diff not available)"}`);
+		sections.push(parts.join("\n"));
+	}
+	return sections.join("\n\n");
 }
 
 function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
-  if (index.length === 0) return "";
-  const lines: string[] = ["\n### Project Index — Existing modules and exports\n"];
-  for (const entry of index) {
-    lines.push(`- ${entry.path}: ${entry.exports.slice(0, 12).join(", ")}${entry.exports.length > 12 ? " ..." : ""}`);
-  }
-  return lines.join("\n");
+	if (index.length === 0) return "";
+	const lines: string[] = [
+		"\n### Project Index — Existing modules and exports\n",
+	];
+	for (const entry of index) {
+		lines.push(
+			`- ${entry.path}: ${entry.exports.slice(0, 12).join(", ")}${entry.exports.length > 12 ? " ..." : ""}`,
+		);
+	}
+	return lines.join("\n");
 }
 
 // ── Public API ──────────────────────────────────────────────────────────
 
 export async function buildReviewPrompts(
-  cwd: string,
-  files: ChangedFile[],
-  diffs: Map<string, string>,
-  lens: ReviewLens,
-  options?: {
-    contents?: Map<string, { content: string; lineCount: number; truncated: boolean }>;
-    projectIndex?: ProjectIndexEntry[];
-  },
+	cwd: string,
+	files: ChangedFile[],
+	diffs: Map<string, string>,
+	lens: ReviewLens,
+	options?: {
+		contents?: Map<
+			string,
+			{ content: string; lineCount: number; truncated: boolean }
+		>;
+		projectIndex?: ProjectIndexEntry[];
+	},
 ): Promise<ReviewPrompt[]> {
-  const context = buildFileContext(files, diffs, options?.contents);
-  const indexBlock = options?.projectIndex ? buildProjectIndexContext(options.projectIndex) : "";
+	const context = buildFileContext(files, diffs, options?.contents);
+	const indexBlock = options?.projectIndex
+		? buildProjectIndexContext(options.projectIndex)
+		: "";
 
-  if (lens !== "all") {
-    const systemPrompt = await loadLensSystemPrompt(cwd, lens);
-    const userPrompt = lens === "deduplication" && indexBlock
-      ? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
-      : `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}`;
-    return [{ lens, systemPrompt, userPrompt }];
-  }
+	if (lens !== "all") {
+		const systemPrompt = await loadLensSystemPrompt(cwd, lens);
+		const userPrompt =
+			lens === "deduplication" && indexBlock
+				? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
+				: `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}`;
+		return [{ lens, systemPrompt, userPrompt }];
+	}
 
-  const lenses: Exclude<ReviewLens, "all">[] = ["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests"];
-  const prompts: ReviewPrompt[] = [];
-  for (const l of lenses) {
-    const systemPrompt = await loadLensSystemPrompt(cwd, l);
-    const userPrompt = l === "deduplication" && indexBlock
-      ? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
-      : `Review the following code changes. Output findings as JSON only.\n\n${context}`;
-    prompts.push({ lens: l, systemPrompt, userPrompt });
-  }
-  return prompts;
+	const lenses: Exclude<ReviewLens, "all">[] = [
+		"simplicity",
+		"deduplication",
+		"clarity",
+		"resilience",
+		"architecture",
+		"tests",
+	];
+	const prompts: ReviewPrompt[] = [];
+	for (const l of lenses) {
+		const systemPrompt = await loadLensSystemPrompt(cwd, l);
+		const userPrompt =
+			l === "deduplication" && indexBlock
+				? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
+				: `Review the following code changes. Output findings as JSON only.\n\n${context}`;
+		prompts.push({ lens: l, systemPrompt, userPrompt });
+	}
+	return prompts;
 }
 
 export async function buildSynthesisPrompt(
-  cwd: string,
-  lensReviews: Array<{ lens: ReviewLens; rawOutput: string }>,
+	cwd: string,
+	lensReviews: Array<{ lens: string; rawOutput: string }>,
 ): Promise<{ systemPrompt: string; userPrompt: string }> {
-  const systemPrompt = await loadSynthesisSystemPrompt(cwd);
+	const systemPrompt = await loadSynthesisSystemPrompt(cwd);
 
-  let userPrompt = "# Independent Reviewer Findings\n\n";
-  for (const review of lensReviews) {
-    userPrompt += `## ${review.lens.toUpperCase()} REVIEWER\n\n${review.rawOutput}\n\n---\n\n`;
-  }
-  userPrompt += "\nSynthesize these findings into the final JSON report.";
+	let userPrompt = "# Independent Reviewer Findings\n\n";
+	for (const review of lensReviews) {
+		userPrompt += `## ${review.lens.toUpperCase()} REVIEWER\n\n${review.rawOutput}\n\n---\n\n`;
+	}
+	userPrompt += "\nSynthesize these findings into the final JSON report.";
 
-  return { systemPrompt, userPrompt };
+	return { systemPrompt, userPrompt };
 }
 
-export function buildAutoInjectBlock(edits: { files: ReadonlyArray<{ path: string; language: string | null }> }): string {
-  const fileList = edits.files.map((f) => f.path).join(", ");
-  return `\n\n## KISS/DRY Quick Check
+export function buildAutoInjectBlock(edits: {
+	files: ReadonlyArray<{ path: string; language: string | null }>;
+}): string {
+	const fileList = edits.files.map((f) => f.path).join(", ");
+	return `\n\n## KISS/DRY Quick Check
 
 You edited: ${fileList}. Before proceeding, briefly verify:
 

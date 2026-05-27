@@ -16,7 +16,7 @@ import {
 	buildSynthesisPrompt,
 	ensureDefaultPrompts,
 } from "./prompt-builder.js";
-import { callLLM } from "./llm.js";
+
 import { saveReview, formatReviewForDisplay } from "./persist.js";
 import { loadConfig } from "./config.js";
 import type {
@@ -189,42 +189,69 @@ async function runLensReview(
 	const prompt = prompts[0];
 	if (!prompt) return { lens, findings: [], rawOutput: "", modelName: "none" };
 
-	ctx.ui.notify(`[DRYKISS] Running ${lens} review...`, "info");
+	// Use subagent runner for visible Pi subagent spawning
+	const { resolveModel, runLensSubagent } = await import(
+		"./subagent-runner.js"
+	);
+	const model = options.modelHint
+		? await resolveModel(ctx, cwd, lens) // only triggers interactive if no config
+		: await resolveModel(ctx, cwd, lens);
 
-	const { text: rawOutput, model } = await callLLM(
-		ctx,
-		cwd,
-		prompt.systemPrompt,
-		prompt.userPrompt,
-		{ temperature: 0.2, maxTokens: 4000, signal: ctx.signal },
-		options.modelHint ? undefined : lens,
+	ctx.ui.notify(
+		`[DRYKISS] Launching ${lens} subagent with ${model.name}...`,
+		"info",
 	);
 
+	const result = await runLensSubagent(
+		ctx,
+		cwd,
+		model,
+		prompt.systemPrompt,
+		prompt.userPrompt,
+		lens,
+	);
+
+	const rawOutput = result.errorMessage
+		? `ERROR: ${result.errorMessage}`
+		: result.text || "[]";
 	const findings = parseFindingsJson(rawOutput, lens);
-	return { lens, findings, rawOutput, modelName: model.name };
+	return { lens, findings, rawOutput, modelName: result.modelName };
 }
 
 async function runSynthesis(
 	ctx: ExtensionContext,
 	cwd: string,
-	lensReviews: Array<{ lens: ReviewLens; rawOutput: string }>,
-	modelHint?: string,
+	lensReviews: Array<{ lens: string; rawOutput: string }>,
+	_modelHint?: string,
 ): Promise<SynthesisResult> {
 	const { systemPrompt, userPrompt } = await buildSynthesisPrompt(
 		cwd,
 		lensReviews,
 	);
 
-	ctx.ui.notify(`[DRYKISS] Synthesizing findings...`, "info");
+	// Use subagent runner for visible Pi subagent spawning
+	const { resolveModel, runLensSubagent } = await import(
+		"./subagent-runner.js"
+	);
+	const model = await resolveModel(ctx, cwd, "synthesis");
 
-	const { text: rawOutput } = await callLLM(
+	ctx.ui.notify(
+		`[DRYKISS] Launching synthesis subagent with ${model.name}...`,
+		"info",
+	);
+
+	const runResult = await runLensSubagent(
 		ctx,
 		cwd,
+		model,
 		systemPrompt,
 		userPrompt,
-		{ temperature: 0.2, maxTokens: 4000, signal: ctx.signal },
-		modelHint ? undefined : "synthesis",
+		"synthesis",
 	);
+
+	const rawOutput = runResult.errorMessage
+		? `ERROR: ${runResult.errorMessage}`
+		: runResult.text;
 
 	const result = parseSynthesisJson(rawOutput);
 	if (result) return result;
@@ -306,20 +333,67 @@ export async function handleDrykissCommand(
 			"architecture",
 			"tests",
 		];
-		const lensReviews = await Promise.all(
-			lenses.map((lens) =>
-				runLensReview(ctx, ctx.cwd, files, diffs, lens, {
-					modelHint: options.model,
-					contents,
-					projectIndex,
-				}),
-			),
+
+		// Resolve models sequentially FIRST to avoid TUI overlay clashes
+		const { resolveAllModels } = await import("./subagent-runner.js");
+		const modelMap = options.model
+			? undefined // explicit --model= skips interactive selection
+			: await resolveAllModels(ctx, ctx.cwd, lenses);
+
+		// Build prompts for all lenses
+		const allPrompts = await buildReviewPrompts(ctx.cwd, files, diffs, "all", {
+			contents,
+			projectIndex,
+		});
+		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
+
+		// Launch each lens as a separate Pi subagent (parallel)
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		const subagentResults = await Promise.all(
+			lenses.map((lens) => {
+				const prompt = promptMap.get(lens);
+				if (!prompt) {
+					return Promise.resolve({
+						lens,
+						text: "",
+						modelName: "none",
+						durationMs: 0,
+						errorMessage: "No prompt generated",
+					});
+				}
+				const model = modelMap?.get(lens);
+				if (!model) {
+					return Promise.resolve({
+						lens,
+						text: "",
+						modelName: "none",
+						durationMs: 0,
+						errorMessage: "No model resolved",
+					});
+				}
+				ctx.ui.notify(
+					`[DRYKISS] Launching ${lens} subagent with ${model.name}...`,
+					"info",
+				);
+				return runLensSubagent(
+					ctx,
+					ctx.cwd,
+					model,
+					prompt.systemPrompt,
+					prompt.userPrompt,
+					lens,
+				);
+			}),
 		);
 
+		// Synthesize results
 		const synthesis = await runSynthesis(
 			ctx,
 			ctx.cwd,
-			lensReviews.map((r) => ({ lens: r.lens, rawOutput: r.rawOutput })),
+			subagentResults.map((r) => ({
+				lens: r.lens,
+				rawOutput: r.errorMessage ? `ERROR: ${r.errorMessage}` : r.text || "[]",
+			})),
 			options.model,
 		);
 
