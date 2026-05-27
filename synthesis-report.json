@@ -1,0 +1,276 @@
+{
+  "summary": "CRITICAL: The --model flag is completely broken — in the full /drykiss path it causes all 6 lens subagents to silently fail (modelMap=undefined), and in single-lens commands it's ignored (identical ternary branches). This means every --model=sonnet invocation produces an empty or misleading review.",
+  "verdict": "Request changes",
+  "findings": [
+    {
+      "file": "src/review-command.ts",
+      "line": 336,
+      "severity": "critical",
+      "category": "Logic Bug — Silent failure of all lens subagents",
+      "summary": "--model flag silently breaks the full multi-lens /drykiss review: all 6 subagents fail with 'No model resolved'",
+      "detail": "At line 336–338: `const modelMap = options.model ? undefined : await resolveAllModels(...)`. When the user passes --model=haiku, modelMap is set to undefined. At line ~350, `modelMap?.get(lens)` returns undefined for every lens, causing every subagent to short-circuit with errorMessage: 'No model resolved'. The synthesis then runs on 6 error entries, produces an empty findings array, and the user sees a report with 0 findings and no indication that all lenses failed. The --model flag is completely non-functional in the full /drykiss command path.",
+      "suggestion": "When --model is provided, resolve it via findModelByHint and create a Map mapping every lens to that model: `const modelMap = options.model ? new Map(lenses.map(l => [l, findModelByHint(available, options.model)!]).filter(([_, m]) => m)) : await resolveAllModels(...)`. Or, better, delegate to a new `resolveAllModelsWithHint` function in subagent-runner.ts that accepts an optional hint.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 1,
+      "severity": "critical",
+      "category": "Zero test coverage — core orchestration",
+      "summary": "review-command.ts has zero test coverage; no review-command.test.ts exists",
+      "detail": "This file contains ALL business logic for the DRYKISS review system: handleDrykissCommand, handleKissCommand, handleDryCommand, handleResilienceCommand, handleTestsCommand, handleArchCommand, executeDrykissReviewTool, runLensReview, runSynthesis, gatherDiffs, gatherContents, parseFindingsJson, parseSynthesisJson. None have a single test. The critical --model= bug above would have been caught by even a basic integration test. The JSON parsing functions bridge LLM output to user-facing review results and their silent-failure-on-parse behavior is completely untested.",
+      "suggestion": "Create src/review-command.test.ts. At minimum test: parseFindingsJson with valid/invalid/malformed JSON, parseSynthesisJson with valid/invalid/malformed JSON, gatherDiffs error path, handleKissCommand with no files, executeDrykissReviewTool with a valid lens, and the --model flag paths (both single-lens and full) that are currently broken.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/subagent-runner.ts",
+      "line": 1,
+      "severity": "critical",
+      "category": "Zero test coverage — subagent lifecycle",
+      "summary": "subagent-runner.ts has zero test coverage; no subagent-runner.test.ts exists",
+      "detail": "This file manages Pi subagent session lifecycle: resolveModel (config lookup + interactive fallback), resolveAllModels (sequential resolution across 6 lenses), runLensSubagent (session creation, prompt execution, result extraction, abort handling, cleanup), and extractAssistantText (content extraction with type guards). If runLensSubagent leaks sessions or fails to handle aborts, it can leave the IDE in a broken state. Complex async flows, error handling, and resource cleanup are completely untested.",
+      "suggestion": "Create src/subagent-runner.test.ts. Mock createAgentSession and test: resolveModel with config hint, resolveModel with no models (throws), resolveModel fallback to first available, resolveAllModels resolves all lenses, runLensSubagent session error returns errorMessage, runLensSubagent abort signal disposes session, extractAssistantText with array/string/non-array content.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/llm.ts",
+      "line": 1,
+      "severity": "critical",
+      "category": "Zero test coverage — LLM resolution and retry logic",
+      "summary": "llm.ts has zero test coverage; no llm.test.ts exists",
+      "detail": "This file contains model resolution (resolveModelSmart with 5-step priority chain), model matching (findModelByHint with exact/partial matching), and LLM calling with quota/auth error recovery (callLLM catches specific error types, prompts user for new model, and retries once). The error recovery and retry logic is especially risky — if error classification is wrong or retry state is corrupted, users will get confusing error loops. None of this is tested.",
+      "suggestion": "Create src/llm.test.ts. Mock ctx.modelRegistry and test: resolveModelSmart with explicit hint, per-lens config, fallback to first available, findModelByHint with exact/partial/no match, callLLM success path, callLLM quota error with/without UI, callLLM auth error retry path.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 196,
+      "severity": "high",
+      "category": "Dead code — modelHint parameter completely ignored",
+      "summary": "Ternary in runLensReview has identical branches; --model flag silently ignored for all single-lens commands",
+      "detail": "Lines 196–198: `const model = options.modelHint ? await resolveModel(ctx, cwd, lens) : await resolveModel(ctx, cwd, lens);` — both branches are identical. The options.modelHint flag is evaluated but never passed to resolveModel (which doesn't accept a hint parameter anyway). Every single-lens command (/drykiss-kiss --model=sonnet, /drykiss-dry --model=haiku, etc.) ignores the user's model choice and falls through to interactive selection or config defaults. Flagged by 4 of 6 reviewers (Simplicity, Clarity, Resilience, Architecture).",
+      "suggestion": "Replace with: `const model = options.modelHint ? findModelByHint(available, options.modelHint) ?? await resolveModel(ctx, cwd, lens) : await resolveModel(ctx, cwd, lens);`. Also add a modelHint parameter to resolveModel in subagent-runner.ts so it can use the hint in its priority chain.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/subagent-runner.ts",
+      "line": 36,
+      "severity": "high",
+      "category": "Duplicated model resolution logic",
+      "summary": "resolveModel in subagent-runner.ts duplicates resolveModelSmart from llm.ts with a divergent implementation",
+      "detail": "llm.ts:resolveModelSmart implements a 5-step priority chain: (1) explicit hint, (2) per-lens config, (3) default config, (4) interactive selector, (5) fallback to available[0]. subagent-runner.ts:resolveModel reimplements a 3-step chain: (1) per-lens config, (2) interactive selector, (3) fallback to available[0]. It skips the explicit hint and default config steps entirely. When one function changes (e.g., new priority step or config key), the other won't stay in sync. Both can return different models for the same input. Flagged by 3 reviewers.",
+      "suggestion": "Delete resolveModel from subagent-runner.ts and import resolveModelSmart from llm.ts. If the interface doesn't match (resolveModel throws instead of returning undefined), add a thin wrapper: `export async function resolveModel(...) { const m = await resolveModelSmart(...); if (!m) throw new Error('No models available'); return m; }`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/edit-tracker.ts",
+      "line": 10,
+      "severity": "high",
+      "category": "Duplicated detectLanguage with diverging extension maps",
+      "summary": "detectLanguage is defined in both edit-tracker.ts and git-diff.ts with inconsistent language coverage (15 vs 30+ extensions)",
+      "detail": "edit-tracker.ts detectLanguage (line 10) maps 15 extensions. git-diff.ts detectLanguage (line 20) maps 30+ extensions including Kotlin, Ruby, Swift, C#, C++, C, Scala, JSON, Shell, Bash, Zsh, Dockerfile — all missing from edit-tracker.ts. When a user edits a .json, .rb, .swift, or .sh file, edit-tracker.ts records language as null while git-diff.ts correctly identifies it. This directly impacts auto-injection and edit-tracking features. Any new extension added requires updates to two separate maps that will inevitably diverge again.",
+      "suggestion": "Extract detectLanguage into a shared module (src/detect-language.ts) using git-diff.ts's more complete mapping as the canonical version. Import from both edit-tracker.ts and git-diff.ts.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 435,
+      "severity": "high",
+      "category": "DRY violation — five near-identical command handlers",
+      "summary": "handleKissCommand, handleDryCommand, handleResilienceCommand, handleTestsCommand, handleArchCommand share ~90% identical code (~175 lines of duplication)",
+      "detail": "All five single-lens handlers follow the exact same pattern: parseArgs → getChangedFiles → early return if empty → ensureDefaultPrompts → gatherDiffs → loadConfig → conditional gatherContents → try/catch runLensReview → map findings → format display string → notify. The only differences are: the lens string (simplicity/deduplication/etc.), whether projectIndex is fetched (only for dry+arch), the empty-state message, and the notification title. Adding a new lens requires copy-pasting the entire pattern again.",
+      "suggestion": "Replace the 5 handlers with a single parameterized function: `async function handleLensReview(lens: ReviewLens, args, ctx, pi, opts?: { needProjectIndex?: boolean, label: string, emptyMsg: string })`. Each exported handler becomes a one-liner: `export const handleKissCommand = (a, c, p) => handleLensReview('simplicity', a, c, p, { label: 'KISS Review', emptyMsg: 'No simplicity concerns found.' })`.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 280,
+      "severity": "high",
+      "category": "God function — Single Responsibility violation",
+      "summary": "handleDrykissCommand is ~150 lines and handles file gathering, model resolution, prompt building, subagent spawning, synthesis, persistence, and display",
+      "detail": "The function does everything: parse args, fetch changed files, validate file count, load config, create prompts, resolve 6 models, spawn 6 subagents in parallel, run synthesis, persist results to disk, build markdown report, notify user with severity-aware color. Any of these stages could fail independently, but error handling is a single catch block that loses context about which stage failed. The function has at least 7 distinct responsibilities.",
+      "suggestion": "Break into focused stages: (1) `resolveModels` — resolve all lens models sequentially, (2) `runLenses` — spawn subagents in parallel, (3) `synthesize` — run synthesis agent, (4) `persistAndReport` — save + display. Each returns typed results and the orchestrator delegates error handling to each stage.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 194,
+      "severity": "high",
+      "category": "Dynamic imports where static imports suffice",
+      "summary": "review-command.ts uses await import('./subagent-runner.js') at 3 call sites instead of a top-level static import",
+      "detail": "Lines 194, 234, and 336 all dynamically import from subagent-runner.js inside function bodies. This adds latency per call (module resolution + parsing), prevents tree-shaking, and obscures the module dependency graph. Lines 336 and 346 even import from the same module separately instead of combining into one destructuring import. There is no conditional or lazy-loading reason — subagent-runner.js is always needed.",
+      "suggestion": "Replace all dynamic imports with a single top-level `import { resolveModel, resolveAllModels, runLensSubagent } from './subagent-runner.js'`. Remove the three `await import(...)` call sites.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/config-command.ts",
+      "line": 45,
+      "severity": "high",
+      "category": "OCP violation — 9-branch if-else chain for subcommands",
+      "summary": "handleConfigCommand uses a 9-branch if-else chain; adding a new subcommand requires editing this function",
+      "detail": "Subcommands 'show'/'set-default'/'set-lens'/'interactive'/'confirm'/'context-mode'/'reset-prompts' plus the unknown-subcommand error are handled by a long if-else chain. Each branch is 7-25 lines. Adding a new subcommand (e.g., 'set-timeout') means adding another if-block and increasing cyclomatic complexity. Unit testing individual subcommands requires the whole function.",
+      "suggestion": "Replace with a command registry: `const subcommands: Record<string, (tokens: string[], ctx: ExtensionCommandContext) => Promise<void>> = { show, 'set-default': ..., ... }`. Then: `const handler = subcommands[subcommand]; if (!handler) return showUsage(); await handler(tokens.slice(1), ctx);`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 93,
+      "severity": "high",
+      "category": "Untested critical path — JSON parsing",
+      "summary": "parseFindingsJson and parseSynthesisJson have no tests despite being the bridge between LLM output and user-facing results",
+      "detail": "parseFindingsJson (line 93–111) and parseSynthesisJson (line 113–141) parse AI-generated JSON output. parseFindingsJson uses a regex to extract JSON arrays from raw text, handles non-array results, and coerces field types. parseSynthesisJson uses a regex to extract JSON objects, validates object shape, maps findings with string coercions, and computes severity counts. Both silently return empty/default results on parse failure — malformed AI output is silently dropped. These functions are completely untested.",
+      "suggestion": "Test: parseFindingsJson with valid JSON array, with markdown-wrapped JSON, with non-array JSON (should return []), with completely invalid JSON (should return []). parseSynthesisJson with valid object, missing findings field, invalid JSON (should return null), and verify severity counts are computed correctly.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 108,
+      "severity": "medium",
+      "category": "Silent error swallowing",
+      "summary": "gatherDiffs catches all errors and replaces diff with '(diff unavailable)' with no logging",
+      "detail": "The catch block at line 108 sets '(diff unavailable)' but never logs the actual error. If git diff fails due to a corrupted repo, permission error, or shell timeout, the error is completely hidden. The reviewer then analyzes stale or missing diffs, potentially producing incorrect findings with no indication that anything went wrong.",
+      "suggestion": "Add logging: `try { ... } catch (err) { console.error('[pi-drykiss] Failed to get diff for', file.path, err); diffs.set(file.path, '(diff unavailable)'); }`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/review-command.ts",
+      "line": 252,
+      "severity": "medium",
+      "category": "Silent fallback on synthesis failure",
+      "summary": "When synthesis JSON parsing fails, a generic fallback is returned with no error logged or user notified",
+      "detail": "At lines 252–260, if parseSynthesisJson returns null, a hardcoded fallback is returned with summary 'Synthesis returned non-JSON output...' and 0 findings. But no error is logged, and the user sees a report with 0 findings. If the synthesis LLM errored (quota, timeout, bad response), the user gets no actionable feedback about what went wrong.",
+      "suggestion": "Log the raw synthesis output and parsing error to console.error. Consider surfacing the error to the user via ctx.ui.notify with 'warning' severity instead of silently returning empty findings.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/config.ts",
+      "line": 33,
+      "severity": "medium",
+      "category": "Overly broad error catch",
+      "summary": "loadConfig catches ALL errors including JSON parse failures and permission errors, returning defaults silently",
+      "detail": "The catch block catches everything — ENOENT (file missing), JSON syntax errors, permission denied, disk read failures — and returns defaults. A malformed config.json silently resets to defaults with no warning. A permission error also silently returns defaults. If the config is later saved, the corrupted config is overwritten, silently destroying custom lens model settings.",
+      "suggestion": "Differentiate: `catch (err) { if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { interactive: true, confirmBeforeRun: true }; console.error('[pi-drykiss] Failed to load config:', err); return { interactive: true, confirmBeforeRun: true }; }`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/git-diff.ts",
+      "line": 156,
+      "severity": "medium",
+      "category": "Duplicate directory-walking logic",
+      "summary": "getAllSourceFiles and getProjectIndex both implement identical source-dir discovery and recursive walk patterns",
+      "detail": "Both functions (lines 98–120 and 274–310) repeat the same 15-line bootstrap: `const sourceDirs = ['src','lib','app','packages']; for (const d of sourceDirs) { try { const s = await stat(...); if (s.isDirectory()) dirsToWalk.push(d); } catch {} } if (dirsToWalk.length === 0) dirsToWalk.push('.');` followed by `for (const dir of dirsToWalk) { for await (const filePath of walkDir(cwd, dir)) { ... } }`. The logic is identical except for what they collect (files vs. exports). Updating one walk (e.g., adding a new source directory) requires touching both.",
+      "suggestion": "Extract a shared helper: `async function resolveSourceDirs(cwd: string): Promise<string[]>` that returns existing source directories, falling back to `['.']`. Share between getAllSourceFiles and getProjectIndex.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/auto-injector.ts",
+      "line": 14,
+      "severity": "medium",
+      "category": "Unnecessary wrapper function",
+      "summary": "buildKissDryInjectionBlock is a pass-through to buildAutoInjectBlock with a redundant null check",
+      "detail": "The function checks `if (edits.files.length === 0) return null`, then calls `buildAutoInjectBlock(edits)` which always returns a non-null string (it handles empty files by producing a checklist with an empty file list). The null guard is redundant and the caller (handleBeforeAgentStart) already checks `if (!block) return undefined`. This abstraction adds a layer but zero leverage.",
+      "suggestion": "Delete buildKissDryInjectionBlock. Import buildAutoInjectBlock directly in handleBeforeAgentStart. The null/undefined check at the call site is sufficient.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/config-command.ts",
+      "line": 85,
+      "severity": "medium",
+      "category": "Runtime validation diverges from type system",
+      "summary": "validLenses array includes 'synthesis' which is not part of the ReviewLens type union",
+      "detail": "ReviewLens type (types.ts) = 'simplicity' | 'deduplication' | 'clarity' | 'resilience' | 'architecture' | 'tests' | 'all'. But config-command.ts line 85 defines validLenses including 'synthesis' (and excluding 'all'). A user can set 'synthesis' model via /drykiss-config set-lens, but no code path reads this value through getModelForLens because the type doesn't include 'synthesis'. The type system and runtime validation are out of sync.",
+      "suggestion": "Either add 'synthesis' to the ReviewLens type (it's used in runSynthesis) or remove it from validLenses. Keep definitions in sync: `const validLenses = ['simplicity', 'deduplication', 'clarity', 'resilience', 'architecture', 'tests'] as const satisfies Readonly<Exclude<ReviewLens, 'all'>[]>;`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/prompt-builder.ts",
+      "line": 547,
+      "severity": "medium",
+      "category": "Unused parameter in function interface",
+      "summary": "buildAutoInjectBlock accepts 'language' field on each file but never uses it in implementation",
+      "detail": "The parameter type is `{ files: ReadonlyArray<{ path: string; language: string | null }> }`. The function body only accesses `f.path` to build the file list string. `language` is accepted but completely ignored. This widens the interface unnecessarily — callers must provide a language value that has no effect.",
+      "suggestion": "Narrow the parameter type to `{ files: ReadonlyArray<{ path: string }> }` (or `Pick<EditedFile, 'path'>[]`). If the language field is intended for future display, add a comment explaining the intent.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/config.ts",
+      "line": 67,
+      "severity": "low",
+      "category": "Unsafe type cast in getModelForLens",
+      "summary": "getModelForLens uses 'as keyof typeof' cast on an unvalidated runtime string, bypassing type checking",
+      "detail": "`config.lensModels?.[lens as keyof typeof config.lensModels]` casts at runtime without validating the lens is a valid key. The config-command layer validates the lens name separately via validLenses array, but this function silently returns undefined for invalid keys. The cast also means callers don't get autocomplete for valid lens names.",
+      "suggestion": "Accept the proper union type (e.g., `keyof DrykissConfig['lensModels']`) instead of a generic string, or define a reusable LensKey type in types.ts that both config.ts and config-command.ts reference.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/config-command.ts",
+      "line": 98,
+      "severity": "low",
+      "category": "Repeated toggle subcommand pattern",
+      "summary": "Three config subcommand handlers (interactive, confirm, context-mode) follow identical structure",
+      "detail": "The interactive (line 98), confirm (line 112), and context-mode (line 126) subcommands each: parse token[1] → loadConfig → validate value → set config property → saveConfig → notify. Each is ~14 lines with identical structure but different property names and valid values. ~42 lines of near-identical code.",
+      "suggestion": "Extract: `async function toggleConfigField(ctx, cwd, field: string, validValues: string[], value: string, label: string): Promise<void>`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/model-selector.ts",
+      "line": 40,
+      "severity": "low",
+      "category": "Over-engineered popup width calculator",
+      "summary": "calculatePopupWidth computes complex pixel-perfect widths that are negated by final clamping to [40, 120]",
+      "detail": "This 15-line function accounts for prefix width, primary gap, box padding, safety margin, help text width, content width, min width of 40, max width of 120. The result is then clamped to [40, 120] regardless. The complexity of the calculation is negated by the final clamping. A simpler heuristic would produce equivalent results.",
+      "suggestion": "Replace with: `const width = Math.min(Math.max(Math.max(...items.map(i => visibleWidth(i.label || '')), visibleWidth(title)) + 4, 40), 120);`",
+      "confidence": "likely"
+    },
+    {
+      "file": "src/persist.ts",
+      "line": 57,
+      "severity": "low",
+      "category": "Corrupt review files silently skipped",
+      "summary": "listReviews catches all JSON parse errors silently, potentially hiding data corruption",
+      "detail": "The try/catch inside the loop catches corrupt review files and silently skips them. If a review file has a partial write or encoding issue, the user will see fewer reviews without explanation. The resulting array may be empty or incomplete with no feedback.",
+      "suggestion": "Log a warning for corrupt files: `catch { console.warn('[pi-drykiss] Skipping corrupt review:', entry); }`. Optionally count and report skipped files in the notification.",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/prompt-builder.ts",
+      "line": 27,
+      "severity": "low",
+      "category": "Repeated JSON output instructions boilerplate",
+      "summary": "JSON_OUTPUT_INSTRUCTIONS and SYNTHESIS_JSON_INSTRUCTIONS share ~60% identical formatting rules",
+      "detail": "Both strings contain near-identical lines: 'Output ONLY the JSON... No markdown code fences, no extra commentary.', severity rules, and empty-output handling. The synthesis variant adds confidence and verdict fields. When one changes, the other likely needs changing too.",
+      "suggestion": "Extract a shared base instruction constant: `const BASE_JSON_RULES = 'Output ONLY the JSON. No markdown code fences, no extra commentary.'` and append format-specific fields.",
+      "confidence": "likely"
+    },
+    {
+      "file": "src/edit-tracker.ts",
+      "line": 45,
+      "severity": "low",
+      "category": "Single-implementation interface",
+      "summary": "EditTracker interface exists with exactly one implementation and no planned alternates",
+      "detail": "The EditTracker interface (7 lines) and createEditTracker factory (45 lines of implementation) wrap a simple closure-based state machine backed by a Map. There is exactly one implementation and nothing depends on the interface (consumers use the returned object structurally). This is abstraction for its own sake.",
+      "suggestion": "Remove the EditTracker interface. Export a class EditTracker or just export the factory function directly. TypeScript infers the structural type correctly without the interface declaration.",
+      "confidence": "likely"
+    },
+    {
+      "file": "src/config-command.ts",
+      "line": 60,
+      "severity": "nit",
+      "category": "Unhelpful error message",
+      "summary": "set-lens with no lens argument shows 'Invalid lens: undefined' instead of usage help",
+      "detail": "If a user runs '/drykiss-config set-lens' with no arguments, tokens[1] is undefined. `validLenses.includes(undefined)` is false, so the error says 'Invalid lens: undefined. Valid: simplicity, deduplication, ...' instead of showing the usage help text.",
+      "suggestion": "Add a guard before the includes check: `if (!lens) { ctx.ui.notify('Usage: /drykiss-config set-lens <lens> <model>', 'warning'); return; }`",
+      "confidence": "confirmed"
+    },
+    {
+      "file": "src/git-diff.ts",
+      "line": 178,
+      "severity": "nit",
+      "category": "Repeated source directory list",
+      "summary": "The array ['src', 'lib', 'app', 'packages'] is defined in two different functions",
+      "detail": "getAllSourceFiles (line ~178) and getProjectIndex (line ~295) each declare `const sourceDirs = ['src', 'lib', 'app', 'packages']`. If a new source directory is added, it must be updated in both places. Subsumed by the medium-severity finding about duplicate directory-walking logic — this is the smallest instance of that duplication.",
+      "suggestion": "Define `const SOURCE_DIRS = ['src', 'lib', 'app', 'packages']` as a module-level constant and reference it from both functions.",
+      "confidence": "confirmed"
+    }
+  ]
+}

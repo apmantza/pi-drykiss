@@ -19,6 +19,7 @@ import {
 
 import { saveReview, formatReviewForDisplay } from "./persist.js";
 import { loadConfig } from "./config.js";
+import { findModelByHint } from "./llm.js";
 import type {
 	ReviewLens,
 	ReviewOptions,
@@ -27,6 +28,7 @@ import type {
 	SynthesisResult,
 	Severity,
 } from "./types.js";
+import type { ReviewProgressWidget } from "./review-widget.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -193,8 +195,9 @@ async function runLensReview(
 	const { resolveModel, runLensSubagent } = await import(
 		"./subagent-runner.js"
 	);
+	const available = ctx.modelRegistry.getAvailable();
 	const model = options.modelHint
-		? await resolveModel(ctx, cwd, lens) // only triggers interactive if no config
+		? findModelByHint(available, options.modelHint) ?? await resolveModel(ctx, cwd, lens)
 		: await resolveModel(ctx, cwd, lens);
 
 	ctx.ui.notify(
@@ -324,6 +327,7 @@ export async function handleDrykissCommand(
 		}
 	}
 
+	let widget: ReviewProgressWidget | undefined;
 	try {
 		const lenses: ReviewLens[] = [
 			"simplicity",
@@ -336,9 +340,18 @@ export async function handleDrykissCommand(
 
 		// Resolve models sequentially FIRST to avoid TUI overlay clashes
 		const { resolveAllModels } = await import("./subagent-runner.js");
-		const modelMap = options.model
-			? undefined // explicit --model= skips interactive selection
-			: await resolveAllModels(ctx, ctx.cwd, lenses);
+		let modelMap;
+		if (options.model) {
+			const available = ctx.modelRegistry.getAvailable();
+			const m = findModelByHint(available, options.model);
+			if (!m) {
+				ctx.ui.notify(`Model "${options.model}" not found.`, "error");
+				return;
+			}
+			modelMap = new Map(lenses.map((l) => [l, m]));
+		} else {
+			modelMap = await resolveAllModels(ctx, ctx.cwd, lenses);
+		}
 
 		// Build prompts for all lenses
 		const allPrompts = await buildReviewPrompts(ctx.cwd, files, diffs, "all", {
@@ -348,34 +361,38 @@ export async function handleDrykissCommand(
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
 
 		// Launch each lens as a separate Pi subagent (parallel)
+		const { ReviewProgressWidget } = await import("./review-widget.js");
+		widget = new ReviewProgressWidget(lenses, modelMap);
+		widget.attach(ctx.ui);
+
 		const { runLensSubagent } = await import("./subagent-runner.js");
 		const subagentResults = await Promise.all(
-			lenses.map((lens) => {
+			lenses.map(async (lens) => {
+				const w = widget!; // assigned above, TS loses it in closure
 				const prompt = promptMap.get(lens);
 				if (!prompt) {
-					return Promise.resolve({
+					w.setLensError(lens, "No prompt generated");
+					return {
 						lens,
 						text: "",
 						modelName: "none",
 						durationMs: 0,
 						errorMessage: "No prompt generated",
-					});
+					};
 				}
-				const model = modelMap?.get(lens);
+				const model = modelMap.get(lens);
 				if (!model) {
-					return Promise.resolve({
+					w.setLensError(lens, "No model resolved");
+					return {
 						lens,
 						text: "",
 						modelName: "none",
 						durationMs: 0,
 						errorMessage: "No model resolved",
-					});
+					};
 				}
-				ctx.ui.notify(
-					`[DRYKISS] Launching ${lens} subagent with ${model.name}...`,
-					"info",
-				);
-				return runLensSubagent(
+				w.setLensRunning(lens);
+				const result = await runLensSubagent(
 					ctx,
 					ctx.cwd,
 					model,
@@ -383,10 +400,26 @@ export async function handleDrykissCommand(
 					prompt.userPrompt,
 					lens,
 				);
+				if (result.errorMessage) {
+					w.setLensError(lens, result.errorMessage);
+				} else {
+					let count = 0;
+					try {
+						const arr = JSON.parse(
+							(result.text.match(/\[[\s\S]*\]/)?.[0] ?? result.text) || "[]",
+						);
+						count = Array.isArray(arr) ? arr.length : 0;
+					} catch {
+						/* ignore parse errors */
+					}
+					w.setLensDone(lens, result.durationMs, count);
+				}
+				return result;
 			}),
 		);
 
 		// Synthesize results
+		widget.setSynthesizing();
 		const synthesis = await runSynthesis(
 			ctx,
 			ctx.cwd,
@@ -396,6 +429,7 @@ export async function handleDrykissCommand(
 			})),
 			options.model,
 		);
+		widget.setSynthesisDone();
 
 		const persistPath = await saveReview(
 			ctx.cwd,
@@ -419,6 +453,7 @@ export async function handleDrykissCommand(
 		);
 		ctx.ui.notify(`Review persisted to: ${persistPath}`, "info");
 	} catch (err: any) {
+		widget?.dispose();
 		ctx.ui.notify(`DRYKISS review failed: ${err.message}`, "error");
 	}
 }

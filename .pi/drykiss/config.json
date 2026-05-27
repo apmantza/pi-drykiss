@@ -1,0 +1,13 @@
+{
+  "interactive": true,
+  "confirmBeforeRun": true,
+  "lensModels": {
+    "simplicity": "deepseek/deepseek-v4-flash",
+    "synthesis": "deepseek/deepseek-v4-pro",
+    "deduplication": "deepseek/deepseek-v4-flash",
+    "clarity": "deepseek/deepseek-v4-flash",
+    "resilience": "deepseek/deepseek-v4-flash",
+    "architecture": "deepseek/deepseek-v4-flash",
+    "tests": "deepseek/deepseek-v4-flash"
+  }
+}
