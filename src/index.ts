@@ -3,8 +3,6 @@ import type {
 	ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { createEditTracker } from "./edit-tracker.js";
-import { handleBeforeAgentStart } from "./auto-injector.js";
 import {
 	handleDrykissCommand,
 	handleKissCommand,
@@ -31,8 +29,6 @@ import { ReviewProgressWidget } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
 
 export default function (pi: ExtensionAPI): void {
-	const tracker = createEditTracker();
-
 	// ── Background review manager + live widget ────────────
 	const widget = new ReviewProgressWidget();
 	const manager = new ReviewManager(
@@ -169,56 +165,6 @@ export default function (pi: ExtensionAPI): void {
 			{ deliverAs: "followUp", triggerTurn: true },
 		);
 	}
-
-	// ── Track file edits across turns ──────────────────────
-	pi.on("tool_execution_end", (event: any, ctx: any) => {
-		try {
-			const { toolName, result } = event as {
-				type: "tool_execution_end";
-				toolName: string;
-				result: unknown;
-			};
-			tracker.trackEdit(toolName, result);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error("[pi-drykiss] tool_execution_end error:", err);
-			ctx.ui?.notify?.(`DRYKISS edit tracking failed: ${msg}`, "warning");
-		}
-	});
-
-	pi.on("turn_end", (event: any, ctx: any) => {
-		try {
-			const { turnIndex } = event as { type: "turn_end"; turnIndex: number };
-			tracker.onTurnEnd(turnIndex);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error("[pi-drykiss] turn_end error:", err);
-			ctx.ui?.notify?.(`DRYKISS turn tracking failed: ${msg}`, "warning");
-		}
-	});
-
-	// ── Auto-inject KISS/DRY checklist before next turn ────
-	pi.on("before_agent_start", (event: any, ctx: any) => {
-		try {
-			const lastEdits = tracker.getLastTurnEdits();
-			if (!lastEdits || lastEdits.files.length === 0) return;
-			const result = handleBeforeAgentStart(
-				event as {
-					type: "before_agent_start";
-					prompt: string;
-					systemPrompt: string;
-				},
-				lastEdits,
-			);
-			tracker.clearLastTurnEdits();
-			return result;
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error("[pi-drykiss] before_agent_start error:", err);
-			ctx.ui?.notify?.(`DRYKISS checklist injection failed: ${msg}`, "warning");
-			return undefined;
-		}
-	});
 
 	// ── /drykiss — Full multi-lens KISS/DRY review ─────────
 	pi.registerCommand(COMMAND_NAME, {

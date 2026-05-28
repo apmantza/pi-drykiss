@@ -304,6 +304,43 @@ describe("getFileContent", () => {
 		const result = await getFileContent("/cwd", "src/missing.ts");
 		expect(result).toBeNull();
 	});
+
+	// Security: Path traversal prevention tests
+	it("returns null for absolute Unix path", async () => {
+		const result = await getFileContent("/cwd", "/etc/passwd");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null for absolute Windows path", async () => {
+		const result = await getFileContent(
+			"/cwd",
+			"\\\\windows\\\\system32\\\\config\\\\sam",
+		);
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null for path with parent directory traversal", async () => {
+		const result = await getFileContent("/cwd", "src/../../etc/passwd");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null for path with tilde expansion", async () => {
+		const result = await getFileContent("/cwd", "~/secret.txt");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null for nested parent directory traversal", async () => {
+		const result = await getFileContent(
+			"/cwd",
+			"src/subdir/../../../etc/shadow",
+		);
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
 });
 
 describe("getProjectIndex", () => {

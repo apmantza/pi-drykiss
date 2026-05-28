@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { getGlobalBaseDir, CONFIG_FILE } from "./constants.js";
 
 export interface DrykissConfig {
 	/** Default model for all lenses when not specified */
@@ -24,15 +24,8 @@ export interface DrykissConfig {
 	contextMode?: "diff" | "full";
 }
 
-const CONFIG_DIR = ".pi/drykiss";
-const CONFIG_FILE = "config.json";
-
-function getGlobalConfigDir(): string {
-	return join(homedir(), CONFIG_DIR);
-}
-
 export function getConfigPath(_cwd: string): string {
-	return join(getGlobalConfigDir(), CONFIG_FILE);
+	return join(getGlobalBaseDir(), CONFIG_FILE);
 }
 
 export async function loadConfig(cwd: string): Promise<DrykissConfig> {
@@ -48,11 +41,9 @@ export async function loadConfig(cwd: string): Promise<DrykissConfig> {
 			return { interactive: true, confirmBeforeRun: true };
 		}
 		// JSON parse error: corrupt file — warn and fall back to defaults
+		// Note: Don't log err.message as it may contain the malformed JSON content
 		if (err instanceof SyntaxError) {
-			console.error(
-				"[DRYKISS] Config file is corrupt, using defaults:",
-				err.message,
-			);
+			console.error("[DRYKISS] Config file is corrupt, using defaults");
 			return { interactive: true, confirmBeforeRun: true };
 		}
 		const msg = err instanceof Error ? err.message : String(err);
@@ -65,7 +56,7 @@ export async function saveConfig(
 	cwd: string,
 	config: DrykissConfig,
 ): Promise<void> {
-	const dir = getGlobalConfigDir();
+	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
 	await writeFile(getConfigPath(cwd), JSON.stringify(config, null, 2), "utf8");
 }

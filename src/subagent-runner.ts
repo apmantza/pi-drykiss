@@ -18,6 +18,7 @@ import {
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
+import { extractAssistantText } from "./content-utils.js";
 
 export interface SubagentResult {
 	lens: string;
@@ -136,13 +137,4 @@ export async function runLensSubagent(
 		session,
 		...(errorMessage ? { errorMessage } : {}),
 	};
-}
-
-function extractAssistantText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((c: any) => !!c && typeof c === "object" && c.type === "text")
-		.map((c: any) => c.text ?? "")
-		.join("");
 }

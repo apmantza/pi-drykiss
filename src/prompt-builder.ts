@@ -1,9 +1,9 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { ChangedFile, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
+import { getGlobalBaseDir } from "./constants.js";
 
 export interface ReviewPrompt {
 	readonly lens: ReviewLens;
@@ -11,10 +11,8 @@ export interface ReviewPrompt {
 	readonly userPrompt: string;
 }
 
-const PROMPTS_DIR = ".pi/drykiss/prompts";
-
 function getGlobalPromptsDir(): string {
-	return join(homedir(), PROMPTS_DIR);
+	return join(getGlobalBaseDir(), "prompts");
 }
 
 const JSON_OUTPUT_INSTRUCTIONS = `
@@ -68,6 +66,21 @@ Rules:
 - Findings must be sorted by severity (critical first, then high, medium, low, nit)
 - confidence must be one of: confirmed, likely, suspect
 - verdict must be one of: Approve, Request changes, Needs security review
+`;
+
+// KISS/DRY checklist items to include in all lens prompts
+const KISS_DRY_CHECKLIST = `
+## Quick Self-Check
+When reviewing code, also verify these fundamental quality aspects:
+- **Simplicity**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners?
+- **DRY**: Is knowledge represented once? No copy-pasted logic or scattered conditionals?
+- **Names**: Do variables/functions reveal intent, not mechanism? (No 'temp', 'data', 'result' without context)
+- **Size**: Are functions focused on one thing? Any function worth splitting?
+- **Comments**: Do they explain WHY, not WHAT?
+- **Edge cases**: Are null, empty, and boundary values handled?
+- **Security**: Is user input validated at boundaries? No raw SQL concatenation?
+- **Resilience**: Are errors handled specifically, not swallowed? Are async failures caught?
+- **Architecture**: Does the change follow existing patterns? Is the interface small and the behavior rich (deep module)?
 `;
 
 // ── Default prompt bodies (without JSON output instructions) ────────────
@@ -484,8 +497,29 @@ async function loadPromptBody(
 ): Promise<string> {
 	try {
 		const raw = await readFile(getPromptPath(cwd, lens), "utf8");
+		// Handle null/undefined return (e.g., from mocks) — treat as missing file
+		if (raw == null) {
+			return lens === "synthesis"
+				? DEFAULT_SYNTHESIS_PROMPT
+				: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+		}
 		return raw.trim();
-	} catch {
+	} catch (err) {
+		// ENOENT: file doesn't exist — use default silently
+		if (
+			err instanceof Error &&
+			(err as NodeJS.ErrnoException).code === "ENOENT"
+		) {
+			return lens === "synthesis"
+				? DEFAULT_SYNTHESIS_PROMPT
+				: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+		}
+		// Other errors (permission denied, etc.) — log and use default
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(
+			`[DRYKISS] Failed to load prompt for ${lens}, using default:`,
+			msg,
+		);
 		return lens === "synthesis"
 			? DEFAULT_SYNTHESIS_PROMPT
 			: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
@@ -497,7 +531,7 @@ export async function loadLensSystemPrompt(
 	lens: Exclude<ReviewLens, "all">,
 ): Promise<string> {
 	const body = await loadPromptBody(cwd, lens);
-	return body + "\n" + JSON_OUTPUT_INSTRUCTIONS;
+	return body + "\n" + JSON_OUTPUT_INSTRUCTIONS + KISS_DRY_CHECKLIST;
 }
 
 export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {

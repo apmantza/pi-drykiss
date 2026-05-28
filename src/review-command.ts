@@ -72,7 +72,9 @@ async function gatherDiffs(
 		try {
 			const diff = await getFileDiff(pi, cwd, file.path, options);
 			diffs.set(file.path, diff);
-		} catch {
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.error(`[DRYKISS] Failed to get diff for ${file.path}:`, msg);
 			diffs.set(file.path, "(diff unavailable)");
 		}
 	}
@@ -94,6 +96,61 @@ async function gatherContents(
 		if (result) contents.set(file.path, result);
 	}
 	return contents;
+}
+
+/**
+ * Common review setup: parses args, gathers files, diffs, contents, and project index.
+ * Shared between handleDrykissCommand and handleSingleLensCommand.
+ */
+async function prepareReview(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+	needsProjectIndex: boolean,
+): Promise<{
+	options: ParsedArgs;
+	files: ChangedFile[];
+	diffs: Map<string, string>;
+	contents:
+		| Map<string, { content: string; lineCount: number; truncated: boolean }>
+		| undefined;
+	projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined;
+	config: Awaited<ReturnType<typeof loadConfig>>;
+} | null> {
+	const options = parseArgs(args);
+	const files = await getChangedFiles(pi, ctx.cwd, options);
+
+	if (files.length === 0) {
+		const msg = options.all
+			? "No source files found. Ensure your project has files in src/, lib/, app/, or packages/."
+			: "No changed files found. Specify file paths, use --all, or make some changes first.";
+		ctx.ui.notify(msg, "info");
+		return null;
+	}
+
+	if (!options.all && files.length > MAX_FILES) {
+		ctx.ui.notify(
+			`Too many changed files (${files.length}). DRYKISS reviews max ${MAX_FILES} files at a time. Run with specific files to review others.`,
+			"warning",
+		);
+		return null;
+	}
+
+	await ensureDefaultPrompts(ctx.cwd);
+	const config = await loadConfig(ctx.cwd);
+
+	// --all implies full context (diffs are empty for unchanged files)
+	const contextMode = options.all ? "full" : config.contextMode;
+
+	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+	const contents =
+		contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
+	const projectIndex =
+		needsProjectIndex && contextMode !== "diff"
+			? await getProjectIndex(ctx.cwd)
+			: undefined;
+
+	return { options, files, diffs, contents, projectIndex, config };
 }
 
 export interface ParseFindingsResult {
@@ -206,43 +263,15 @@ export async function handleDrykissCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
+	const prepared = await prepareReview(args, ctx, pi, true);
+	if (!prepared) return;
 
-	if (files.length === 0) {
-		const msg = options.all
-			? "No source files found. Ensure your project has files in src/, lib/, app/, or packages/."
-			: "No changed files found. Specify file paths, use --all, or make some changes first.";
-		ctx.ui.notify(msg, "info");
-		return;
-	}
-
-	if (!options.all && files.length > MAX_FILES) {
-		ctx.ui.notify(
-			`Too many changed files (${files.length}). DRYKISS reviews max ${MAX_FILES} files at a time. Run with specific files to review others.`,
-			"warning",
-		);
-		return;
-	}
-
-	const config = await loadConfig(ctx.cwd);
-
-	// --all implies full context (diffs are empty for unchanged files)
-	const contextMode = options.all ? "full" : config.contextMode;
-
-	// Ensure default prompts exist on disk so users can customize
-	await ensureDefaultPrompts(ctx.cwd);
-
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const contents =
-		contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
-	const projectIndex =
-		contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
-
+	const { options, files, diffs, contents, projectIndex, config } = prepared;
 	const fileList = files.map((f) => f.path).join(", ");
 
 	// Confirmation (respect config)
 	if (config.confirmBeforeRun !== false) {
+		const contextMode = options.all ? "full" : config.contextMode;
 		const contextLabel =
 			contextMode === "diff" ? "diff only" : "full file + project index";
 		const scopeLabel = options.all ? "full project scan" : "changed files";
@@ -287,25 +316,10 @@ async function handleSingleLensCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
+	const prepared = await prepareReview(args, ctx, pi, needsProjectIndex);
+	if (!prepared) return;
 
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
-		return;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
-	const projectIndex =
-		needsProjectIndex && config.contextMode !== "diff"
-			? await getProjectIndex(ctx.cwd)
-			: undefined;
+	const { options, files, diffs, contents, projectIndex } = prepared;
 
 	try {
 		const jobId = await manager.startReview(

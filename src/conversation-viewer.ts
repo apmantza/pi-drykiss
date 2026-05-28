@@ -8,6 +8,7 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ReviewJob } from "./review-manager.js";
+import { extractAssistantText } from "./content-utils.js";
 
 export class ConversationViewer implements Component {
 	private scrollOffset = 0;
@@ -52,7 +53,7 @@ export class ConversationViewer implements Component {
 						const text =
 							typeof msg.content === "string"
 								? msg.content
-								: extractText(msg.content);
+								: extractAssistantText(msg.content);
 						for (const chunk of chunkLine(text, 180)) {
 							lines.push(fg("dim", `│ [User]: ${chunk}`));
 						}
@@ -76,7 +77,7 @@ export class ConversationViewer implements Component {
 						const text =
 							typeof msg.content === "string"
 								? msg.content
-								: extractText(msg.content);
+								: extractAssistantText(msg.content);
 						for (const chunk of chunkLine(text, 150)) {
 							lines.push(fg("muted", `│ [Result (${msg.toolName})]: ${chunk}`));
 						}
@@ -153,15 +154,6 @@ export class ConversationViewer implements Component {
 			);
 		}
 	}
-}
-
-function extractText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((c: any) => c && typeof c === "object" && c.type === "text")
-		.map((c: any) => c.text ?? "")
-		.join("");
 }
 
 function chunkLine(text: string, max: number): string[] {

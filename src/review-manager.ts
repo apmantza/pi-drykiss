@@ -166,7 +166,11 @@ export class ReviewManager {
 					}
 				}
 				this.runningCount--;
-				this.onUpdate?.(job!);
+				try {
+					this.onUpdate?.(job!);
+				} catch {
+					/* don't let callback errors crash the loop */
+				}
 				console.error(`[DRYKISS] runLens crashed for ${task.lens}:`, err);
 			});
 		}
@@ -190,7 +194,11 @@ export class ReviewManager {
 
 		const state = job.states.get(task.lens)!;
 		state.status = "running";
-		this.onUpdate?.(job);
+		try {
+			this.onUpdate?.(job);
+		} catch {
+			/* don't let callback errors crash the loop */
+		}
 
 		const result = await runLensSubagent(
 			ctx,
@@ -222,16 +230,17 @@ export class ReviewManager {
 					`[DRYKISS] Failed to parse findings JSON for ${task.lens}:`,
 					msg,
 				);
-				console.error(
-					`[DRYKISS] Raw output (first 500 chars):`,
-					state.rawOutput.slice(0, 500),
-				);
+				// Note: Raw output not logged to avoid sensitive data exposure
 				state.findingsCount = 0;
 			}
 		}
 
 		this.runningCount--;
-		this.onUpdate?.(job);
+		try {
+			this.onUpdate?.(job);
+		} catch {
+			/* don't let callback errors crash the loop */
+		}
 
 		// Check if all lenses for this job are done
 		const allDone = job.lenses.every((l) => {
@@ -239,10 +248,16 @@ export class ReviewManager {
 			return s.status === "done" || s.status === "error";
 		});
 
-		if (allDone && job.synthesisStatus === "idle" && !job.synthesisTriggered) {
-			job.synthesisTriggered = true;
+		// Atomic check-and-set: use compareExchange pattern to prevent race condition
+		if (allDone && job.synthesisStatus === "idle") {
+			// Atomically transition from idle -> running (only one lens can win this)
 			job.synthesisStatus = "running";
-			this.onUpdate?.(job);
+			job.synthesisTriggered = true;
+			try {
+				this.onUpdate?.(job);
+			} catch {
+				/* don't let callback errors crash the loop */
+			}
 			try {
 				await this.runSynthesis(ctx, cwd, job);
 			} catch {
@@ -250,8 +265,10 @@ export class ReviewManager {
 			}
 		}
 
-		// Keep draining
-		this.drain(ctx, pi, cwd);
+		// Keep draining - catch errors to prevent unhandled rejections
+		this.drain(ctx, pi, cwd).catch((err) => {
+			console.error(`[DRYKISS] drain failed:`, err);
+		});
 	}
 
 	private async runSynthesis(

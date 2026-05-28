@@ -178,6 +178,24 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].systemPrompt).toContain("Output ONLY the JSON array");
 	});
 
+	it("includes KISS/DRY checklist in system prompts", async () => {
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"simplicity",
+		);
+		expect(prompts[0].systemPrompt).toContain("Quick Self-Check");
+		expect(prompts[0].systemPrompt).toContain(
+			"Is the new code as simple as the problem allows",
+		);
+		expect(prompts[0].systemPrompt).toContain("Is knowledge represented once");
+		expect(prompts[0].systemPrompt).toContain(
+			"Do variables/functions reveal intent",
+		);
+		expect(prompts[0].systemPrompt).toContain("Do they explain WHY, not WHAT");
+	});
+
 	it("includes project index for deduplication lens", async () => {
 		const index = [{ path: "src/lib.ts", exports: ["helper", "util"] }];
 		const prompts = await buildReviewPrompts(
@@ -232,10 +250,10 @@ describe("buildSynthesisPrompt", () => {
 });
 
 describe("buildAutoInjectBlock", () => {
-	it("returns null when no files", () => {
+	it("returns block with empty file list when no files", () => {
 		const block = buildAutoInjectBlock({ files: [] });
 		expect(block).toContain("KISS/DRY Quick Check");
-		expect(block).toContain("You edited:");
+		expect(block).toContain("You edited: ");
 	});
 
 	it("lists edited files", () => {
