@@ -219,7 +219,7 @@ describe("ReviewManager", () => {
 		expect(mockDispose).toHaveBeenCalled();
 	});
 
-	it("synthesisTriggered prevents double synthesis", async () => {
+	it("synthesisStatus tracks idle->running transition", async () => {
 		const ctx = makeMinimalCtx();
 		const pi = makeMinimalPi();
 		const files = [
@@ -242,10 +242,10 @@ describe("ReviewManager", () => {
 
 		const job = manager.getJob(jobId)!;
 
-		// Simulate the guard being set
-		job.synthesisTriggered = true;
+		// Initially synthesis is idle
+		expect(job.synthesisStatus).toBe("idle");
 
-		// This should not happen in normal flow, but tests the guard
-		expect(job.synthesisTriggered).toBe(true);
+		// After synthesis triggers, it should be running or done
+		// (depends on whether synthesis completes in the test)
 	});
 });

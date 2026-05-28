@@ -72,3 +72,32 @@ export interface EditedFile {
 	readonly path: string;
 	readonly language: string | null;
 }
+
+/**
+ * Map a raw JSON object from LLM output to a Finding.
+ * Handles missing/undefined fields with sensible defaults.
+ */
+export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
+	return {
+		file: String(raw.file ?? "unknown"),
+		line: typeof raw.line === "number" ? raw.line : undefined,
+		severity: String(raw.severity ?? "medium") as Severity,
+		category: String(raw.category ?? ""),
+		summary: String(raw.summary ?? ""),
+		detail: String(raw.detail ?? raw.summary ?? ""),
+		suggestion: String(raw.suggestion ?? ""),
+		confidence: raw.confidence
+			? (String(raw.confidence) as "confirmed" | "likely" | "suspect")
+			: undefined,
+		lens,
+	};
+}
+
+/**
+ * Parse a JSON array of findings from LLM output.
+ * Returns empty array on failure (does not throw).
+ */
+export function parseFindingsArray(raw: unknown, lens?: ReviewLens): Finding[] {
+	if (!Array.isArray(raw)) return [];
+	return raw.map((f) => mapRawToFinding(f, lens));
+}

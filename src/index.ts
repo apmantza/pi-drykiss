@@ -57,7 +57,9 @@ export default function (pi: ExtensionAPI): void {
 			const s = job.synthesisResult;
 			const hasError =
 				job.overallStatus === "error" ||
-				job.lenses.some((l: string) => job.states.get(l)!.status === "error");
+				job.lenses.some(
+					(l: string) => (job.states as any)[l]?.status === "error",
+				);
 			const hasCritical = s && s.criticalCount > 0;
 			const hasHigh = s && s.highCount > 0;
 
@@ -145,9 +147,10 @@ export default function (pi: ExtensionAPI): void {
 			: "Review completed but synthesis produced no output.";
 
 		// Strip session objects (contain non-cloneable async handlers) before sending
+		// Convert Map to plain object for serialization (structured clone fails on Maps)
 		const serializableJob = {
 			...job,
-			states: new Map(
+			states: Object.fromEntries(
 				[...job.states.entries()].map(([lens, state]) => [
 					lens,
 					{ ...state, session: undefined },
@@ -160,7 +163,7 @@ export default function (pi: ExtensionAPI): void {
 				customType: "drykiss-review-complete",
 				content: report,
 				display: true,
-				details: serializableJob as ReviewJob,
+				details: serializableJob as unknown as ReviewJob,
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
 		);

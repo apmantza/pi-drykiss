@@ -19,8 +19,8 @@ import type {
 	ReviewOptions,
 	ChangedFile,
 	Finding,
-	Severity,
 } from "./types.js";
+import { parseFindingsArray } from "./types.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -66,8 +66,9 @@ async function gatherDiffs(
 	cwd: string,
 	files: ChangedFile[],
 	options: ReviewOptions,
-): Promise<Map<string, string>> {
+): Promise<{ diffs: Map<string, string>; failedFiles: string[] }> {
 	const diffs = new Map<string, string>();
+	const failedFiles: string[] = [];
 	for (const file of files) {
 		try {
 			const diff = await getFileDiff(pi, cwd, file.path, options);
@@ -76,9 +77,10 @@ async function gatherDiffs(
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error(`[DRYKISS] Failed to get diff for ${file.path}:`, msg);
 			diffs.set(file.path, "(diff unavailable)");
+			failedFiles.push(file.path);
 		}
 	}
-	return diffs;
+	return { diffs, failedFiles };
 }
 
 async function gatherContents(
@@ -142,7 +144,13 @@ async function prepareReview(
 	// --all implies full context (diffs are empty for unchanged files)
 	const contextMode = options.all ? "full" : config.contextMode;
 
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+	const { diffs, failedFiles } = await gatherDiffs(pi, ctx.cwd, files, options);
+	if (failedFiles.length > 0) {
+		ctx.ui.notify(
+			`[DRYKISS] Could not retrieve diffs for: ${failedFiles.join(", ")}. Review will use available diffs.`,
+			"warning",
+		);
+	}
 	const contents =
 		contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
 	const projectIndex =
@@ -158,10 +166,50 @@ export interface ParseFindingsResult {
 	parseError?: string;
 }
 
+/**
+ * Attempt to repair common LLM JSON issues:
+ * - Unescaped control characters (newlines, tabs) inside strings
+ * - Trailing commas before } or ]
+ * - Markdown code fences around JSON
+ */
+function sanitizeJsonString(raw: string): string {
+	let s = raw;
+
+	// Remove markdown code fences if present
+	s = s.replace(/```(?:json)?\s*/gi, "");
+
+	// Replace literal newlines/tabs inside strings with escaped versions
+	// This regex is imperfect but handles most cases
+	s = s.replace(/"([^"]*)"/g, (_match, content: string) => {
+		// Only sanitize if the content contains problematic characters
+		if (
+			content.includes("\n") ||
+			content.includes("\t") ||
+			content.includes("\r")
+		) {
+			const sanitized = content
+				.replace(/\r\n/g, " ")
+				.replace(/\n/g, " ")
+				.replace(/\t/g, " ")
+				.replace(/"/g, '\\"');
+			return `"${sanitized}"`;
+		}
+		return _match;
+	});
+
+	// Remove trailing commas before } or ]
+	s = s.replace(/,\s*([}\]])/g, "$1");
+
+	return s;
+}
+
 function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
+	// First, try to extract JSON array from the output
+	const jsonMatch = raw.match(/\[[\s\S]*\]/);
+	const jsonStr = jsonMatch ? jsonMatch[0] : raw;
+
+	// Try parsing as-is first
 	try {
-		const jsonMatch = raw.match(/\[[\s\S]*\]/);
-		const jsonStr = jsonMatch ? jsonMatch[0] : raw;
 		const parsed = JSON.parse(jsonStr);
 		if (!Array.isArray(parsed)) {
 			console.warn(
@@ -174,21 +222,38 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 			};
 		}
 		return {
-			findings: parsed.map((f: any) => ({
-				file: String(f.file ?? "unknown"),
-				line: typeof f.line === "number" ? f.line : undefined,
-				severity: String(f.severity ?? "medium") as Severity,
-				category: String(f.category ?? ""),
-				summary: String(f.summary ?? ""),
-				detail: String(f.detail ?? f.summary ?? ""),
-				suggestion: String(f.suggestion ?? ""),
-				lens,
-			})),
+			findings: parseFindingsArray(parsed, lens),
 		};
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error(`[DRYKISS] Failed to parse JSON for ${lens} lens:`, msg);
-		console.error(`[DRYKISS] Raw output (first 800 chars):`, raw.slice(0, 800));
+	} catch {
+		// If initial parse fails, try sanitizing the JSON
+		try {
+			const sanitized = sanitizeJsonString(jsonStr);
+			const parsed = JSON.parse(sanitized);
+			if (Array.isArray(parsed)) {
+				console.log(
+					`[DRYKISS] ${lens} lens: JSON repaired successfully after sanitization`,
+				);
+				return {
+					findings: parseFindingsArray(parsed, lens),
+				};
+			}
+		} catch (sanitizationErr) {
+			// Sanitization didn't help, fall through to error
+			console.error(
+				`[DRYKISS] JSON sanitization failed for ${lens}:`,
+				sanitizationErr instanceof Error
+					? sanitizationErr.message
+					: String(sanitizationErr),
+			);
+		}
+
+		// Both attempts failed
+		const msg = `Failed to parse JSON. The LLM output may contain unescaped characters.`;
+		console.error(`[DRYKISS] Failed to parse JSON for ${lens} lens.`);
+		console.error(
+			`[DRYKISS] Raw output (first 1200 chars):`,
+			raw.slice(0, 1200),
+		);
 		return { findings: [], parseError: msg };
 	}
 }
@@ -562,7 +627,17 @@ export async function executeDrykissReviewTool(
 				}));
 
 	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, filesToReview, options);
+	const { diffs, failedFiles } = await gatherDiffs(
+		pi,
+		ctx.cwd,
+		filesToReview,
+		options,
+	);
+	if (failedFiles.length > 0) {
+		console.warn(
+			`[DRYKISS] Could not retrieve diffs for: ${failedFiles.join(", ")}`,
+		);
+	}
 	const config = await loadConfig(ctx.cwd);
 	const contents =
 		config.contextMode !== "diff"

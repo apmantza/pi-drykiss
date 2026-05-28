@@ -24,14 +24,10 @@ export async function handleConfigCommand(
 			`**Default model:** ${config.defaultModel ?? "(not set — will prompt on first use)"}`,
 			"",
 			"**Per-lens models:**",
-			`  simplicity:     ${config.lensModels?.simplicity ?? "(inherits default)"}`,
-			`  deduplication:  ${config.lensModels?.deduplication ?? "(inherits default)"}`,
-			`  clarity:        ${config.lensModels?.clarity ?? "(inherits default)"}`,
-			`  resilience:     ${config.lensModels?.resilience ?? "(inherits default)"}`,
-			`  architecture:   ${config.lensModels?.architecture ?? "(inherits default)"}`,
-			`  tests:          ${config.lensModels?.tests ?? "(inherits default)"}`,
-			`  security:       ${config.lensModels?.security ?? "(inherits default)"}`,
-			`  synthesis:      ${config.lensModels?.synthesis ?? "(inherits default)"}`,
+			...[...LENS_NAMES, "synthesis"].map(
+				(lens) =>
+					`  ${lens.padEnd(15)} ${config.lensModels?.[lens as keyof typeof config.lensModels] ?? "(inherits default)"}`,
+			),
 			"",
 			`**Interactive prompts:** ${config.interactive !== false ? "enabled" : "disabled"}`,
 			`**Confirm before run:** ${config.confirmBeforeRun !== false ? "enabled" : "disabled"}`,

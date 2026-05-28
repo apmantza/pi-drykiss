@@ -6,12 +6,26 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
-import { LENS_NAMES } from "./types.js";
+import { LENS_NAMES, mapRawToFinding } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 
 const CONCURRENCY = 3;
+
+/** Create a fallback SynthesisResult for error cases. */
+function createFallbackSynthesis(summary: string): SynthesisResult {
+	return {
+		findings: [],
+		summary,
+		verdict: "Request changes",
+		criticalCount: 0,
+		highCount: 0,
+		mediumCount: 0,
+		lowCount: 0,
+		nitCount: 0,
+	};
+}
 
 export type LensStatus = "queued" | "running" | "done" | "error";
 
@@ -32,8 +46,6 @@ export interface ReviewJob {
 	lenses: ReviewLens[];
 	states: Map<ReviewLens, LensState>;
 	synthesisStatus: "idle" | "running" | "done" | "error";
-	/** Guard to prevent race-condition double-triggering of synthesis. */
-	synthesisTriggered: boolean;
 	synthesisResult?: SynthesisResult;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
@@ -120,7 +132,6 @@ export class ReviewManager {
 			lenses,
 			states,
 			synthesisStatus: "idle",
-			synthesisTriggered: false,
 			overallStatus: "running",
 			startedAt: Date.now(),
 		};
@@ -250,9 +261,7 @@ export class ReviewManager {
 
 		// Atomic check-and-set: use compareExchange pattern to prevent race condition
 		if (allDone && job.synthesisStatus === "idle") {
-			// Atomically transition from idle -> running (only one lens can win this)
 			job.synthesisStatus = "running";
-			job.synthesisTriggered = true;
 			try {
 				this.onUpdate?.(job);
 			} catch {
@@ -309,16 +318,9 @@ export class ReviewManager {
 			job.synthesisStatus = "done";
 		} catch (err: any) {
 			job.synthesisStatus = "error";
-			job.synthesisResult = {
-				findings: [],
-				summary: `Synthesis failed: ${err.message}`,
-				verdict: "Request changes",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-			};
+			job.synthesisResult = createFallbackSynthesis(
+				`Synthesis failed: ${err.message}`,
+			);
 		}
 
 		job.overallStatus =
@@ -345,24 +347,7 @@ export class ReviewManager {
 				throw new Error("Not an object");
 			}
 			const findings = Array.isArray(parsed.findings)
-				? (parsed.findings as any[]).map((f: any) => ({
-						file: String(f.file ?? "unknown"),
-						line: typeof f.line === "number" ? f.line : undefined,
-						severity: String(f.severity ?? "medium") as
-							| "critical"
-							| "high"
-							| "medium"
-							| "low"
-							| "nit",
-						category: String(f.category ?? ""),
-						summary: String(f.summary ?? ""),
-						detail: String(f.detail ?? f.summary ?? ""),
-						suggestion: String(f.suggestion ?? ""),
-						confidence: String(f.confidence ?? "likely") as
-							| "confirmed"
-							| "likely"
-							| "suspect",
-					}))
+				? (parsed.findings as any[]).map((f) => mapRawToFinding(f))
 				: [];
 			return {
 				findings,
@@ -383,17 +368,9 @@ export class ReviewManager {
 				"[DRYKISS] Synthesis raw output (first 800 chars):",
 				raw.slice(0, 800),
 			);
-			return {
-				findings: [],
-				summary:
-					"Synthesis returned non-JSON output. Raw response available in logs.",
-				verdict: "Request changes",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-			};
+			return createFallbackSynthesis(
+				"Synthesis returned non-JSON output. Raw response available in logs.",
+			);
 		}
 	}
 

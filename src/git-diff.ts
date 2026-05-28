@@ -215,6 +215,13 @@ export async function getFileContent(
 			: raw;
 		return { content, lineCount: lines.length, truncated };
 	} catch (err) {
+		// ENOENT is expected for missing files (e.g., deleted files in git status)
+		if (
+			err instanceof Error &&
+			(err as NodeJS.ErrnoException).code === "ENOENT"
+		) {
+			return null;
+		}
 		const msg = err instanceof Error ? err.message : String(err);
 		console.error(`[DRYKISS] Failed to read ${filePath}:`, msg);
 		return null;
