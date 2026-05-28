@@ -57,12 +57,12 @@ export async function resolveModelSmart(
 					...config.lensModels,
 					[lens]: `${selected.provider}/${selected.id}`,
 				};
-			} else {
-				config.defaultModel = `${selected.provider}/${selected.id}`;
 			}
+			// Always save as default so remaining lenses don't re-prompt
+			config.defaultModel = `${selected.provider}/${selected.id}`;
 			await saveConfig(cwd, config);
 			ctx.ui.notify(
-				`Saved ${selected.name} as default for ${lens ?? "all reviews"}.`,
+				`Saved ${selected.name} as default${lens ? ` for ${lens}` : ""}.`,
 				"info",
 			);
 			return selected;

@@ -37,7 +37,7 @@ function buildModelDescription(m: Model<Api>): string {
 }
 
 function calculatePopupWidth(items: SelectItem[], title: string): number {
-	const prefixWidth = 2; // "→ " or "  "
+	const prefixWidth = 2;
 	const primaryGap = 2;
 	const boxPadding = 2;
 	const safetyMargin = 2;
@@ -53,21 +53,12 @@ function calculatePopupWidth(items: SelectItem[], title: string): number {
 			? Math.max(...itemsWithDesc.map((i) => visibleWidth(i.description || "")))
 			: 0;
 
-	const helpWidth = visibleWidth("↑↓ navigate • enter select • esc cancel");
-
 	const contentWidth =
 		maxDescWidth > 0
 			? prefixWidth + Math.max(maxLabelWidth + primaryGap, 20) + maxDescWidth
 			: prefixWidth + maxLabelWidth;
 
-	return Math.min(
-		Math.max(
-			contentWidth + boxPadding + safetyMargin,
-			helpWidth + boxPadding,
-			40,
-		),
-		120,
-	);
+	return Math.min(contentWidth + boxPadding + safetyMargin, 80);
 }
 
 export async function selectModel(
@@ -89,6 +80,8 @@ export async function selectModel(
 	});
 
 	const optimalWidth = calculatePopupWidth(items, title);
+
+	const maxHeight = Math.min(items.length + 8, 28);
 
 	const selectedValue = await ctx.ui.custom<string | null>(
 		(_tui: any, theme: any, _kb: any, done: any) => {
@@ -130,14 +123,24 @@ export async function selectModel(
 			);
 
 			return {
-				render: (w: number) => box.render(w),
+				render: (w: number) => {
+					const rendered = box.render(w);
+					// Pad to fill the overlay area so Pi's UI doesn't show through
+					const padLine = bgColor(" ".repeat(w));
+					while (rendered.length < maxHeight) rendered.push(padLine);
+					return rendered;
+				},
 				invalidate: () => box.invalidate(),
 				handleInput: (data: string) => selectList.handleInput(data),
 			};
 		},
 		{
 			overlay: true,
-			overlayOptions: { width: optimalWidth, anchor: "center" },
+			overlayOptions: {
+				width: optimalWidth,
+				maxHeight,
+				anchor: "center",
+			},
 		},
 	);
 
