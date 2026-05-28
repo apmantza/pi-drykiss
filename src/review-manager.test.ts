@@ -130,6 +130,8 @@ describe("ReviewManager", () => {
 				lenses: ["simplicity"],
 			},
 		);
+		// Small delay to ensure distinct timestamps
+		await new Promise((r) => setTimeout(r, 10));
 		const id2 = await manager.startReview(
 			ctx,
 			pi,
