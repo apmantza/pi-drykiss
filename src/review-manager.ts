@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type {
 	ReviewLens,
@@ -13,11 +16,7 @@ import { findModelByHint } from "./llm.js";
 
 const CONCURRENCY = 3;
 
-export type LensStatus =
-	| "queued"
-	| "running"
-	| "done"
-	| "error";
+export type LensStatus = "queued" | "running" | "done" | "error";
 
 export interface LensState {
 	status: LensStatus;
@@ -60,10 +59,7 @@ export class ReviewManager {
 	/** Number of lens subagents currently running. */
 	private runningCount = 0;
 
-	constructor(
-		onUpdate?: OnReviewUpdate,
-		onComplete?: OnReviewComplete,
-	) {
+	constructor(onUpdate?: OnReviewUpdate, onComplete?: OnReviewComplete) {
 		this.onUpdate = onUpdate;
 		this.onComplete = onComplete;
 	}
@@ -75,14 +71,9 @@ export class ReviewManager {
 		files: ChangedFile[],
 		diffs: Map<string, string>,
 		contents:
-			| Map<
-					string,
-					{ content: string; lineCount: number; truncated: boolean }
-			  >
+			| Map<string, { content: string; lineCount: number; truncated: boolean }>
 			| undefined,
-		projectIndex:
-			| import("./git-diff.js").ProjectIndexEntry[]
-			| undefined,
+		projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined,
 		options: {
 			model?: string;
 		},
@@ -163,15 +154,8 @@ export class ReviewManager {
 		return id;
 	}
 
-	private async drain(
-		ctx: ExtensionContext,
-		pi: ExtensionAPI,
-		cwd: string,
-	) {
-		while (
-			this.taskQueue.length > 0 &&
-			this.runningCount < CONCURRENCY
-		) {
+	private async drain(ctx: ExtensionContext, pi: ExtensionAPI, cwd: string) {
+		while (this.taskQueue.length > 0 && this.runningCount < CONCURRENCY) {
 			const task = this.taskQueue.shift()!;
 			this.runningCount++;
 			this.runLens(ctx, pi, cwd, task).catch(() => {
@@ -219,8 +203,8 @@ export class ReviewManager {
 			state.rawOutput = result.text || "[]";
 			try {
 				const arr = JSON.parse(
-					(state.rawOutput.match(/\[[\s\S]*\]/)?.[0] ??
-						state.rawOutput) || "[]",
+					(state.rawOutput.match(/\[[\s\S]*\]/)?.[0] ?? state.rawOutput) ||
+						"[]",
 				);
 				state.findingsCount = Array.isArray(arr) ? arr.length : 0;
 			} catch {
@@ -264,8 +248,10 @@ export class ReviewManager {
 			rawOutput: job.states.get(l)!.rawOutput,
 		}));
 
-		const { systemPrompt, userPrompt } =
-			await buildSynthesisPrompt(cwd, lensReviews);
+		const { systemPrompt, userPrompt } = await buildSynthesisPrompt(
+			cwd,
+			lensReviews,
+		);
 
 		const model = await resolveModel(ctx, cwd, "synthesis");
 
@@ -374,19 +360,14 @@ export class ReviewManager {
 	}
 
 	listJobs(): ReviewJob[] {
-		return [...this.jobs.values()].sort(
-			(a, b) => b.startedAt - a.startedAt,
-		);
+		return [...this.jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
 	}
 
 	/** Clean up completed jobs older than 10 minutes. */
 	private cleanup() {
 		const cutoff = Date.now() - 10 * 60_000;
 		for (const [id, job] of this.jobs) {
-			if (
-				job.overallStatus === "done" ||
-				job.overallStatus === "error"
-			) {
+			if (job.overallStatus === "done" || job.overallStatus === "error") {
 				if ((job.completedAt ?? 0) < cutoff) {
 					this.jobs.delete(id);
 				}

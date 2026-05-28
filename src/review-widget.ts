@@ -45,10 +45,7 @@ export class ReviewProgressWidget {
 		const lines: string[] = [];
 
 		for (const job of this.jobs) {
-			if (
-				job.overallStatus !== "running" &&
-				job.overallStatus !== "queued"
-			) {
+			if (job.overallStatus !== "running" && job.overallStatus !== "queued") {
 				continue;
 			}
 
@@ -62,8 +59,7 @@ export class ReviewProgressWidget {
 				const lens = job.lenses[i];
 				const s = job.states.get(lens)!;
 				const isLast =
-					i === job.lenses.length - 1 &&
-					job.synthesisStatus === "idle";
+					i === job.lenses.length - 1 && job.synthesisStatus === "idle";
 				const branch = isLast ? "└─" : "├─";
 				lines.push(
 					truncate(this.renderLensLine(branch, lens, s, theme, frame)),
@@ -89,7 +85,13 @@ export class ReviewProgressWidget {
 	private renderLensLine(
 		branch: string,
 		lens: string,
-		state: { status: LensStatus; modelName: string; durationMs: number; errorMessage?: string; findingsCount: number },
+		state: {
+			status: LensStatus;
+			modelName: string;
+			durationMs: number;
+			errorMessage?: string;
+			findingsCount: number;
+		},
 		theme: Theme,
 		frame: string,
 	): string {
@@ -104,10 +106,11 @@ export class ReviewProgressWidget {
 		} else if (state.status === "done") {
 			icon = theme.fg("success", "✓");
 			const findings =
-				state.findingsCount > 0
-					? ` · ${state.findingsCount} findings`
-					: "";
-			statusText = theme.fg("dim", `${(state.durationMs / 1000).toFixed(1)}s${findings}`);
+				state.findingsCount > 0 ? ` · ${state.findingsCount} findings` : "";
+			statusText = theme.fg(
+				"dim",
+				`${(state.durationMs / 1000).toFixed(1)}s${findings}`,
+			);
 		} else {
 			icon = theme.fg("error", "✗");
 			statusText = theme.fg(

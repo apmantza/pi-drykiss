@@ -11,11 +11,7 @@ import {
 	getFileContent,
 	getProjectIndex,
 } from "./git-diff.js";
-import {
-	buildReviewPrompts,
-	ensureDefaultPrompts,
-} from "./prompt-builder.js";
-
+import { buildReviewPrompts, ensureDefaultPrompts } from "./prompt-builder.js";
 
 import { loadConfig } from "./config.js";
 import { findModelByHint } from "./llm.js";
@@ -121,8 +117,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): Finding[] {
 	}
 }
 
-
-
 async function runLensReview(
 	ctx: ExtensionContext,
 	cwd: string,
@@ -180,8 +174,6 @@ async function runLensReview(
 	const findings = parseFindingsJson(rawOutput, lens);
 	return { lens, findings, rawOutput, modelName: result.modelName };
 }
-
-
 
 export async function handleDrykissCommand(
 	args: string,

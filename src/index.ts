@@ -71,8 +71,7 @@ export default function (pi: ExtensionAPI): void {
 						: theme.fg("success", "✓");
 
 			const statusText =
-				job.overallStatus === "error" ? "completed with errors"
-				: "completed";
+				job.overallStatus === "error" ? "completed with errors" : "completed";
 
 			let line = `${icon} ${theme.bold(`DRYKISS Review`)} ${theme.fg("dim", statusText)}`;
 
@@ -89,7 +88,9 @@ export default function (pi: ExtensionAPI): void {
 			if (parts.length) {
 				line +=
 					"\n  " +
-					parts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `);
+					parts
+						.map((p) => theme.fg("dim", p))
+						.join(` ${theme.fg("dim", "·")} `);
 			}
 
 			// Verdict
@@ -115,11 +116,12 @@ export default function (pi: ExtensionAPI): void {
 					line += "\n" + theme.fg("dim", `  ${rl}`);
 				}
 				if (reportLines.length > 40) {
-					line += "\n" + theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
+					line +=
+						"\n" +
+						theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
 				}
 			} else if (s?.summary) {
-				line +=
-					"\n  " + theme.fg("dim", `⎿  ${s.summary.slice(0, 80)}`);
+				line += "\n  " + theme.fg("dim", `⎿  ${s.summary.slice(0, 80)}`);
 			}
 
 			return new Text(line, 0, 0);
