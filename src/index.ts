@@ -295,7 +295,7 @@ export default function (pi: ExtensionAPI): void {
 	// ── /drykiss-history — Browse past reviews ─────────────
 	pi.registerCommand("drykiss-history", {
 		description:
-			"Show past KISS/DRY review results persisted to .pi/drykiss/reviews/",
+			"Show past KISS/DRY review results persisted to ~/.pi/drykiss/reviews/",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const reviews = await listReviews(ctx.cwd);
 			if (reviews.length === 0) {

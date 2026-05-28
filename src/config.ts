@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
 export interface DrykissConfig {
 	/** Default model for all lenses when not specified */
@@ -26,8 +27,12 @@ export interface DrykissConfig {
 const CONFIG_DIR = ".pi/drykiss";
 const CONFIG_FILE = "config.json";
 
-export function getConfigPath(cwd: string): string {
-	return join(cwd, CONFIG_DIR, CONFIG_FILE);
+function getGlobalConfigDir(): string {
+	return join(homedir(), CONFIG_DIR);
+}
+
+export function getConfigPath(_cwd: string): string {
+	return join(getGlobalConfigDir(), CONFIG_FILE);
 }
 
 export async function loadConfig(cwd: string): Promise<DrykissConfig> {
@@ -60,7 +65,7 @@ export async function saveConfig(
 	cwd: string,
 	config: DrykissConfig,
 ): Promise<void> {
-	const dir = join(cwd, CONFIG_DIR);
+	const dir = getGlobalConfigDir();
 	await mkdir(dir, { recursive: true });
 	await writeFile(getConfigPath(cwd), JSON.stringify(config, null, 2), "utf8");
 }

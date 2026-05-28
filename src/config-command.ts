@@ -37,8 +37,8 @@ export async function handleConfigCommand(
 			`**Confirm before run:** ${config.confirmBeforeRun !== false ? "enabled" : "disabled"}`,
 			`**Context mode:** ${config.contextMode ?? "full"}`,
 			"",
-			"Config file: `.pi/drykiss/config.json`",
-			"Prompts dir: `.pi/drykiss/prompts/`",
+			"Config file: `~/.pi/drykiss/config.json`",
+			"Prompts dir: `~/.pi/drykiss/prompts/`",
 			"",
 			"Usage:",
 			"  /drykiss-config set-default <model>",
@@ -160,7 +160,7 @@ export async function handleConfigCommand(
 	if (subcommand === "reset-prompts") {
 		await resetPrompts(ctx.cwd);
 		ctx.ui.notify(
-			"Default prompt templates regenerated in `.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
+			"Default prompt templates regenerated in `~/.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
 			"info",
 		);
 		return;

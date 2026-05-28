@@ -1,5 +1,6 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { ChangedFile, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
@@ -11,6 +12,10 @@ export interface ReviewPrompt {
 }
 
 const PROMPTS_DIR = ".pi/drykiss/prompts";
+
+function getGlobalPromptsDir(): string {
+	return join(homedir(), PROMPTS_DIR);
+}
 
 const JSON_OUTPUT_INSTRUCTIONS = `
 ## Output Format — REQUIRED
@@ -467,10 +472,10 @@ const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your jo
 // ── Prompt loading & default management ─────────────────────────────────
 
 export function getPromptPath(
-	cwd: string,
+	_cwd: string,
 	lens: ReviewLens | "synthesis",
 ): string {
-	return join(cwd, PROMPTS_DIR, `${lens}.md`);
+	return join(getGlobalPromptsDir(), `${lens}.md`);
 }
 
 async function loadPromptBody(
@@ -500,9 +505,9 @@ export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {
 	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
 }
 
-export async function ensureDefaultPrompts(cwd: string): Promise<void> {
+export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 	try {
-		const dir = join(cwd, PROMPTS_DIR);
+		const dir = getGlobalPromptsDir();
 		await mkdir(dir, { recursive: true });
 
 		for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
@@ -551,8 +556,8 @@ export async function ensureDefaultPrompts(cwd: string): Promise<void> {
 	}
 }
 
-export async function resetPrompts(cwd: string): Promise<void> {
-	const dir = join(cwd, PROMPTS_DIR);
+export async function resetPrompts(_cwd: string): Promise<void> {
+	const dir = getGlobalPromptsDir();
 	await mkdir(dir, { recursive: true });
 
 	for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {

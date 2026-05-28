@@ -1,8 +1,13 @@
 import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { Finding, SynthesisResult } from "./types.js";
 
 const REVIEWS_DIR = ".pi/drykiss/reviews";
+
+function getGlobalReviewsDir(): string {
+	return join(homedir(), REVIEWS_DIR);
+}
 
 export interface PersistedReview {
   readonly timestamp: string;
@@ -17,16 +22,14 @@ export interface PersistedReview {
   readonly verdict: string;
 }
 
-function getReviewsDir(cwd: string): string {
-  return join(cwd, REVIEWS_DIR);
-}
+
 
 export async function saveReview(
-  cwd: string,
+  _cwd: string,
   files: string[],
   synthesis: SynthesisResult,
 ): Promise<string> {
-  const dir = getReviewsDir(cwd);
+  const dir = getGlobalReviewsDir();
   await mkdir(dir, { recursive: true });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -48,8 +51,8 @@ export async function saveReview(
   return path;
 }
 
-export async function listReviews(cwd: string): Promise<PersistedReview[]> {
-  const dir = getReviewsDir(cwd);
+export async function listReviews(_cwd: string): Promise<PersistedReview[]> {
+  const dir = getGlobalReviewsDir();
   try {
     const entries = await readdir(dir);
     const reviews: PersistedReview[] = [];
