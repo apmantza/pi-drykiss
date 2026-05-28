@@ -119,7 +119,13 @@ jobs:
           printf '@earendil-works/pi-ai\n@earendil-works/pi-tui\n' >>/tmp/expected.txt
           grep -oE "Cannot find (package|module) '[^']+'" \
             /tmp/tsx-output.txt 2>/dev/null \
-            | sed "s/.*'\(.*\)'/\1/" | sort -u >/tmp/missing.txt
+            | sed "s/.*'\(.*\)'/\1/" | sort -u > /tmp/missing.txt || true
+          echo "=== tsx output ==="
+          cat /tmp/tsx-output.txt || true
+          echo "=== missing packages ==="
+          cat /tmp/missing.txt || true
+          echo "=== expected packages ==="
+          cat /tmp/expected.txt
           UNEXPECTED=$(comm -23 /tmp/missing.txt /tmp/expected.txt 2>/dev/null || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "FAILED: unexpected missing dependency detected:"
