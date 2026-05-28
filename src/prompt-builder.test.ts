@@ -278,7 +278,9 @@ describe("prompt template management", () => {
 	});
 
 	it("loadLensSystemPrompt falls back to default when file missing", async () => {
-		vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+		vi.mocked(readFile).mockRejectedValue(
+			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
+		);
 		const prompt = await loadLensSystemPrompt("/cwd", "simplicity");
 		expect(prompt).toContain("Simplicity Auditor");
 		expect(prompt).toContain("KISS");
@@ -286,7 +288,9 @@ describe("prompt template management", () => {
 	});
 
 	it("ensureDefaultPrompts creates missing prompt files", async () => {
-		vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+		vi.mocked(readFile).mockRejectedValue(
+			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
+		);
 		await ensureDefaultPrompts("/cwd");
 		expect(mkdir).toHaveBeenCalled();
 		expect(writeFile).toHaveBeenCalledTimes(8); // 7 lenses + synthesis

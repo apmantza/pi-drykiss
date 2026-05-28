@@ -13,6 +13,7 @@ import {
 	handleArchCommand,
 	handleTestsCommand,
 	handleSecurityCommand,
+	handleJobsCommand,
 	executeDrykissReviewTool,
 	DrykissReviewParams,
 	COMMAND_NAME,
@@ -159,7 +160,7 @@ export default function (pi: ExtensionAPI): void {
 	}
 
 	// ── Track file edits across turns ──────────────────────
-	pi.on("tool_execution_end", (event: any, _ctx: any) => {
+	pi.on("tool_execution_end", (event: any, ctx: any) => {
 		try {
 			const { toolName, result } = event as {
 				type: "tool_execution_end";
@@ -168,21 +169,25 @@ export default function (pi: ExtensionAPI): void {
 			};
 			tracker.trackEdit(toolName, result);
 		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			console.error("[pi-drykiss] tool_execution_end error:", err);
+			ctx.ui?.notify?.(`DRYKISS edit tracking failed: ${msg}`, "warning");
 		}
 	});
 
-	pi.on("turn_end", (event: any, _ctx: any) => {
+	pi.on("turn_end", (event: any, ctx: any) => {
 		try {
 			const { turnIndex } = event as { type: "turn_end"; turnIndex: number };
 			tracker.onTurnEnd(turnIndex);
 		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			console.error("[pi-drykiss] turn_end error:", err);
+			ctx.ui?.notify?.(`DRYKISS turn tracking failed: ${msg}`, "warning");
 		}
 	});
 
 	// ── Auto-inject KISS/DRY checklist before next turn ────
-	pi.on("before_agent_start", (event: any, _ctx: any) => {
+	pi.on("before_agent_start", (event: any, ctx: any) => {
 		try {
 			const lastEdits = tracker.getLastTurnEdits();
 			if (!lastEdits || lastEdits.files.length === 0) return;
@@ -197,7 +202,10 @@ export default function (pi: ExtensionAPI): void {
 			tracker.clearLastTurnEdits();
 			return result;
 		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			console.error("[pi-drykiss] before_agent_start error:", err);
+			ctx.ui?.notify?.(`DRYKISS checklist injection failed: ${msg}`, "warning");
+			return undefined;
 		}
 	});
 
@@ -263,6 +271,14 @@ export default function (pi: ExtensionAPI): void {
 			"Configure DRYKISS defaults: set models per lens, toggle interactive mode, disable confirmations. Run without args to see current config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
 			handleConfigCommand(args, ctx),
+	});
+
+	// ── /drykiss-jobs — Inspect running/completed reviews ──
+	pi.registerCommand("drykiss-jobs", {
+		description:
+			"Browse running and completed DRYKISS reviews. Select one to view its full lens conversation.",
+		handler: (_args: string, ctx: ExtensionCommandContext) =>
+			handleJobsCommand(_args, ctx, manager),
 	});
 
 	// ── /drykiss-history — Browse past reviews ─────────────
@@ -336,11 +352,7 @@ export default function (pi: ExtensionAPI): void {
 			);
 		},
 
-		renderCall(
-			args: any,
-			theme: any,
-		) {
-			const { Text } = require("@earendil-works/pi-tui");
+		renderCall(args: any, theme: any) {
 			return new Text(
 				theme.fg("toolTitle", theme.bold("drykiss_review ")) +
 					theme.fg("accent", args.lens) +
@@ -354,7 +366,6 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderResult(result: any, _options: any, theme: any) {
-			const { Text } = require("@earendil-works/pi-tui");
 			const findings = (result.details as any)?.findings ?? [];
 			const critical = findings.filter(
 				(f: any) => f.severity === "critical",

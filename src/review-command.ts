@@ -96,24 +96,43 @@ async function gatherContents(
 	return contents;
 }
 
-function parseFindingsJson(raw: string, lens: ReviewLens): Finding[] {
+export interface ParseFindingsResult {
+	findings: Finding[];
+	parseError?: string;
+}
+
+function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 	try {
 		const jsonMatch = raw.match(/\[[\s\S]*\]/);
 		const jsonStr = jsonMatch ? jsonMatch[0] : raw;
 		const parsed = JSON.parse(jsonStr);
-		if (!Array.isArray(parsed)) return [];
-		return parsed.map((f: any) => ({
-			file: String(f.file ?? "unknown"),
-			line: typeof f.line === "number" ? f.line : undefined,
-			severity: String(f.severity ?? "medium") as Severity,
-			category: String(f.category ?? ""),
-			summary: String(f.summary ?? ""),
-			detail: String(f.detail ?? f.summary ?? ""),
-			suggestion: String(f.suggestion ?? ""),
-			lens,
-		}));
-	} catch {
-		return [];
+		if (!Array.isArray(parsed)) {
+			console.warn(
+				`[DRYKISS] ${lens} lens returned non-array JSON:`,
+				raw.slice(0, 500),
+			);
+			return {
+				findings: [],
+				parseError: `Expected array, got ${typeof parsed}`,
+			};
+		}
+		return {
+			findings: parsed.map((f: any) => ({
+				file: String(f.file ?? "unknown"),
+				line: typeof f.line === "number" ? f.line : undefined,
+				severity: String(f.severity ?? "medium") as Severity,
+				category: String(f.category ?? ""),
+				summary: String(f.summary ?? ""),
+				detail: String(f.detail ?? f.summary ?? ""),
+				suggestion: String(f.suggestion ?? ""),
+				lens,
+			})),
+		};
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[DRYKISS] Failed to parse JSON for ${lens} lens:`, msg);
+		console.error(`[DRYKISS] Raw output (first 800 chars):`, raw.slice(0, 800));
+		return { findings: [], parseError: msg };
 	}
 }
 
@@ -171,7 +190,13 @@ async function runLensReview(
 	const rawOutput = result.errorMessage
 		? `ERROR: ${result.errorMessage}`
 		: result.text || "[]";
-	const findings = parseFindingsJson(rawOutput, lens);
+	const { findings, parseError } = parseFindingsJson(rawOutput, lens);
+	if (parseError && !result.errorMessage) {
+		ctx.ui.notify(
+			`[DRYKISS] ${lens} lens output could not be parsed. Check console for raw output.`,
+			"warning",
+		);
+	}
 	return { lens, findings, rawOutput, modelName: result.modelName };
 }
 
@@ -251,7 +276,12 @@ export async function handleDrykissCommand(
 	}
 }
 
-export async function handleKissCommand(
+// ── Single-lens command helper ─────────────────────────
+
+async function handleSingleLensCommand(
+	lens: ReviewLens,
+	label: string,
+	needsProjectIndex: boolean,
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
@@ -272,6 +302,10 @@ export async function handleKissCommand(
 		config.contextMode !== "diff"
 			? await gatherContents(ctx.cwd, files)
 			: undefined;
+	const projectIndex =
+		needsProjectIndex && config.contextMode !== "diff"
+			? await getProjectIndex(ctx.cwd)
+			: undefined;
 
 	try {
 		const jobId = await manager.startReview(
@@ -281,16 +315,33 @@ export async function handleKissCommand(
 			files,
 			diffs,
 			contents,
-			undefined,
-			{ model: options.model, lenses: ["simplicity"] },
+			projectIndex,
+			{ model: options.model, lenses: [lens] },
 		);
 		ctx.ui.notify(
-			`KISS review **${jobId}** started in background. Watch the widget for live progress.`,
+			`${label} **${jobId}** started in background. Watch the widget for live progress.`,
 			"info",
 		);
 	} catch (err: any) {
-		ctx.ui.notify(`KISS review failed: ${err.message}`, "error");
+		ctx.ui.notify(`${label} failed: ${err.message}`, "error");
 	}
+}
+
+export async function handleKissCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
+): Promise<void> {
+	return handleSingleLensCommand(
+		"simplicity",
+		"KISS review",
+		false,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
 }
 
 export async function handleDryCommand(
@@ -299,42 +350,15 @@ export async function handleDryCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
-
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
-		return;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
-	const projectIndex =
-		config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
-
-	try {
-		const jobId = await manager.startReview(
-			ctx,
-			pi,
-			ctx.cwd,
-			files,
-			diffs,
-			contents,
-			projectIndex,
-			{ model: options.model, lenses: ["deduplication"] },
-		);
-		ctx.ui.notify(
-			`DRY review **${jobId}** started in background. Watch the widget for live progress.`,
-			"info",
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`DRY review failed: ${err.message}`, "error");
-	}
+	return handleSingleLensCommand(
+		"deduplication",
+		"DRY review",
+		true,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
 }
 
 export async function handleResilienceCommand(
@@ -343,40 +367,15 @@ export async function handleResilienceCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
-
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
-		return;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
-
-	try {
-		const jobId = await manager.startReview(
-			ctx,
-			pi,
-			ctx.cwd,
-			files,
-			diffs,
-			contents,
-			undefined,
-			{ model: options.model, lenses: ["resilience"] },
-		);
-		ctx.ui.notify(
-			`Resilience review **${jobId}** started in background. Watch the widget for live progress.`,
-			"info",
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`Resilience review failed: ${err.message}`, "error");
-	}
+	return handleSingleLensCommand(
+		"resilience",
+		"Resilience review",
+		false,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
 }
 
 export async function handleTestsCommand(
@@ -385,40 +384,15 @@ export async function handleTestsCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
-
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
-		return;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
-
-	try {
-		const jobId = await manager.startReview(
-			ctx,
-			pi,
-			ctx.cwd,
-			files,
-			diffs,
-			contents,
-			undefined,
-			{ model: options.model, lenses: ["tests"] },
-		);
-		ctx.ui.notify(
-			`Test coverage review **${jobId}** started in background. Watch the widget for live progress.`,
-			"info",
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`Test coverage review failed: ${err.message}`, "error");
-	}
+	return handleSingleLensCommand(
+		"tests",
+		"Test coverage review",
+		false,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
 }
 
 export async function handleArchCommand(
@@ -427,42 +401,15 @@ export async function handleArchCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
-
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
-		return;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
-	const projectIndex =
-		config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
-
-	try {
-		const jobId = await manager.startReview(
-			ctx,
-			pi,
-			ctx.cwd,
-			files,
-			diffs,
-			contents,
-			projectIndex,
-			{ model: options.model, lenses: ["architecture"] },
-		);
-		ctx.ui.notify(
-			`Architecture review **${jobId}** started in background. Watch the widget for live progress.`,
-			"info",
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`Architecture review failed: ${err.message}`, "error");
-	}
+	return handleSingleLensCommand(
+		"architecture",
+		"Architecture review",
+		true,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
 }
 
 export async function handleSecurityCommand(
@@ -471,40 +418,69 @@ export async function handleSecurityCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const options = parseArgs(args);
-	const files = await getChangedFiles(pi, ctx.cwd, options);
+	return handleSingleLensCommand(
+		"security",
+		"Security review",
+		false,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
+}
 
-	if (files.length === 0) {
-		ctx.ui.notify("No changed files found.", "info");
+// ── /drykiss-jobs — Browse running/completed reviews ────
+
+export async function handleJobsCommand(
+	_args: string,
+	ctx: ExtensionCommandContext,
+	manager: import("./review-manager.js").ReviewManager,
+): Promise<void> {
+	const jobs = manager.listJobs();
+	if (jobs.length === 0) {
+		ctx.ui.notify("No DRYKISS reviews in this session.", "info");
 		return;
 	}
 
-	await ensureDefaultPrompts(ctx.cwd);
-	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
-	const config = await loadConfig(ctx.cwd);
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, files)
-			: undefined;
+	const options = jobs.map((j) => {
+		const running = j.lenses.filter(
+			(l) => j.states.get(l)!.status === "running",
+		).length;
+		const done = j.lenses.filter((l) => {
+			const s = j.states.get(l)!;
+			return s.status === "done" || s.status === "error";
+		}).length;
+		const status =
+			j.overallStatus === "running"
+				? "● running"
+				: j.overallStatus === "error"
+					? "✗ error"
+					: "✓ done";
+		const fileCount = j.files.length;
+		const dur = j.completedAt
+			? `${((j.completedAt - j.startedAt) / 1000).toFixed(1)}s`
+			: `${((Date.now() - j.startedAt) / 1000).toFixed(1)}s`;
+		return `${j.id} · ${fileCount} file(s) · ${j.lenses.length} lenses (${running} running, ${done} done) · ${dur} · ${status}`;
+	});
 
-	try {
-		const jobId = await manager.startReview(
-			ctx,
-			pi,
-			ctx.cwd,
-			files,
-			diffs,
-			contents,
-			undefined,
-			{ model: options.model, lenses: ["security"] },
-		);
-		ctx.ui.notify(
-			`Security review **${jobId}** started in background. Watch the widget for live progress.`,
-			"info",
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`Security review failed: ${err.message}`, "error");
-	}
+	const choice = await ctx.ui.select("DRYKISS Reviews", options);
+	if (!choice) return;
+
+	const idx = options.indexOf(choice);
+	if (idx < 0) return;
+	const job = jobs[idx];
+
+	// Show conversation overlay
+	const { ConversationViewer } = await import("./conversation-viewer.js");
+	await ctx.ui.custom<undefined>(
+		(tui, theme, _keybindings, done) => {
+			return new ConversationViewer(tui, theme, done, job);
+		},
+		{
+			overlay: true,
+			overlayOptions: { anchor: "center", width: "90%", maxHeight: "70%" },
+		},
+	);
 }
 
 // ── Tool parameter schema ─────────────────────────────────

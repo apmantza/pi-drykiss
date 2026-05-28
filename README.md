@@ -43,14 +43,15 @@ pi install npm:pi-drykiss
 /drykiss src/foo.ts         # review specific files
 ```
 
-Runs six independent reviewer subagents in **parallel**, each with an isolated context window:
+Runs seven independent reviewer subagents in **parallel**, each with an isolated context window:
 
-1. **Simplicity (KISS)** — unnecessary complexity, premature abstraction, over-engineering, Chesterton's Fence, speculative features, surgical-change violations
+1. **Simplicity (KISS)** — unnecessary complexity, premature abstraction, over-engineering, Chesterton's Fence, spaghetti conditionals, thin wrappers, file size awareness, surgical-change violations
 2. **Deduplication (DRY)** — repeated logic, magic values, copy-paste, scattered knowledge. Sees a project index of existing utilities so it can spot cross-file duplication.
-3. **Clarity & Quality** — naming, correctness, security, performance (N+1 queries, XSS, SQL injection, etc.)
+3. **Clarity & Quality** — naming, readability, correctness, performance (N+1 queries, XSS, SQL injection, etc.)
 4. **Resilience** — error handling, silent failures, swallowed exceptions, overly broad catch blocks, missing async error handling
-5. **Architecture** — SOLID principles, type design, dependency direction, removal candidates, goal-driven execution checks
+5. **Architecture** — SOLID principles, type design, dependency direction, layer violations, orchestration issues, removal candidates, goal-driven execution checks
 6. **Tests** — missing test coverage, untested branches, edge cases, boundary values, test quality (fragile assertions, shared mutable state)
+7. **Security** — quick security scan for injection, auth/authz, secrets, data exposure, crypto issues, SSRF/CSRF (recommends piolium for deep security audits)
 
 Then a synthesizer deduplicates, ranks by severity, assigns confidence, and produces a final verdict.
 

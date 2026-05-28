@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
+	AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
@@ -20,6 +21,8 @@ export interface LensState {
 	errorMessage?: string;
 	findingsCount: number;
 	rawOutput: string;
+	/** Live session object — kept alive for conversation viewing. */
+	session?: AgentSession;
 }
 
 export interface ReviewJob {
@@ -191,6 +194,7 @@ export class ReviewManager {
 		);
 
 		state.durationMs = result.durationMs;
+		state.session = result.session;
 		if (result.errorMessage) {
 			state.status = "error";
 			state.errorMessage = result.errorMessage;
@@ -204,7 +208,16 @@ export class ReviewManager {
 						"[]",
 				);
 				state.findingsCount = Array.isArray(arr) ? arr.length : 0;
-			} catch {
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(
+					`[DRYKISS] Failed to parse findings JSON for ${task.lens}:`,
+					msg,
+				);
+				console.error(
+					`[DRYKISS] Raw output (first 500 chars):`,
+					state.rawOutput.slice(0, 500),
+				);
 				state.findingsCount = 0;
 			}
 		}
@@ -337,7 +350,13 @@ export class ReviewManager {
 				lowCount: findings.filter((f) => f.severity === "low").length,
 				nitCount: findings.filter((f) => f.severity === "nit").length,
 			};
-		} catch {
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.error("[DRYKISS] Synthesis JSON parse failed:", msg);
+			console.error(
+				"[DRYKISS] Synthesis raw output (first 800 chars):",
+				raw.slice(0, 800),
+			);
 			return {
 				findings: [],
 				summary:
@@ -366,8 +385,23 @@ export class ReviewManager {
 		for (const [id, job] of this.jobs) {
 			if (job.overallStatus === "done" || job.overallStatus === "error") {
 				if ((job.completedAt ?? 0) < cutoff) {
+					this.disposeJobSessions(job);
 					this.jobs.delete(id);
 				}
+			}
+		}
+	}
+
+	private disposeJobSessions(job: ReviewJob) {
+		for (const lens of job.lenses) {
+			const state = job.states.get(lens);
+			if (state?.session) {
+				try {
+					state.session.dispose();
+				} catch {
+					/* ignore */
+				}
+				state.session = undefined;
 			}
 		}
 	}
@@ -383,6 +417,7 @@ export class ReviewManager {
 		this.taskQueue = this.taskQueue.filter((t) => t.jobId !== id);
 		job.overallStatus = "error";
 		job.completedAt = Date.now();
+		this.disposeJobSessions(job);
 		return true;
 	}
 }

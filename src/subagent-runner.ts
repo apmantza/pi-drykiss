@@ -8,6 +8,7 @@
 
 import type { Model, Api } from "@earendil-works/pi-ai";
 import {
+	type AgentSession,
 	type AgentSessionEvent,
 	createAgentSession,
 	getAgentDir,
@@ -15,9 +16,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import { selectModel } from "./model-selector.js";
-import { findModelByHint } from "./llm.js";
+import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
 
 export interface SubagentResult {
@@ -26,54 +25,24 @@ export interface SubagentResult {
 	modelName: string;
 	durationMs: number;
 	errorMessage?: string;
+	/** The live session object — caller must dispose when no longer needed. */
+	session?: AgentSession;
 }
 
 /**
- * Resolve a model for a lens, sequentially and without UI clashes.
- * Uses config first, then falls back to interactive selection.
+ * Resolve a model for a lens. Thin wrapper around resolveModelSmart
+ * that throws instead of returning undefined.
  */
 export async function resolveModel(
 	ctx: ExtensionContext,
 	cwd: string,
 	lens: string,
 ): Promise<Model<Api>> {
-	const available = ctx.modelRegistry.getAvailable();
-	if (available.length === 0) {
+	const model = await resolveModelSmart(ctx, cwd, undefined, lens);
+	if (!model) {
 		throw new Error("No models available. Configure an API key with /login.");
 	}
-
-	// 1. Check per-lens config
-	const config = await loadConfig(cwd);
-	const configHint = getModelForLens(config, lens);
-	if (configHint) {
-		const m = findModelByHint(available, configHint);
-		if (m) return m;
-	}
-
-	// 2. Interactive selection (serial — only one at a time)
-	if (config.interactive !== false && ctx.hasUI) {
-		const selected = await selectModel(
-			ctx,
-			"Select Review Model",
-			`Choose a model for the **${lens}** review lens.`,
-		);
-		if (selected) {
-			// Save to config so they don't have to pick again
-			config.lensModels = {
-				...config.lensModels,
-				[lens]: `${selected.provider}/${selected.id}`,
-			};
-			await saveConfig(cwd, config);
-			ctx.ui.notify(
-				`Saved ${selected.name} as default for ${lens} review.`,
-				"info",
-			);
-			return selected;
-		}
-	}
-
-	// 3. Fallback
-	return available[0];
+	return model;
 }
 
 /**
@@ -96,7 +65,7 @@ export async function resolveAllModels(
  * Spawn a single lens review as a Pi subagent.
  */
 export async function runLensSubagent(
-	ctx: ExtensionContext,
+	_ctx: ExtensionContext,
 	cwd: string,
 	model: Model<Api>,
 	systemPrompt: string,
@@ -121,7 +90,6 @@ export async function runLensSubagent(
 		cwd,
 		agentDir: getAgentDir(),
 		model,
-		tools: ["read", "bash", "edit", "write"],
 		sessionManager: SessionManager.inMemory(),
 		resourceLoader,
 		noTools: "all",
@@ -145,9 +113,8 @@ export async function runLensSubagent(
 		}
 	});
 
-	const abortListener = () => session.agent.abort();
-	ctx.signal?.addEventListener("abort", abortListener, { once: true });
-
+	// Intentionally NOT wiring to ctx.signal — these are background reviews
+	// that should survive the user cancelling the parent agent turn.
 	try {
 		await session.prompt(userPrompt);
 		await session.agent.waitForIdle();
@@ -156,9 +123,9 @@ export async function runLensSubagent(
 			errorMessage = err instanceof Error ? err.message : String(err);
 		}
 	} finally {
-		ctx.signal?.removeEventListener("abort", abortListener);
 		unsubscribe();
-		session.dispose();
+		// NOTE: session is NOT disposed here — caller (ReviewManager) keeps it
+		// alive so the conversation can be viewed via /drykiss-jobs.
 	}
 
 	return {
@@ -166,6 +133,7 @@ export async function runLensSubagent(
 		text: finalText.trim(),
 		modelName: model.name,
 		durationMs: Date.now() - start,
+		session,
 		...(errorMessage ? { errorMessage } : {}),
 	};
 }

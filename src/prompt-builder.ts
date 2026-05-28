@@ -447,7 +447,7 @@ For each missing test, suggest:
 - **Nit:** Very minor, author may ignore`,
 };
 
-const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your job is to review the findings from six independent code reviewers and produce a single, ranked, actionable report.
+const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your job is to review the findings from seven independent code reviewers and produce a single, ranked, actionable report.
 
 ## Rules
 1. Do your own analysis. Rule out false positives. If two reviewers flagged the same issue, note it once with higher confidence.
@@ -507,21 +507,37 @@ export async function ensureDefaultPrompts(cwd: string): Promise<void> {
 		const path = join(dir, `${lens}.md`);
 		try {
 			await readFile(path, "utf8");
-			// already exists, don't overwrite
-		} catch {
-			await writeFile(path, body.trim() + "\n", "utf8");
+			// File exists — don't overwrite
+		} catch (err) {
+			if (
+				err instanceof Error &&
+				(err as NodeJS.ErrnoException).code === "ENOENT"
+			) {
+				await writeFile(path, body.trim() + "\n", "utf8");
+			} else {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(`[DRYKISS] Failed to check prompt ${path}:`, msg);
+			}
 		}
 	}
 
 	const synthesisPath = join(dir, "synthesis.md");
 	try {
 		await readFile(synthesisPath, "utf8");
-	} catch {
-		await writeFile(
-			synthesisPath,
-			DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
-			"utf8",
-		);
+	} catch (err) {
+		if (
+			err instanceof Error &&
+			(err as NodeJS.ErrnoException).code === "ENOENT"
+		) {
+			await writeFile(
+				synthesisPath,
+				DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
+				"utf8",
+			);
+		} else {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.error(`[DRYKISS] Failed to check prompt ${synthesisPath}:`, msg);
+		}
 	}
 }
 

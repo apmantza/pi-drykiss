@@ -11,7 +11,7 @@ const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	D: "deleted",
 };
 
-function detectLanguage(path: string): string | null {
+export function detectLanguage(path: string): string | null {
 	const ext = path.split(".").pop()?.toLowerCase();
 	const map: Record<string, string> = {
 		ts: "TypeScript",
@@ -188,6 +188,16 @@ export async function getFileContent(
 	cwd: string,
 	filePath: string,
 ): Promise<FileContent | null> {
+	// Prevent path traversal: reject absolute paths
+	if (filePath.startsWith("/") || filePath.startsWith("\\")) {
+		console.error(`[DRYKISS] Rejected absolute path: ${filePath}`);
+		return null;
+	}
+	// Reject paths that escape the cwd
+	if (filePath.includes("..") || filePath.includes("~")) {
+		console.error(`[DRYKISS] Rejected suspicious path: ${filePath}`);
+		return null;
+	}
 	try {
 		const raw = await readFile(join(cwd, filePath), "utf8");
 		const lines = raw.split("\n");
@@ -199,7 +209,9 @@ export async function getFileContent(
 				" more lines) ...\n"
 			: raw;
 		return { content, lineCount: lines.length, truncated };
-	} catch {
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[DRYKISS] Failed to read ${filePath}:`, msg);
 		return null;
 	}
 }
