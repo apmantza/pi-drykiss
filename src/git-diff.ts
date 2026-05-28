@@ -64,17 +64,7 @@ function parseDiffOutput(stdout: string): ChangedFile[] {
 }
 
 export async function getAllSourceFiles(cwd: string): Promise<ChangedFile[]> {
-	const sourceDirs = ["src", "lib", "app", "packages"];
-	const dirsToWalk: string[] = [];
-	for (const d of sourceDirs) {
-		try {
-			const s = await stat(join(cwd, d));
-			if (s.isDirectory()) dirsToWalk.push(d);
-		} catch {
-			// skip
-		}
-	}
-	if (dirsToWalk.length === 0) dirsToWalk.push(".");
+	const dirsToWalk = await getSourceDirs(cwd);
 
 	const files: ChangedFile[] = [];
 	const seenPaths = new Set<string>();
@@ -177,6 +167,21 @@ const CODE_EXTS = new Set([
 	"c",
 	"scala",
 ]);
+const SOURCE_DIRS = ["src", "lib", "app", "packages"];
+
+/** Detect which source directories exist in the project. */
+async function getSourceDirs(cwd: string): Promise<string[]> {
+	const dirsToWalk: string[] = [];
+	for (const d of SOURCE_DIRS) {
+		try {
+			const s = await stat(join(cwd, d));
+			if (s.isDirectory()) dirsToWalk.push(d);
+		} catch {
+			// skip
+		}
+	}
+	return dirsToWalk.length > 0 ? dirsToWalk : ["."];
+}
 
 export interface FileContent {
 	readonly content: string;
@@ -306,17 +311,7 @@ export async function getProjectIndex(
 	cwd: string,
 	maxFiles = 200,
 ): Promise<ProjectIndexEntry[]> {
-	const sourceDirs = ["src", "lib", "app", "packages"];
-	const dirsToWalk: string[] = [];
-	for (const d of sourceDirs) {
-		try {
-			const s = await stat(join(cwd, d));
-			if (s.isDirectory()) dirsToWalk.push(d);
-		} catch {
-			// skip
-		}
-	}
-	if (dirsToWalk.length === 0) dirsToWalk.push(".");
+	const dirsToWalk = await getSourceDirs(cwd);
 
 	const entries: ProjectIndexEntry[] = [];
 	const seenPaths = new Set<string>();

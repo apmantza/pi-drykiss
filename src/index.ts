@@ -148,12 +148,23 @@ export default function (pi: ExtensionAPI): void {
 				})
 			: "Review completed but synthesis produced no output.";
 
+		// Strip session objects (contain non-cloneable async handlers) before sending
+		const serializableJob = {
+			...job,
+			states: new Map(
+				[...job.states.entries()].map(([lens, state]) => [
+					lens,
+					{ ...state, session: undefined },
+				]),
+			),
+		};
+
 		piRef.sendMessage<ReviewJob>(
 			{
 				customType: "drykiss-review-complete",
 				content: report,
 				display: true,
-				details: job,
+				details: serializableJob as ReviewJob,
 			},
 			{ deliverAs: "followUp", triggerTurn: true },
 		);

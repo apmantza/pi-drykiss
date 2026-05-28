@@ -1,6 +1,7 @@
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChangedFile, ReviewLens } from "./types.js";
+import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 
 export interface ReviewPrompt {
@@ -500,44 +501,53 @@ export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {
 }
 
 export async function ensureDefaultPrompts(cwd: string): Promise<void> {
-	const dir = join(cwd, PROMPTS_DIR);
-	await mkdir(dir, { recursive: true });
+	try {
+		const dir = join(cwd, PROMPTS_DIR);
+		await mkdir(dir, { recursive: true });
 
-	for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
-		const path = join(dir, `${lens}.md`);
+		for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
+			const path = join(dir, `${lens}.md`);
+			try {
+				await readFile(path, "utf8");
+				// File exists — don't overwrite
+			} catch (err) {
+				if (
+					err instanceof Error &&
+					(err as NodeJS.ErrnoException).code === "ENOENT"
+				) {
+					await writeFile(path, body.trim() + "\n", "utf8");
+				} else {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.error(`[DRYKISS] Failed to check prompt ${path}:`, msg);
+				}
+			}
+		}
+
+		const synthesisPath = join(dir, "synthesis.md");
 		try {
-			await readFile(path, "utf8");
-			// File exists — don't overwrite
+			await readFile(synthesisPath, "utf8");
 		} catch (err) {
 			if (
 				err instanceof Error &&
 				(err as NodeJS.ErrnoException).code === "ENOENT"
 			) {
-				await writeFile(path, body.trim() + "\n", "utf8");
+				await writeFile(
+					synthesisPath,
+					DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
+					"utf8",
+				);
 			} else {
 				const msg = err instanceof Error ? err.message : String(err);
-				console.error(`[DRYKISS] Failed to check prompt ${path}:`, msg);
+				console.error(
+					`[DRYKISS] Failed to check prompt ${synthesisPath}:`,
+					msg,
+				);
 			}
 		}
-	}
-
-	const synthesisPath = join(dir, "synthesis.md");
-	try {
-		await readFile(synthesisPath, "utf8");
 	} catch (err) {
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
-			await writeFile(
-				synthesisPath,
-				DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
-				"utf8",
-			);
-		} else {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`[DRYKISS] Failed to check prompt ${synthesisPath}:`, msg);
-		}
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[DRYKISS] ensureDefaultPrompts failed:`, msg);
+		throw err;
 	}
 }
 
@@ -636,17 +646,8 @@ export async function buildReviewPrompts(
 		return [{ lens, systemPrompt, userPrompt }];
 	}
 
-	const lenses: Exclude<ReviewLens, "all">[] = [
-		"simplicity",
-		"deduplication",
-		"clarity",
-		"resilience",
-		"architecture",
-		"tests",
-		"security",
-	];
 	const prompts: ReviewPrompt[] = [];
-	for (const l of lenses) {
+	for (const l of LENS_NAMES) {
 		const systemPrompt = await loadLensSystemPrompt(cwd, l);
 		const userPrompt =
 			l === "deduplication" && indexBlock

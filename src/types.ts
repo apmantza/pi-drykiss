@@ -27,6 +27,17 @@ export type ReviewLens =
 	| "security"
 	| "all";
 
+/** All reviewable lens names (excludes "all"). */
+export const LENS_NAMES: readonly Exclude<ReviewLens, "all">[] = [
+	"simplicity",
+	"deduplication",
+	"clarity",
+	"resilience",
+	"architecture",
+	"tests",
+	"security",
+];
+
 export type Severity = "critical" | "high" | "medium" | "low" | "nit";
 
 export interface Finding {

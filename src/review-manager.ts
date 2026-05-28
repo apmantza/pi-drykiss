@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
+import { LENS_NAMES } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
@@ -31,6 +32,8 @@ export interface ReviewJob {
 	lenses: ReviewLens[];
 	states: Map<ReviewLens, LensState>;
 	synthesisStatus: "idle" | "running" | "done" | "error";
+	/** Guard to prevent race-condition double-triggering of synthesis. */
+	synthesisTriggered: boolean;
 	synthesisResult?: SynthesisResult;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
@@ -78,15 +81,7 @@ export class ReviewManager {
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
-		const lenses: ReviewLens[] = options.lenses ?? [
-			"simplicity",
-			"deduplication",
-			"clarity",
-			"resilience",
-			"architecture",
-			"tests",
-			"security",
-		];
+		const lenses: ReviewLens[] = options.lenses ?? [...LENS_NAMES];
 
 		// Resolve models
 		const { resolveAllModels } = await import("./subagent-runner.js");
@@ -125,6 +120,7 @@ export class ReviewManager {
 			lenses,
 			states,
 			synthesisStatus: "idle",
+			synthesisTriggered: false,
 			overallStatus: "running",
 			startedAt: Date.now(),
 		};
@@ -158,8 +154,20 @@ export class ReviewManager {
 		while (this.taskQueue.length > 0 && this.runningCount < CONCURRENCY) {
 			const task = this.taskQueue.shift()!;
 			this.runningCount++;
-			this.runLens(ctx, pi, cwd, task).catch(() => {
-				/* errors handled inside runLens */
+			this.runLens(ctx, pi, cwd, task).catch((err) => {
+				/* Ensure runningCount is always decremented even on unexpected errors */
+				const job = this.jobs.get(task.jobId);
+				if (job) {
+					const state = job.states.get(task.lens);
+					if (state && state.status === "running") {
+						state.status = "error";
+						state.errorMessage =
+							err instanceof Error ? err.message : String(err);
+					}
+				}
+				this.runningCount--;
+				this.onUpdate?.(job!);
+				console.error(`[DRYKISS] runLens crashed for ${task.lens}:`, err);
 			});
 		}
 	}
@@ -231,7 +239,8 @@ export class ReviewManager {
 			return s.status === "done" || s.status === "error";
 		});
 
-		if (allDone && job.synthesisStatus === "idle") {
+		if (allDone && job.synthesisStatus === "idle" && !job.synthesisTriggered) {
+			job.synthesisTriggered = true;
 			job.synthesisStatus = "running";
 			this.onUpdate?.(job);
 			try {

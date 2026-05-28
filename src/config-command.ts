@@ -7,6 +7,7 @@ import {
 } from "./config.js";
 import { selectModel } from "./model-selector.js";
 import { resetPrompts } from "./prompt-builder.js";
+import { LENS_NAMES } from "./types.js";
 
 export async function handleConfigCommand(
 	args: string,
@@ -82,18 +83,9 @@ export async function handleConfigCommand(
 	if (subcommand === "set-lens") {
 		const lens = tokens[1];
 		const model = tokens[2];
-		const validLenses = [
-			"simplicity",
-			"deduplication",
-			"clarity",
-			"resilience",
-			"architecture",
-			"tests",
-			"security",
-		];
-		if (!validLenses.includes(lens)) {
+		if (!(LENS_NAMES as readonly string[]).includes(lens)) {
 			ctx.ui.notify(
-				`Invalid lens: ${lens}. Valid: ${validLenses.join(", ")}`,
+				`Invalid lens: ${lens}. Valid: ${LENS_NAMES.join(", ")}`,
 				"error",
 			);
 			return;
