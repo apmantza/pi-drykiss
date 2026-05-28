@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI): void {
 	// ── Background review manager + live widget ────────────
 	const widget = new ReviewProgressWidget();
 	const manager = new ReviewManager(
-		(job) => widget.setJobs(manager.listJobs()),
+		(_job) => widget.setJobs(manager.listJobs()),
 		(job) => {
 			widget.setJobs(manager.listJobs());
 			sendReviewNotification(pi, job);
@@ -212,7 +212,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Review changed files through the KISS lens. Supports --model=hint. Configure defaults with /drykiss-config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleKissCommand(args, ctx, pi),
+			handleKissCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-dry — Focused duplication review ──────────
@@ -220,7 +220,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Review changed files through the DRY lens. Supports --model=hint. Configure defaults with /drykiss-config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleDryCommand(args, ctx, pi),
+			handleDryCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-resilience — Error handling review ────────
@@ -228,7 +228,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Review changed files through the resilience lens (error handling, silent failures). Supports --model=hint.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleResilienceCommand(args, ctx, pi),
+			handleResilienceCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-arch — Architecture review ────────────────
@@ -236,7 +236,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Review changed files through the architecture lens (SOLID, type design, dependencies). Supports --model=hint.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleArchCommand(args, ctx, pi),
+			handleArchCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-tests — Test coverage review ──────────────
@@ -244,7 +244,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Review changed files through the tests lens (missing coverage, edge cases, test quality). Supports --model=hint.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
-			handleTestsCommand(args, ctx, pi),
+			handleTestsCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-config — Configure defaults and models ────
@@ -301,7 +301,13 @@ export default function (pi: ExtensionAPI): void {
 		],
 		parameters: DrykissReviewParams,
 
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			params: Record<string, unknown>,
+			_signal: AbortSignal,
+			_onUpdate: any,
+			ctx: any,
+		) {
 			return executeDrykissReviewTool(
 				params as {
 					lens:
@@ -319,7 +325,10 @@ export default function (pi: ExtensionAPI): void {
 			);
 		},
 
-		renderCall(args, theme) {
+		renderCall(
+			args: { lens: string; files: string[]; model?: string },
+			theme: any,
+		) {
 			const { Text } = require("@earendil-works/pi-tui");
 			return new Text(
 				theme.fg("toolTitle", theme.bold("drykiss_review ")) +
@@ -333,7 +342,7 @@ export default function (pi: ExtensionAPI): void {
 			);
 		},
 
-		renderResult(result, _options, theme) {
+		renderResult(result: any, _options: any, theme: any) {
 			const { Text } = require("@earendil-works/pi-tui");
 			const findings = (result.details as any)?.findings ?? [];
 			const critical = findings.filter(

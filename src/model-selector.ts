@@ -78,7 +78,7 @@ export async function selectModel(
 	const available = ctx.modelRegistry.getAvailable();
 	if (available.length === 0) return undefined;
 
-	const items: SelectItem[] = available.map((m) => {
+	const items: SelectItem[] = available.map((m: any) => {
 		const label = `[${m.provider}] ${formatModelLabel(m)}`;
 		const description = buildModelDescription(m);
 		return {
@@ -91,7 +91,7 @@ export async function selectModel(
 	const optimalWidth = calculatePopupWidth(items, title);
 
 	const selectedValue = await ctx.ui.custom<string | null>(
-		(_tui, theme, _kb, done) => {
+		(_tui: any, theme: any, _kb: any, done: any) => {
 			const box = new Box(1, 1, bgColor);
 			box.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
 

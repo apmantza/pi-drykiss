@@ -133,8 +133,10 @@ export async function callLLM(
 		});
 
 		const parts = response.content
-			.filter((c): c is { type: "text"; text: string } => c.type === "text")
-			.map((c) => c.text);
+			.filter(
+				(c: any): c is { type: "text"; text: string } => c.type === "text",
+			)
+			.map((c: { type: string; text: string }) => c.text);
 
 		return { text: parts.join(""), model: model! };
 	};

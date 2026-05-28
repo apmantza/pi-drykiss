@@ -4,14 +4,9 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type {
-	ReviewLens,
-	ChangedFile,
-	Finding,
-	SynthesisResult,
-} from "./types.js";
+import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
-import { saveReview, formatReviewForDisplay } from "./persist.js";
+import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 
 const CONCURRENCY = 3;
@@ -76,10 +71,11 @@ export class ReviewManager {
 		projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined,
 		options: {
 			model?: string;
+			lenses?: ReviewLens[];
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
-		const lenses: ReviewLens[] = [
+		const lenses: ReviewLens[] = options.lenses ?? [
 			"simplicity",
 			"deduplication",
 			"clarity",

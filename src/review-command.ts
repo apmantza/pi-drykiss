@@ -3,7 +3,7 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import {
 	getChangedFiles,
@@ -255,6 +255,7 @@ export async function handleKissCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -273,25 +274,20 @@ export async function handleKissCommand(
 			: undefined;
 
 	try {
-		const review = await runLensReview(
+		const jobId = await manager.startReview(
 			ctx,
+			pi,
 			ctx.cwd,
 			files,
 			diffs,
-			"simplicity",
-			{
-				modelHint: options.model,
-				contents,
-			},
+			contents,
+			undefined,
+			{ model: options.model, lenses: ["simplicity"] },
 		);
-		const display =
-			review.findings
-				.map(
-					(f) =>
-						`[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`,
-				)
-				.join("\n") || "No simplicity concerns found.";
-		ctx.ui.notify(`## KISS Review (${review.modelName})\n\n${display}`, "info");
+		ctx.ui.notify(
+			`KISS review **${jobId}** started in background. Watch the widget for live progress.`,
+			"info",
+		);
 	} catch (err: any) {
 		ctx.ui.notify(`KISS review failed: ${err.message}`, "error");
 	}
@@ -301,6 +297,7 @@ export async function handleDryCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -321,26 +318,20 @@ export async function handleDryCommand(
 		config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
 
 	try {
-		const review = await runLensReview(
+		const jobId = await manager.startReview(
 			ctx,
+			pi,
 			ctx.cwd,
 			files,
 			diffs,
-			"deduplication",
-			{
-				modelHint: options.model,
-				contents,
-				projectIndex,
-			},
+			contents,
+			projectIndex,
+			{ model: options.model, lenses: ["deduplication"] },
 		);
-		const display =
-			review.findings
-				.map(
-					(f) =>
-						`[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`,
-				)
-				.join("\n") || "No duplication concerns found.";
-		ctx.ui.notify(`## DRY Review (${review.modelName})\n\n${display}`, "info");
+		ctx.ui.notify(
+			`DRY review **${jobId}** started in background. Watch the widget for live progress.`,
+			"info",
+		);
 	} catch (err: any) {
 		ctx.ui.notify(`DRY review failed: ${err.message}`, "error");
 	}
@@ -350,6 +341,7 @@ export async function handleResilienceCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -368,26 +360,18 @@ export async function handleResilienceCommand(
 			: undefined;
 
 	try {
-		const review = await runLensReview(
+		const jobId = await manager.startReview(
 			ctx,
+			pi,
 			ctx.cwd,
 			files,
 			diffs,
-			"resilience",
-			{
-				modelHint: options.model,
-				contents,
-			},
+			contents,
+			undefined,
+			{ model: options.model, lenses: ["resilience"] },
 		);
-		const display =
-			review.findings
-				.map(
-					(f) =>
-						`[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`,
-				)
-				.join("\n") || "No resilience concerns found.";
 		ctx.ui.notify(
-			`## Resilience Review (${review.modelName})\n\n${display}`,
+			`Resilience review **${jobId}** started in background. Watch the widget for live progress.`,
 			"info",
 		);
 	} catch (err: any) {
@@ -399,6 +383,7 @@ export async function handleTestsCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -417,19 +402,18 @@ export async function handleTestsCommand(
 			: undefined;
 
 	try {
-		const review = await runLensReview(ctx, ctx.cwd, files, diffs, "tests", {
-			modelHint: options.model,
+		const jobId = await manager.startReview(
+			ctx,
+			pi,
+			ctx.cwd,
+			files,
+			diffs,
 			contents,
-		});
-		const display =
-			review.findings
-				.map(
-					(f) =>
-						`[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`,
-				)
-				.join("\n") || "No test coverage gaps found.";
+			undefined,
+			{ model: options.model, lenses: ["tests"] },
+		);
 		ctx.ui.notify(
-			`## Test Coverage Review (${review.modelName})\n\n${display}`,
+			`Test coverage review **${jobId}** started in background. Watch the widget for live progress.`,
 			"info",
 		);
 	} catch (err: any) {
@@ -441,6 +425,7 @@ export async function handleArchCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
 	const options = parseArgs(args);
 	const files = await getChangedFiles(pi, ctx.cwd, options);
@@ -461,27 +446,18 @@ export async function handleArchCommand(
 		config.contextMode !== "diff" ? await getProjectIndex(ctx.cwd) : undefined;
 
 	try {
-		const review = await runLensReview(
+		const jobId = await manager.startReview(
 			ctx,
+			pi,
 			ctx.cwd,
 			files,
 			diffs,
-			"architecture",
-			{
-				modelHint: options.model,
-				contents,
-				projectIndex,
-			},
+			contents,
+			projectIndex,
+			{ model: options.model, lenses: ["architecture"] },
 		);
-		const display =
-			review.findings
-				.map(
-					(f) =>
-						`[${f.severity.toUpperCase()}] ${f.file}:${f.line ?? ""} — ${f.category}: ${f.summary}`,
-				)
-				.join("\n") || "No architecture concerns found.";
 		ctx.ui.notify(
-			`## Architecture Review (${review.modelName})\n\n${display}`,
+			`Architecture review **${jobId}** started in background. Watch the widget for live progress.`,
 			"info",
 		);
 	} catch (err: any) {
