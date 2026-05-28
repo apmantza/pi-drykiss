@@ -82,6 +82,7 @@ export class ReviewManager {
 			"resilience",
 			"architecture",
 			"tests",
+			"security",
 		];
 
 		// Resolve models

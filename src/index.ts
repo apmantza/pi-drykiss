@@ -12,6 +12,7 @@ import {
 	handleResilienceCommand,
 	handleArchCommand,
 	handleTestsCommand,
+	handleSecurityCommand,
 	executeDrykissReviewTool,
 	DrykissReviewParams,
 	COMMAND_NAME,
@@ -20,6 +21,7 @@ import {
 	RESILIENCE_COMMAND_NAME,
 	ARCH_COMMAND_NAME,
 	TESTS_COMMAND_NAME,
+	SECURITY_COMMAND_NAME,
 } from "./review-command.js";
 import { handleConfigCommand } from "./config-command.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
@@ -247,6 +249,14 @@ export default function (pi: ExtensionAPI): void {
 			handleTestsCommand(args, ctx, pi, manager),
 	});
 
+	// ── /drykiss-security — Security vulnerability scan ────
+	pi.registerCommand(SECURITY_COMMAND_NAME, {
+		description:
+			"Quick security scan for vulnerabilities, credential exposure, and attack surface issues. Supports --model=hint.",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleSecurityCommand(args, ctx, pi, manager),
+	});
+
 	// ── /drykiss-config — Configure defaults and models ────
 	pi.registerCommand("drykiss-config", {
 		description:
@@ -316,7 +326,8 @@ export default function (pi: ExtensionAPI): void {
 						| "clarity"
 						| "resilience"
 						| "architecture"
-						| "tests";
+						| "tests"
+						| "security";
 					files: string[];
 					model?: string;
 				},

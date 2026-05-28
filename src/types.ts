@@ -24,6 +24,7 @@ export type ReviewLens =
 	| "resilience"
 	| "architecture"
 	| "tests"
+	| "security"
 	| "all";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "nit";

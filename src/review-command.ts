@@ -29,6 +29,7 @@ export const DRY_COMMAND_NAME = "drykiss-dry";
 export const RESILIENCE_COMMAND_NAME = "drykiss-resilience";
 export const ARCH_COMMAND_NAME = "drykiss-arch";
 export const TESTS_COMMAND_NAME = "drykiss-tests";
+export const SECURITY_COMMAND_NAME = "drykiss-security";
 
 const MAX_FILES = 20;
 
@@ -465,6 +466,48 @@ export async function handleArchCommand(
 	}
 }
 
+export async function handleSecurityCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
+): Promise<void> {
+	const options = parseArgs(args);
+	const files = await getChangedFiles(pi, ctx.cwd, options);
+
+	if (files.length === 0) {
+		ctx.ui.notify("No changed files found.", "info");
+		return;
+	}
+
+	await ensureDefaultPrompts(ctx.cwd);
+	const diffs = await gatherDiffs(pi, ctx.cwd, files, options);
+	const config = await loadConfig(ctx.cwd);
+	const contents =
+		config.contextMode !== "diff"
+			? await gatherContents(ctx.cwd, files)
+			: undefined;
+
+	try {
+		const jobId = await manager.startReview(
+			ctx,
+			pi,
+			ctx.cwd,
+			files,
+			diffs,
+			contents,
+			undefined,
+			{ model: options.model, lenses: ["security"] },
+		);
+		ctx.ui.notify(
+			`Security review **${jobId}** started in background. Watch the widget for live progress.`,
+			"info",
+		);
+	} catch (err: any) {
+		ctx.ui.notify(`Security review failed: ${err.message}`, "error");
+	}
+}
+
 // ── Tool parameter schema ─────────────────────────────────
 
 export const DrykissReviewParams = Type.Object({
@@ -476,6 +519,7 @@ export const DrykissReviewParams = Type.Object({
 			"resilience",
 			"architecture",
 			"tests",
+			"security",
 		] as const,
 		{
 			description: "Which review lens to apply",
@@ -500,7 +544,8 @@ export async function executeDrykissReviewTool(
 			| "clarity"
 			| "resilience"
 			| "architecture"
-			| "tests";
+			| "tests"
+			| "security";
 		files: string[];
 		model?: string;
 	},
