@@ -337,7 +337,7 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderCall(
-			args: { lens: string; files: string[]; model?: string },
+			args: any,
 			theme: any,
 		) {
 			const { Text } = require("@earendil-works/pi-tui");

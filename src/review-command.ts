@@ -4,7 +4,6 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
 import {
 	getChangedFiles,
 	getFileDiff,
@@ -511,16 +510,16 @@ export async function handleSecurityCommand(
 // ── Tool parameter schema ─────────────────────────────────
 
 export const DrykissReviewParams = Type.Object({
-	lens: StringEnum(
+	lens: Type.Union(
 		[
-			"simplicity",
-			"deduplication",
-			"clarity",
-			"resilience",
-			"architecture",
-			"tests",
-			"security",
-		] as const,
+			Type.Literal("simplicity"),
+			Type.Literal("deduplication"),
+			Type.Literal("clarity"),
+			Type.Literal("resilience"),
+			Type.Literal("architecture"),
+			Type.Literal("tests"),
+			Type.Literal("security"),
+		],
 		{
 			description: "Which review lens to apply",
 		},
