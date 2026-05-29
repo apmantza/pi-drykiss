@@ -20,3 +20,15 @@ export const REVIEWS_DIR = join(DRYKISS_BASE_DIR, "reviews");
 
 /** File names */
 export const CONFIG_FILE = "config.json";
+
+/** Human-readable lens display names. */
+export const LENS_DISPLAY_NAMES: Record<string, string> = {
+	simplicity: "KISS",
+	deduplication: "DRY",
+	clarity: "Clarity",
+	resilience: "Resilience",
+	architecture: "Architecture",
+	tests: "Tests",
+	security: "Security",
+	synthesis: "Synthesis",
+};

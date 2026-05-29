@@ -299,10 +299,29 @@ describe("getFileContent", () => {
 		expect(result!.content).not.toContain("line600");
 	});
 
-	it("returns null when file cannot be read", async () => {
-		vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+	it("returns null when file cannot be read (ENOENT)", async () => {
+		vi.mocked(readFile).mockRejectedValue(
+			Object.assign(new Error("ENOENT"), { code: "ENOENT" as const }),
+		);
 		const result = await getFileContent("/cwd", "src/missing.ts");
 		expect(result).toBeNull();
+	});
+
+	it("returns null for permission errors (EACCES)", async () => {
+		vi.mocked(readFile).mockRejectedValue(
+			Object.assign(new Error("Permission denied"), {
+				code: "EACCES" as const,
+			}),
+		);
+		const result = await getFileContent("/cwd", "src/secret.ts");
+		expect(result).toBeNull();
+	});
+
+	it("throws on unexpected errors", async () => {
+		vi.mocked(readFile).mockRejectedValue(new Error("Disk full"));
+		await expect(getFileContent("/cwd", "src/file.ts")).rejects.toThrow(
+			"Failed to read src/file.ts",
+		);
 	});
 
 	// Security: Path traversal prevention tests

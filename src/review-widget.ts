@@ -1,19 +1,8 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ReviewJob, LensStatus } from "./review-manager.js";
+import { LENS_DISPLAY_NAMES } from "./constants.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/** Human-readable lens display names. */
-const LENS_DISPLAY_NAMES: Record<string, string> = {
-	simplicity: "KISS",
-	deduplication: "DRY",
-	clarity: "Clarity",
-	resilience: "Resilience",
-	architecture: "Architecture",
-	tests: "Tests",
-	security: "Security",
-	synthesis: "Synthesis",
-};
 
 type Theme = {
 	fg(color: string, text: string): string;

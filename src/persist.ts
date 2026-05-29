@@ -21,7 +21,6 @@ export interface PersistedReview {
 }
 
 export async function saveReview(
-	_cwd: string,
 	files: string[],
 	synthesis: SynthesisResult,
 ): Promise<string> {
@@ -47,7 +46,7 @@ export async function saveReview(
 	return path;
 }
 
-export async function listReviews(_cwd: string): Promise<PersistedReview[]> {
+export async function listReviews(): Promise<PersistedReview[]> {
 	const dir = getGlobalReviewsDir();
 	try {
 		const entries = await readdir(dir);
@@ -64,7 +63,15 @@ export async function listReviews(_cwd: string): Promise<PersistedReview[]> {
 			(a, b) =>
 				new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
 		);
-	} catch {
+	} catch (err) {
+		const code =
+			err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+		if (code === "ENOENT") {
+			return [];
+		}
+		// Log unexpected errors (e.g., permission denied) so users know why list is empty
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[DRYKISS] Failed to list reviews: ${msg}`);
 		return [];
 	}
 }

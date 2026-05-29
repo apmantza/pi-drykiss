@@ -1,14 +1,5 @@
 import { describe, it, expect } from "vitest";
-
-// Extract the pure helper for testing (not exported, so we reimplement the logic)
-function extractAssistantText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.filter((c: any) => !!c && typeof c === "object" && c.type === "text")
-		.map((c: any) => c.text ?? "")
-		.join("");
-}
+import { extractAssistantText } from "./content-utils.js";
 
 describe("extractAssistantText", () => {
 	it("returns string content directly", () => {

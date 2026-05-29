@@ -24,13 +24,13 @@ export interface DrykissConfig {
 	contextMode?: "diff" | "full";
 }
 
-export function getConfigPath(_cwd: string): string {
+export function getConfigPath(): string {
 	return join(getGlobalBaseDir(), CONFIG_FILE);
 }
 
 export async function loadConfig(cwd: string): Promise<DrykissConfig> {
 	try {
-		const raw = await readFile(getConfigPath(cwd), "utf8");
+		const raw = await readFile(getConfigPath(), "utf8");
 		return JSON.parse(raw) as DrykissConfig;
 	} catch (err) {
 		// ENOENT: file missing — return defaults silently (new project)
@@ -58,7 +58,7 @@ export async function saveConfig(
 ): Promise<void> {
 	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
-	await writeFile(getConfigPath(cwd), JSON.stringify(config, null, 2), "utf8");
+	await writeFile(getConfigPath(), JSON.stringify(config, null, 2), "utf8");
 }
 
 export async function setLensModel(

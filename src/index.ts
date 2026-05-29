@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Show past KISS/DRY review results persisted to ~/.pi/drykiss/reviews/",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			const reviews = await listReviews(ctx.cwd);
+			const reviews = await listReviews();
 			if (reviews.length === 0) {
 				ctx.ui.notify("No past reviews found.", "info");
 				return;

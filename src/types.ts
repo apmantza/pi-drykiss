@@ -1,3 +1,5 @@
+import { lenientJsonParse } from "./json-utils.js";
+
 export interface ChangedFile {
 	readonly path: string;
 	readonly status: "modified" | "added" | "renamed" | "copied" | "deleted";
@@ -78,6 +80,17 @@ export interface EditedFile {
  * Handles missing/undefined fields with sensible defaults.
  */
 export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
+	if (raw == null || typeof raw !== "object") {
+		return {
+			file: "unknown",
+			severity: "medium",
+			category: "",
+			summary: "",
+			detail: "",
+			suggestion: "",
+			lens,
+		};
+	}
 	return {
 		file: String(raw.file ?? "unknown"),
 		line: typeof raw.line === "number" ? raw.line : undefined,
@@ -100,4 +113,50 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 export function parseFindingsArray(raw: unknown, lens?: ReviewLens): Finding[] {
 	if (!Array.isArray(raw)) return [];
 	return raw.map((f) => mapRawToFinding(f, lens));
+}
+
+/** Create a fallback SynthesisResult for error cases. */
+export function createFallbackSynthesis(summary: string): SynthesisResult {
+	return {
+		findings: [],
+		summary,
+		verdict: "Request changes",
+		criticalCount: 0,
+		highCount: 0,
+		mediumCount: 0,
+		lowCount: 0,
+		nitCount: 0,
+	};
+}
+
+/**
+ * Parse raw LLM synthesis output into a SynthesisResult.
+ * Returns a fallback result on parse failure.
+ */
+export function parseSynthesis(raw: string): SynthesisResult {
+	try {
+		const parsed = lenientJsonParse<Record<string, unknown>>(raw);
+		if (typeof parsed !== "object" || parsed === null) {
+			throw new Error("Not an object");
+		}
+		const findings = Array.isArray(parsed.findings)
+			? (parsed.findings as any[]).map((f) => mapRawToFinding(f))
+			: [];
+		return {
+			findings,
+			summary: String(parsed.summary ?? ""),
+			verdict: String(
+				parsed.verdict ?? "Request changes",
+			) as SynthesisResult["verdict"],
+			criticalCount: findings.filter((f) => f.severity === "critical").length,
+			highCount: findings.filter((f) => f.severity === "high").length,
+			mediumCount: findings.filter((f) => f.severity === "medium").length,
+			lowCount: findings.filter((f) => f.severity === "low").length,
+			nitCount: findings.filter((f) => f.severity === "nit").length,
+		};
+	} catch {
+		return createFallbackSynthesis(
+			"Synthesis returned non-JSON output. Raw response available in logs.",
+		);
+	}
 }

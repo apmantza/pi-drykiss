@@ -44,6 +44,20 @@ describe("loadConfig", () => {
 		const config = await loadConfig("/cwd");
 		expect(config.interactive).toBe(true);
 	});
+
+	it("rethrows non-ENOENT, non-SyntaxError errors", async () => {
+		vi.mocked(readFile).mockRejectedValue(
+			Object.assign(new Error("Permission denied"), {
+				code: "EACCES" as const,
+			}),
+		);
+		await expect(loadConfig("/cwd")).rejects.toThrow("Permission denied");
+	});
+
+	it("rethrows generic Error that is not ENOENT or SyntaxError", async () => {
+		vi.mocked(readFile).mockRejectedValue(new Error("Disk full"));
+		await expect(loadConfig("/cwd")).rejects.toThrow("Disk full");
+	});
 });
 
 describe("saveConfig", () => {
@@ -115,5 +129,13 @@ describe("setDefaultModel", () => {
 		await setDefaultModel("/cwd", "sonnet");
 		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
 		expect(written.defaultModel).toBe("sonnet");
+	});
+
+	it("propagates writeFile errors", async () => {
+		vi.mocked(readFile).mockResolvedValue(JSON.stringify({}));
+		vi.mocked(writeFile).mockRejectedValue(new Error("Write failed"));
+		await expect(setDefaultModel("/cwd", "haiku")).rejects.toThrow(
+			"Write failed",
+		);
 	});
 });

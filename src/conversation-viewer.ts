@@ -156,8 +156,9 @@ export class ConversationViewer implements Component {
 	}
 }
 
-function chunkLine(text: string, max: number): string[] {
+export function chunkLine(text: string, max: number): string[] {
 	const t = text.replace(/\n/g, " ");
+	if (!t) return [];
 	if (t.length <= max) return [t];
 	const chunks: string[] = [];
 	for (let i = 0; i < t.length; i += max) {

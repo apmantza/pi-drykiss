@@ -215,16 +215,22 @@ export async function getFileContent(
 			: raw;
 		return { content, lineCount: lines.length, truncated };
 	} catch (err) {
+		const code =
+			err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
 		// ENOENT is expected for missing files (e.g., deleted files in git status)
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
+		if (code === "ENOENT") {
 			return null;
 		}
+		// Permission errors — warn the user but continue
+		if (code === "EACCES" || code === "EPERM") {
+			console.warn(
+				`[DRYKISS] Permission denied reading ${filePath}, skipping.`,
+			);
+			return null;
+		}
+		// Unexpected errors — rethrow so callers know something is wrong
 		const msg = err instanceof Error ? err.message : String(err);
-		console.error(`[DRYKISS] Failed to read ${filePath}:`, msg);
-		return null;
+		throw new Error(`Failed to read ${filePath}: ${msg}`);
 	}
 }
 

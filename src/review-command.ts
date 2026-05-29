@@ -21,6 +21,7 @@ import type {
 	Finding,
 } from "./types.js";
 import { parseFindingsArray } from "./types.js";
+import { sanitizeJsonString } from "./json-utils.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -164,43 +165,6 @@ async function prepareReview(
 export interface ParseFindingsResult {
 	findings: Finding[];
 	parseError?: string;
-}
-
-/**
- * Attempt to repair common LLM JSON issues:
- * - Unescaped control characters (newlines, tabs) inside strings
- * - Trailing commas before } or ]
- * - Markdown code fences around JSON
- */
-function sanitizeJsonString(raw: string): string {
-	let s = raw;
-
-	// Remove markdown code fences if present
-	s = s.replace(/```(?:json)?\s*/gi, "");
-
-	// Replace literal newlines/tabs inside strings with escaped versions
-	// This regex is imperfect but handles most cases
-	s = s.replace(/"([^"]*)"/g, (_match, content: string) => {
-		// Only sanitize if the content contains problematic characters
-		if (
-			content.includes("\n") ||
-			content.includes("\t") ||
-			content.includes("\r")
-		) {
-			const sanitized = content
-				.replace(/\r\n/g, " ")
-				.replace(/\n/g, " ")
-				.replace(/\t/g, " ")
-				.replace(/"/g, '\\"');
-			return `"${sanitized}"`;
-		}
-		return _match;
-	});
-
-	// Remove trailing commas before } or ]
-	s = s.replace(/,\s*([}\]])/g, "$1");
-
-	return s;
 }
 
 function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {

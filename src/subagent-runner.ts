@@ -20,6 +20,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
 import { extractAssistantText } from "./content-utils.js";
+import { LENS_DISPLAY_NAMES } from "./constants.js";
 
 export interface SubagentResult {
 	lens: string;
@@ -30,18 +31,6 @@ export interface SubagentResult {
 	/** The live session object — caller must dispose when no longer needed. */
 	session?: AgentSession;
 }
-
-/** Lens display names for session naming. */
-const LENS_DISPLAY_NAMES: Record<string, string> = {
-	simplicity: "KISS",
-	deduplication: "DRY",
-	clarity: "Clarity",
-	resilience: "Resilience",
-	architecture: "Architecture",
-	tests: "Tests",
-	security: "Security",
-	synthesis: "Synthesis",
-};
 
 /**
  * Resolve a model for a lens. Thin wrapper around resolveModelSmart

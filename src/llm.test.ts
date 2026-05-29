@@ -1,6 +1,28 @@
-import { describe, it, expect } from "vitest";
-import { findModelByHint } from "./llm.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { findModelByHint, resolveModelSmart, callLLM } from "./llm.js";
+import { loadConfig, getModelForLens } from "./config.js";
+import { selectModel } from "./model-selector.js";
+import { complete } from "@earendil-works/pi-ai";
 import type { Model, Api } from "@earendil-works/pi-ai";
+
+vi.mock("./config.js", () => ({
+	loadConfig: vi.fn().mockResolvedValue({ interactive: false }),
+	getModelForLens: vi.fn().mockImplementation((config: any, lens?: string) => {
+		if (lens && config.lensModels?.[lens]) return config.lensModels[lens];
+		return config.defaultModel;
+	}),
+	saveConfig: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("./model-selector.js", () => ({
+	selectModel: vi.fn().mockResolvedValue(undefined),
+	isQuotaError: vi.fn().mockReturnValue(false),
+	isAuthError: vi.fn().mockReturnValue(false),
+}));
+
+vi.mock("@earendil-works/pi-ai", () => ({
+	complete: vi.fn(),
+}));
 
 function mockModel(provider: string, id: string, name: string): Model<Api> {
 	return { provider, id, name } as Model<Api>;
@@ -70,5 +92,188 @@ describe("findModelByHint", () => {
 		const result = findModelByHint(models, "mini");
 		// id contains "mini" in gpt-4o-mini
 		expect(result?.id).toBe("gpt-4o-mini");
+	});
+});
+
+describe("resolveModelSmart", () => {
+	const models = [
+		mockModel("anthropic", "claude-sonnet-4-20250514", "Claude Sonnet 4"),
+		mockModel("openai", "gpt-4o", "GPT-4o"),
+	];
+
+	function makeCtx(overrides?: { interactive?: boolean; hasUI?: boolean }) {
+		return {
+			cwd: "/test",
+			modelRegistry: {
+				getAvailable: vi.fn().mockReturnValue(models),
+			},
+			hasUI: overrides?.hasUI ?? false,
+			ui: { notify: vi.fn() },
+		} as any;
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(loadConfig).mockResolvedValue({ interactive: false } as any);
+		vi.mocked(getModelForLens).mockImplementation(
+			(config: any, lens?: string) => {
+				if (lens && config.lensModels?.[lens]) return config.lensModels[lens];
+				return config.defaultModel;
+			},
+		);
+	});
+
+	it("returns undefined when no models available", async () => {
+		const ctx = makeCtx();
+		ctx.modelRegistry.getAvailable.mockReturnValue([]);
+		const result = await resolveModelSmart(ctx, "/test");
+		expect(result).toBeUndefined();
+	});
+
+	it("uses explicit hint when provided", async () => {
+		const ctx = makeCtx();
+		const result = await resolveModelSmart(ctx, "/test", "gpt");
+		expect(result?.id).toBe("gpt-4o");
+	});
+
+	it("falls back to per-lens config", async () => {
+		const ctx = makeCtx();
+		vi.mocked(getModelForLens).mockReturnValue(
+			"anthropic/claude-sonnet-4-20250514",
+		);
+		const result = await resolveModelSmart(
+			ctx,
+			"/test",
+			undefined,
+			"simplicity",
+		);
+		expect(result?.id).toBe("claude-sonnet-4-20250514");
+	});
+
+	it("falls back to default model from config", async () => {
+		const ctx = makeCtx();
+		// Set up loadConfig to return config with defaultModel for this test
+		vi.mocked(loadConfig).mockResolvedValue({
+			defaultModel: "openai/gpt-4o",
+		} as any);
+		const result = await resolveModelSmart(ctx, "/test");
+		expect(result?.id).toBe("gpt-4o");
+	});
+
+	it("returns first available model as final fallback", async () => {
+		const ctx = makeCtx();
+		const result = await resolveModelSmart(ctx, "/test");
+		expect(result?.id).toBe("claude-sonnet-4-20250514");
+	});
+
+	it("skips interactive selector when hasUI is false", async () => {
+		const ctx = makeCtx({ hasUI: false });
+		vi.mocked(loadConfig).mockResolvedValue({ interactive: true } as any);
+		const result = await resolveModelSmart(ctx, "/test");
+		// Should fall through to first available model
+		expect(result?.id).toBe("claude-sonnet-4-20250514");
+		expect(selectModel).not.toHaveBeenCalled();
+	});
+});
+
+describe("callLLM", () => {
+	const models = [
+		mockModel("anthropic", "claude-sonnet-4-20250514", "Claude Sonnet 4"),
+	];
+
+	function makeCtx() {
+		return {
+			cwd: "/test",
+			modelRegistry: {
+				getAvailable: vi.fn().mockReturnValue(models),
+				getApiKeyAndHeaders: vi
+					.fn()
+					.mockResolvedValue({ ok: true, key: "test-key" }),
+			},
+			hasUI: false,
+			ui: { notify: vi.fn() },
+		} as any;
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(loadConfig).mockResolvedValue({ interactive: false } as any);
+		vi.mocked(complete).mockResolvedValue({
+			content: [{ type: "text", text: "response" }],
+		} as any);
+	});
+
+	it("returns text from LLM response", async () => {
+		const ctx = makeCtx();
+		const result = await callLLM(ctx, "/test", "system", "user");
+		expect(result.text).toBe("response");
+		expect(result.model.id).toBe("claude-sonnet-4-20250514");
+	});
+
+	it("throws when no model available", async () => {
+		const ctx = makeCtx();
+		ctx.modelRegistry.getAvailable.mockReturnValue([]);
+		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+			"No model available",
+		);
+	});
+
+	it("throws when API key is missing", async () => {
+		const ctx = makeCtx();
+		ctx.modelRegistry.getApiKeyAndHeaders.mockResolvedValue({
+			ok: false,
+			error: "No key",
+		});
+		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+			"No API key",
+		);
+	});
+
+	it("retries on quota error when hasUI is true", async () => {
+		const { isQuotaError } = await import("./model-selector.js");
+		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+		const ctx = makeCtx();
+		ctx.hasUI = true;
+
+		// First call fails with quota error, second succeeds
+		vi.mocked(complete)
+			.mockRejectedValueOnce(new Error("Rate limit"))
+			.mockResolvedValueOnce({
+				content: [{ type: "text", text: "retry-success" }],
+			} as any);
+		vi.mocked(selectModel).mockResolvedValue(models[0]);
+
+		const result = await callLLM(ctx, "/test", "system", "user");
+		expect(result.text).toBe("retry-success");
+		expect(selectModel).toHaveBeenCalled();
+	});
+
+	it("retries on auth error when hasUI is true", async () => {
+		const { isAuthError } = await import("./model-selector.js");
+		vi.mocked(isAuthError).mockReturnValueOnce(true);
+		const ctx = makeCtx();
+		ctx.hasUI = true;
+
+		vi.mocked(complete)
+			.mockRejectedValueOnce(new Error("Unauthorized"))
+			.mockResolvedValueOnce({
+				content: [{ type: "text", text: "retry-success" }],
+			} as any);
+		vi.mocked(selectModel).mockResolvedValue(models[0]);
+
+		const result = await callLLM(ctx, "/test", "system", "user");
+		expect(result.text).toBe("retry-success");
+	});
+
+	it("throws quota error when hasUI is false", async () => {
+		const { isQuotaError } = await import("./model-selector.js");
+		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+		const ctx = makeCtx();
+
+		vi.mocked(complete).mockRejectedValueOnce(new Error("Rate limit"));
+
+		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+			"Rate limit",
+		);
 	});
 });

@@ -6,96 +6,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
-import { LENS_NAMES, mapRawToFinding } from "./types.js";
+import {
+	LENS_NAMES,
+	createFallbackSynthesis,
+	parseSynthesis,
+} from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
-
-/**
- * Lenient JSON parser that handles common LLM output issues.
- * Tries strict parse first, then applies fixes for:
- * - Unescaped newlines in string values
- * - Trailing commas before } or ]
- * - Unescaped control characters
- * - Unterminated strings (best-effort)
- */
-function lenientJsonParse<T = unknown>(raw: string): T {
-	// Try strict parse first (fast path)
-	try {
-		return JSON.parse(raw) as T;
-	} catch {
-		// Fall through to lenient parsing
-	}
-
-	let fixed = raw;
-
-	// 1. Remove markdown code fences if present
-	fixed = fixed.replace(/^```(?:json)?\s*\n?/gm, "").replace(/```\s*$/gm, "");
-
-	// 2. Extract JSON object or array if wrapped in text
-	const objMatch = fixed.match(/\{[\s\S]*\}/);
-	const arrMatch = fixed.match(/\[[\s\S]*\]/);
-	if (objMatch) {
-		fixed = objMatch[0];
-	} else if (arrMatch) {
-		fixed = arrMatch[0];
-	}
-
-	// 3. Fix trailing commas (common LLM mistake)
-	// Matches: ,} or ,] (with optional whitespace between)
-	fixed = fixed.replace(/,\s*([}\]])/g, "$1");
-
-	// 4. Fix unescaped newlines inside string values
-	// This regex matches content between quotes and escapes literal newlines
-	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
-		// Only process if there are unescaped newlines
-		if (!content.includes("\n")) return match;
-		// Escape the newlines
-		const escaped = content.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
-		return `"${escaped}"`;
-	});
-
-	// 5. Fix unescaped tabs inside string values
-	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
-		if (!content.includes("\t")) return match;
-		const escaped = content.replace(/\t/g, "\\t");
-		return `"${escaped}"`;
-	});
-
-	// 6. Fix single quotes used as string delimiters (rare but happens)
-	// Only do this if there are no double quotes (pure single-quote JSON)
-	if (!fixed.includes('"') && fixed.includes("'")) {
-		fixed = fixed.replace(/'/g, '"');
-	}
-
-	// 7. Try to fix unterminated strings by finding last complete object/array
-	// Find the last } or ] and truncate there
-	const lastObjBrace = fixed.lastIndexOf("}");
-	const lastArrBracket = fixed.lastIndexOf("]");
-	const lastComplete = Math.max(lastObjBrace, lastArrBracket);
-	if (lastComplete > 0 && lastComplete < fixed.length - 1) {
-		fixed = fixed.substring(0, lastComplete + 1);
-	}
-
-	// Final attempt
-	return JSON.parse(fixed) as T;
-}
+import { lenientJsonParse } from "./json-utils.js";
 
 const CONCURRENCY = 3;
-
-/** Create a fallback SynthesisResult for error cases. */
-function createFallbackSynthesis(summary: string): SynthesisResult {
-	return {
-		findings: [],
-		summary,
-		verdict: "Request changes",
-		criticalCount: 0,
-		highCount: 0,
-		mediumCount: 0,
-		lowCount: 0,
-		nitCount: 0,
-	};
-}
 
 export type LensStatus = "queued" | "running" | "done" | "error";
 
@@ -412,7 +333,7 @@ export class ReviewManager {
 				? `ERROR: ${result.errorMessage}`
 				: result.text || "{}";
 
-			job.synthesisResult = this.parseSynthesis(raw);
+			job.synthesisResult = parseSynthesis(raw);
 			job.synthesisStatus = "done";
 		} catch (err: any) {
 			job.synthesisStatus = "error";
@@ -430,44 +351,10 @@ export class ReviewManager {
 
 		// Persist
 		if (job.synthesisResult) {
-			await saveReview(cwd, job.files, job.synthesisResult);
+			await saveReview(job.files, job.synthesisResult);
 		}
 
 		this.onComplete?.(job);
-	}
-
-	private parseSynthesis(raw: string): SynthesisResult {
-		try {
-			const parsed = lenientJsonParse<Record<string, unknown>>(raw);
-			if (typeof parsed !== "object" || parsed === null) {
-				throw new Error("Not an object");
-			}
-			const findings = Array.isArray(parsed.findings)
-				? (parsed.findings as any[]).map((f) => mapRawToFinding(f))
-				: [];
-			return {
-				findings,
-				summary: String(parsed.summary ?? ""),
-				verdict: String(
-					parsed.verdict ?? "Request changes",
-				) as SynthesisResult["verdict"],
-				criticalCount: findings.filter((f) => f.severity === "critical").length,
-				highCount: findings.filter((f) => f.severity === "high").length,
-				mediumCount: findings.filter((f) => f.severity === "medium").length,
-				lowCount: findings.filter((f) => f.severity === "low").length,
-				nitCount: findings.filter((f) => f.severity === "nit").length,
-			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.error("[DRYKISS] Synthesis JSON parse failed:", msg);
-			console.error(
-				"[DRYKISS] Synthesis raw output (first 800 chars):",
-				raw.slice(0, 800),
-			);
-			return createFallbackSynthesis(
-				"Synthesis returned non-JSON output. Raw response available in logs.",
-			);
-		}
 	}
 
 	getJob(id: string): ReviewJob | undefined {
