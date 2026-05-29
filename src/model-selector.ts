@@ -181,3 +181,8 @@ export function isAuthError(err: unknown): boolean {
 		msg.includes("403")
 	);
 }
+
+/** Check if an error is a model-level error (quota or auth) that warrants model switching. */
+export function isModelError(err: unknown): boolean {
+	return isQuotaError(err) || isAuthError(err);
+}

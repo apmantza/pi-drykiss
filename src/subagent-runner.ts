@@ -21,6 +21,7 @@ import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
 import { extractAssistantText } from "./content-utils.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
+import { isModelError, selectModel } from "./model-selector.js";
 
 export interface SubagentResult {
 	lens: string;
@@ -161,6 +162,32 @@ export async function runLensSubagent(
 		await session.prompt(userPrompt);
 		await session.agent.waitForIdle();
 	} catch (err: any) {
+		// On model-level errors (quota/auth), prompt user to pick a different model and retry once
+		if (isModelError(err) && ctx.hasUI) {
+			const selected = await selectModel(
+				ctx,
+				"Model Error",
+				`Model "${model.name}" failed: ${err.message}\n\nChoose a different model:`,
+			);
+			if (selected) {
+				// Dispose current session and retry with new model
+				try {
+					session.dispose();
+				} catch {
+					/* ignore */
+				}
+				return runLensSubagent(
+					ctx,
+					cwd,
+					selected,
+					systemPrompt,
+					userPrompt,
+					lens,
+					signal,
+					onStreamUpdate,
+				);
+			}
+		}
 		if (!errorMessage) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 		}
