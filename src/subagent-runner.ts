@@ -14,6 +14,7 @@ import {
 	getAgentDir,
 	DefaultResourceLoader,
 	SessionManager,
+	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
@@ -77,22 +78,25 @@ export async function resolveAllModels(
 /**
  * Spawn a single lens review as a Pi subagent.
  * Each session is named so it appears in Pi's session list.
+ * Pattern adapted from: https://github.com/tintinweb/pi-subagents
  */
 export async function runLensSubagent(
-	_ctx: ExtensionContext,
+	ctx: ExtensionContext,
 	cwd: string,
 	model: Model<Api>,
 	systemPrompt: string,
 	userPrompt: string,
 	lens: string,
 	signal?: AbortSignal,
+	onStreamUpdate?: () => void,
 ): Promise<SubagentResult> {
 	const start = Date.now();
 	const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
+	const agentDir = getAgentDir();
 
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
-		agentDir: getAgentDir(),
+		agentDir,
 		systemPrompt,
 		noExtensions: true,
 		noSkills: true,
@@ -102,11 +106,15 @@ export async function runLensSubagent(
 	});
 	await resourceLoader.reload();
 
+	// Create session with SettingsManager and modelRegistry for full Pi integration
+	// (matches pi-subagents pattern for visible sessions)
 	const { session } = await createAgentSession({
 		cwd,
-		agentDir: getAgentDir(),
+		agentDir,
 		model,
 		sessionManager: SessionManager.inMemory(cwd),
+		settingsManager: SettingsManager.create(cwd, agentDir),
+		modelRegistry: ctx.modelRegistry,
 		resourceLoader,
 		noTools: "all",
 	});
@@ -114,10 +122,27 @@ export async function runLensSubagent(
 	// Name the session so it appears in Pi's session list (like pi-subagents)
 	session.setSessionName(`DRYKISS: ${displayName}`);
 
+	// Bind extensions so session_start fires and the session is fully initialized
+	// This is critical for the session to be visible in Pi's UI
+	await session.bindExtensions({
+		onError: (err) => {
+			console.error(`[DRYKISS] Extension error in ${displayName}:`, err);
+		},
+	});
+
 	let finalText = "";
 	let errorMessage: string | undefined;
+	let currentText = "";
 
+	// Subscribe to session events for streaming progress (like pi-subagents)
 	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+		if (event.type === "message_start") {
+			currentText = "";
+		}
+		if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+			currentText += event.assistantMessageEvent.delta;
+			onStreamUpdate?.();
+		}
 		if (event.type === "message_end") {
 			const message = event.message as {
 				role?: string;

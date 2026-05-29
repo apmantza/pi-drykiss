@@ -130,6 +130,7 @@ export class ReviewProgressWidget {
 			durationMs: number;
 			errorMessage?: string;
 			findingsCount: number;
+			streamingText?: string;
 		},
 		theme: Theme,
 		frame: string,
@@ -141,7 +142,9 @@ export class ReviewProgressWidget {
 			statusText = theme.fg("dim", "queued");
 		} else if (state.status === "running") {
 			icon = theme.fg("accent", frame);
-			statusText = theme.fg("accent", "running");
+			statusText = state.streamingText
+				? theme.fg("dim", state.streamingText.slice(0, 30))
+				: theme.fg("accent", "running");
 		} else if (state.status === "done") {
 			icon = theme.fg("success", "✓");
 			const findings =

@@ -38,6 +38,8 @@ export interface LensState {
 	rawOutput: string;
 	/** Live session object — kept alive for conversation viewing. */
 	session?: AgentSession;
+	/** Streaming text from the subagent (updated in real-time for live progress). */
+	streamingText?: string;
 }
 
 export interface ReviewJob {
@@ -68,6 +70,7 @@ export class ReviewManager {
 		systemPrompt: string;
 		userPrompt: string;
 		signal: AbortSignal;
+		onStreamUpdate: () => void;
 	}[] = [];
 
 	/** Number of lens subagents currently running. */
@@ -155,14 +158,22 @@ export class ReviewManager {
 				s.errorMessage = !prompt ? "No prompt generated" : "No model resolved";
 				continue;
 			}
-			this.taskQueue.push({
-				jobId: id,
-				lens,
-				model,
-				systemPrompt: prompt.systemPrompt,
-				userPrompt: prompt.userPrompt,
-				signal: abortController.signal,
-			});
+		this.taskQueue.push({
+			jobId: id,
+			lens,
+			model,
+			systemPrompt: prompt.systemPrompt,
+			userPrompt: prompt.userPrompt,
+			signal: abortController.signal,
+			onStreamUpdate: () => {
+				// Notify UI on streaming updates for live progress
+				try {
+					this.onUpdate?.(job);
+				} catch {
+					/* don't let callback errors crash */
+				}
+			},
+		});
 		}
 
 		// Start draining
@@ -207,6 +218,7 @@ export class ReviewManager {
 			systemPrompt: string;
 			userPrompt: string;
 			signal: AbortSignal;
+			onStreamUpdate: () => void;
 		},
 	) {
 		const { runLensSubagent } = await import("./subagent-runner.js");
@@ -229,6 +241,11 @@ export class ReviewManager {
 			task.userPrompt,
 			task.lens,
 			task.signal,
+			() => {
+						// Update streaming text for live progress display
+						state.streamingText = "streaming...";
+						task.onStreamUpdate();
+			},
 		);
 
 		state.durationMs = result.durationMs;
