@@ -342,7 +342,7 @@ export async function handleDrykissCommand(
 		const scopeLabel = options.all ? "full project scan" : "changed files";
 		const ok = await ctx.ui.confirm(
 			"DRYKISS Review",
-			`Review ${files.length} file(s) (${scopeLabel}) with 6 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
+			`Review ${files.length} file(s) (${scopeLabel}) with 7 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
 		);
 		if (!ok) {
 			ctx.ui.notify("Review cancelled.", "info");

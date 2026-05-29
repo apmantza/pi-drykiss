@@ -47,6 +47,11 @@ export default function (pi: ExtensionAPI): void {
 		widget.setJobs(manager.listJobs());
 	});
 
+	// Also grab UI context on session start so commands can show the widget
+	pi.on("session_start", (_event: any, ctx: any) => {
+		widget.attach(ctx.ui);
+	});
+
 	// ── Custom notification renderer for completed reviews ─
 	pi.registerMessageRenderer<ReviewJob>(
 		"drykiss-review-complete",
@@ -172,7 +177,7 @@ export default function (pi: ExtensionAPI): void {
 	// ── /drykiss — Full multi-lens KISS/DRY review ─────────
 	pi.registerCommand(COMMAND_NAME, {
 		description:
-			"Run a full KISS/DRY review on changed files using 6 parallel lens reviews + synthesis. Supports --all, --staged, --ref=branch, --model=hint. Configure defaults with /drykiss-config.",
+			"Run a full KISS/DRY review on changed files using 7 parallel lens reviews + synthesis. Supports --all, --staged, --ref=branch, --model=hint. Configure defaults with /drykiss-config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
 			handleDrykissCommand(args, ctx, pi, manager),
 	});

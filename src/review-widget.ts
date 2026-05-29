@@ -3,6 +3,18 @@ import type { ReviewJob, LensStatus } from "./review-manager.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/** Human-readable lens display names. */
+const LENS_DISPLAY_NAMES: Record<string, string> = {
+	simplicity: "KISS",
+	deduplication: "DRY",
+	clarity: "Clarity",
+	resilience: "Resilience",
+	architecture: "Architecture",
+	tests: "Tests",
+	security: "Security",
+	synthesis: "Synthesis",
+};
+
 type Theme = {
 	fg(color: string, text: string): string;
 	bold(text: string): string;
@@ -53,7 +65,26 @@ export class ReviewProgressWidget {
 				job.overallStatus === "running"
 					? theme.fg("accent", theme.bold("● DRYKISS Review"))
 					: theme.fg("dim", theme.bold("○ DRYKISS Review (queued)"));
-			lines.push(truncate(heading));
+			const fileCount = theme.fg("dim", `· ${job.files.length} file(s)`);
+			lines.push(truncate(`${heading} ${fileCount}`));
+
+			// Count active/completed/done lenses
+			let activeCount = 0;
+			let doneCount = 0;
+			let errorCount = 0;
+			for (const lens of job.lenses) {
+				const s = job.states.get(lens)!;
+				if (s.status === "running") activeCount++;
+				else if (s.status === "done") doneCount++;
+				else if (s.status === "error") errorCount++;
+			}
+			const totalLenses = job.lenses.length;
+			const progressText = theme.fg(
+				"dim",
+				`${doneCount + errorCount}/${totalLenses} complete` +
+					(activeCount > 0 ? ` · ${activeCount} active` : ""),
+			);
+			lines.push(truncate(`  ${progressText}`));
 
 			for (let i = 0; i < job.lenses.length; i++) {
 				const lens = job.lenses[i];
@@ -70,10 +101,18 @@ export class ReviewProgressWidget {
 				const icon =
 					job.synthesisStatus === "running"
 						? theme.fg("accent", frame)
-						: theme.fg("success", "✓");
+						: job.synthesisStatus === "error"
+							? theme.fg("error", "✗")
+							: theme.fg("success", "✓");
+				const statusText =
+					job.synthesisStatus === "running"
+						? theme.fg("accent", "running")
+						: job.synthesisStatus === "error"
+							? theme.fg("error", "failed")
+							: theme.fg("dim", "done");
 				lines.push(
 					truncate(
-						`${theme.fg("dim", "└─")} ${icon} ${theme.bold("Synthesis")} ${theme.fg("dim", "· " + job.synthesisStatus)}`,
+						`${theme.fg("dim", "└─")} ${icon} ${theme.bold("Synthesis")} · ${statusText}`,
 					),
 				);
 			}
@@ -119,7 +158,8 @@ export class ReviewProgressWidget {
 			);
 		}
 
-		const name = lens.charAt(0).toUpperCase() + lens.slice(1);
+		const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
+		const name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 		const model = theme.fg("dim", `@ ${state.modelName}`);
 		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}`;
 	}

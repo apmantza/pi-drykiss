@@ -30,6 +30,18 @@ export interface SubagentResult {
 	session?: AgentSession;
 }
 
+/** Lens display names for session naming. */
+const LENS_DISPLAY_NAMES: Record<string, string> = {
+	simplicity: "KISS",
+	deduplication: "DRY",
+	clarity: "Clarity",
+	resilience: "Resilience",
+	architecture: "Architecture",
+	tests: "Tests",
+	security: "Security",
+	synthesis: "Synthesis",
+};
+
 /**
  * Resolve a model for a lens. Thin wrapper around resolveModelSmart
  * that throws instead of returning undefined.
@@ -64,6 +76,7 @@ export async function resolveAllModels(
 
 /**
  * Spawn a single lens review as a Pi subagent.
+ * Each session is named so it appears in Pi's session list.
  */
 export async function runLensSubagent(
 	_ctx: ExtensionContext,
@@ -72,8 +85,10 @@ export async function runLensSubagent(
 	systemPrompt: string,
 	userPrompt: string,
 	lens: string,
+	signal?: AbortSignal,
 ): Promise<SubagentResult> {
 	const start = Date.now();
+	const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
 
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
@@ -91,10 +106,13 @@ export async function runLensSubagent(
 		cwd,
 		agentDir: getAgentDir(),
 		model,
-		sessionManager: SessionManager.inMemory(),
+		sessionManager: SessionManager.inMemory(cwd),
 		resourceLoader,
 		noTools: "all",
 	});
+
+	// Name the session so it appears in Pi's session list (like pi-subagents)
+	session.setSessionName(`DRYKISS: ${displayName}`);
 
 	let finalText = "";
 	let errorMessage: string | undefined;
@@ -114,8 +132,14 @@ export async function runLensSubagent(
 		}
 	});
 
-	// Intentionally NOT wiring to ctx.signal — these are background reviews
-	// that should survive the user cancelling the parent agent turn.
+	// Wire abort signal to cancel the session
+	let detachAbort: (() => void) | undefined;
+	if (signal) {
+		const onAbort = () => session.abort();
+		signal.addEventListener("abort", onAbort, { once: true });
+		detachAbort = () => signal.removeEventListener("abort", onAbort);
+	}
+
 	try {
 		await session.prompt(userPrompt);
 		await session.agent.waitForIdle();
@@ -125,6 +149,7 @@ export async function runLensSubagent(
 		}
 	} finally {
 		unsubscribe();
+		detachAbort?.();
 		// NOTE: session is NOT disposed here — caller (ReviewManager) keeps it
 		// alive so the conversation can be viewed via /drykiss-jobs.
 	}

@@ -67,10 +67,14 @@ export class ReviewManager {
 		model: Model<Api>;
 		systemPrompt: string;
 		userPrompt: string;
+		signal: AbortSignal;
 	}[] = [];
 
 	/** Number of lens subagents currently running. */
 	private runningCount = 0;
+
+	/** Abort controllers per job for cancelling running sessions. */
+	private abortControllers = new Map<string, AbortController>();
 
 	constructor(onUpdate?: OnReviewUpdate, onComplete?: OnReviewComplete) {
 		this.onUpdate = onUpdate;
@@ -137,6 +141,10 @@ export class ReviewManager {
 		};
 		this.jobs.set(id, job);
 
+		// Create abort controller for this job
+		const abortController = new AbortController();
+		this.abortControllers.set(id, abortController);
+
 		// Queue all lens tasks
 		for (const lens of lenses) {
 			const prompt = promptMap.get(lens);
@@ -153,6 +161,7 @@ export class ReviewManager {
 				model,
 				systemPrompt: prompt.systemPrompt,
 				userPrompt: prompt.userPrompt,
+				signal: abortController.signal,
 			});
 		}
 
@@ -197,6 +206,7 @@ export class ReviewManager {
 			model: Model<Api>;
 			systemPrompt: string;
 			userPrompt: string;
+			signal: AbortSignal;
 		},
 	) {
 		const { runLensSubagent } = await import("./subagent-runner.js");
@@ -218,6 +228,7 @@ export class ReviewManager {
 			task.systemPrompt,
 			task.userPrompt,
 			task.lens,
+			task.signal,
 		);
 
 		state.durationMs = result.durationMs;
@@ -416,11 +427,27 @@ export class ReviewManager {
 	abort(id: string): boolean {
 		const job = this.jobs.get(id);
 		if (!job) return false;
+
+		// Signal abort to all running subagents for this job
+		const controller = this.abortControllers.get(id);
+		if (controller) {
+			controller.abort();
+			this.abortControllers.delete(id);
+		}
+
 		// Remove pending tasks for this job
 		this.taskQueue = this.taskQueue.filter((t) => t.jobId !== id);
 		job.overallStatus = "error";
 		job.completedAt = Date.now();
 		this.disposeJobSessions(job);
+
+		// Notify UI
+		try {
+			this.onComplete?.(job);
+		} catch {
+			/* don't let callback errors crash */
+		}
+
 		return true;
 	}
 }
