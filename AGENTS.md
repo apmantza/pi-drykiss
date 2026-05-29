@@ -6,18 +6,21 @@ A Pi extension that runs multi-lens code reviews (KISS, DRY, resilience, archite
 
 ```
 src/
-  index.ts           # Extension entry point — registers commands, tools, event handlers
-  review-command.ts  # Command handlers (/drykiss, /drykiss-kiss, etc.) + review orchestration
-  llm.ts             # LLM call helpers (callLens, callSynthesizer, withRetry)
-  prompt-builder.ts  # Builds system prompts for each lens from .md templates
-  model-selector.ts  # Resolves model hints ("haiku" → "claude-sonnet-4...") with fallback
-  git-diff.ts        # Git diff parsing, file status detection, project index generation
-  edit-tracker.ts    # Tracks file edits across turns via tool_execution_end events
-  auto-injector.ts   # Injects KISS/DRY checklist into system prompt after editing turns
-  config.ts          # Per-project config (.pi/drykiss/config.json) persistence
-  config-command.ts  # /drykiss-config command handler
-  persist.ts         # Saves review results to .pi/drykiss/reviews/
-  types.ts           # Shared domain types (Finding, SynthesisResult, ReviewLens, etc.)
+  index.ts            # Extension entry point — registers commands, tools, event handlers
+  review-command.ts   # Command handlers (/drykiss, /drykiss-kiss, etc.) + review orchestration
+  review-manager.ts   # Manages review jobs, parallel lens execution, synthesis
+  subagent-runner.ts  # Spawns lens reviews as Pi agent sessions with model error retry
+  llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
+  prompt-builder.ts   # Builds system prompts for each lens from .md templates
+  prompt-templates.ts # Default lens prompts, synthesis prompt, JSON output instructions
+  model-selector.ts   # Resolves model hints, interactive selection, isModelError detection
+  git-diff.ts         # Git diff parsing, file status detection, project index generation
+  edit-tracker.ts     # Tracks file edits across turns via tool_execution_end events
+  auto-injector.ts    # Injects KISS/DRY checklist into system prompt after editing turns
+  config.ts           # Per-project config (.pi/drykiss/config.json) persistence
+  config-command.ts   # /drykiss-config command handler
+  persist.ts          # Saves review results to .pi/drykiss/reviews/
+  types.ts            # Shared domain types (Finding, SynthesisResult, ReviewLens, etc.)
 ```
 
 ## Key Design Principles
@@ -27,6 +30,7 @@ src/
 3. **Project-wide DRY** — The deduplication lens gets an index of all existing modules/exports across the codebase.
 4. **Structured JSON output** — Each lens returns `{ findings: Finding[] }` with severity, confidence, line numbers, and suggestions. Synthesis deduplicates and ranks them.
 5. **Auto-injection** — After any turn that edits files, a lightweight KISS/DRY checklist is prepended to the next system prompt (zero extra LLM calls).
+6. **Model error retry** — When a model fails with quota/auth error, the user is prompted to select a different model and the review retries automatically.
 
 ## Testing
 
@@ -46,8 +50,10 @@ src/
 - **Peer dependencies**: `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui` are peer deps. Do not bundle them.
 - **Config directory**: `.pi/drykiss/` (created per-project). Holds `config.json` and persisted review results.
 - **Severity order**: `critical > high > medium > low > nit`
+- **Severity action mapping**: Critical = must fix, High = should fix, Medium = worth fixing, Low = nice-to-have, Nit = optional
 - **Confidence levels**: `confirmed` (seen by ≥2 lenses), `likely` (single lens, high severity), `suspect` (single lens, low severity)
 - **Model hints**: Users can pass `--model=haiku` or `--model=sonnet`. `model-selector.ts` maps these to actual model IDs with a fallback chain.
+- **Model error handling**: `isModelError()` in `model-selector.ts` detects quota/auth errors. `subagent-runner.ts` retries with user-selected model on failure.
 
 ## When Modifying
 
