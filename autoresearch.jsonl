@@ -1,1 +1,2 @@
 {"run":1,"commit":"9d91f18","metric":132,"metrics":{"tests_passed":132,"typecheck_passed":1},"status":"keep","description":"Implemented pi-subagents pattern: session naming, abort support, improved widget with progress display","timestamp":1780035930379,"segment":0,"confidence":null}
+{"run":2,"commit":"dde06d4","metric":132,"metrics":{"tests_passed":132,"typecheck_passed":1},"status":"keep","description":"Full pi-subagents integration: SettingsManager, modelRegistry, bindExtensions, streaming progress","timestamp":1780037257286,"segment":0,"confidence":null}

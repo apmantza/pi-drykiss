@@ -139,7 +139,10 @@ export async function runLensSubagent(
 		if (event.type === "message_start") {
 			currentText = "";
 		}
-		if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+		if (
+			event.type === "message_update" &&
+			event.assistantMessageEvent?.type === "text_delta"
+		) {
 			currentText += event.assistantMessageEvent.delta;
 			onStreamUpdate?.();
 		}
