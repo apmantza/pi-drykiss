@@ -177,8 +177,11 @@ export function isQuotaError(err: unknown): boolean {
 		msg.includes("overloaded") ||
 		msg.includes("exceeded") ||
 		msg.includes("budget") ||
-		msg.includes("credit")
-	);
+		msg.includes("credit") ||
+		msg.includes("inference") ||
+		msg.includes("failed to create stream") ||
+		msg.includes("request failed")
+);
 }
 
 export function isAuthError(err: unknown): boolean {
