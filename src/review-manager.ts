@@ -15,6 +15,7 @@ import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
+import { isModelError, selectModel } from "./model-selector.js";
 
 const CONCURRENCY = 3;
 
@@ -242,9 +243,71 @@ export class ReviewManager {
 		state.durationMs = result.durationMs;
 		state.session = result.session;
 		if (result.errorMessage) {
-			state.status = "error";
-			state.errorMessage = result.errorMessage;
-			state.rawOutput = `ERROR: ${result.errorMessage}`;
+			// Check if this is a model error (quota/auth) that should trigger model selection
+			if (isModelError(result.errorMessage) && ctx.hasUI) {
+				const selected = await selectModel(
+					ctx,
+					"Model Error",
+					`Model "${task.model.name}" failed: ${result.errorMessage}\n\nChoose a different model to retry:`,
+				);
+				if (selected) {
+					// Retry with the selected model
+					state.status = "running";
+					state.streamingText = "Retrying...";
+					try {
+						this.onUpdate?.(job);
+					} catch {
+						/* ignore */
+					}
+					ctx.ui.notify(
+						`Switching to ${selected.name} and retrying ${task.lens}...`,
+						"info",
+					);
+					const retryResult = await runLensSubagent(
+						ctx,
+						cwd,
+						selected,
+						task.systemPrompt,
+						task.userPrompt,
+						task.lens,
+						task.signal,
+						() => {
+							state.streamingText = "streaming...";
+							task.onStreamUpdate();
+						},
+					);
+					if (retryResult.errorMessage) {
+						// Second failure - record the error
+						state.status = "error";
+						state.errorMessage = retryResult.errorMessage;
+						state.rawOutput = `ERROR: ${retryResult.errorMessage}`;
+					} else {
+						// Retry succeeded
+						state.status = "done";
+						state.rawOutput = retryResult.text || "[]";
+						try {
+							const arr = lenientJsonParse<unknown[]>(
+								(state.rawOutput.match(/\[[\s\S]*\]/)?.[0] ??
+									state.rawOutput) ||
+									"[]",
+							);
+							state.findingsCount = Array.isArray(arr) ? arr.length : 0;
+						} catch {
+							state.findingsCount = 0;
+						}
+					}
+				} else {
+					// User cancelled model selection - record the original error
+					state.status = "error";
+					state.errorMessage = result.errorMessage;
+					state.rawOutput = `ERROR: ${result.errorMessage}`;
+				}
+			} else {
+				// Not a model error or no UI - just record the error
+				state.status = "error";
+				state.errorMessage = result.errorMessage;
+				state.rawOutput = `ERROR: ${result.errorMessage}`;
+			}
 		} else {
 			state.status = "done";
 			state.rawOutput = result.text || "[]";
