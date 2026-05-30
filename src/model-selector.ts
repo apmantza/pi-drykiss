@@ -181,7 +181,7 @@ export function isQuotaError(err: unknown): boolean {
 		msg.includes("inference") ||
 		msg.includes("failed to create stream") ||
 		msg.includes("request failed")
-);
+	);
 }
 
 export function isAuthError(err: unknown): boolean {
@@ -198,8 +198,10 @@ export function isAuthError(err: unknown): boolean {
 		msg.includes("authentication") ||
 		msg.includes("unauthorized") ||
 		msg.includes("401") ||
-		msg.includes("403")
-	);
+		msg.includes("403") ||
+		msg.includes("permission") ||
+		msg.includes("forbidden")
+);
 }
 
 /** Check if an error is a model-level error (quota or auth) that warrants model switching. */
