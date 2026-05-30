@@ -380,7 +380,7 @@ export class ReviewManager {
 			lensReviews,
 		);
 
-		const model = await resolveModel(ctx, cwd, "synthesis");
+		let model = await resolveModel(ctx, cwd, "synthesis");
 
 		try {
 			const result = await runLensSubagent(
@@ -392,11 +392,48 @@ export class ReviewManager {
 				"synthesis",
 			);
 
-			const raw = result.errorMessage
-				? `ERROR: ${result.errorMessage}`
-				: result.text || "{}";
-
-			job.synthesisResult = parseSynthesis(raw);
+			// Check for model error and retry with user-selected model
+			if (result.errorMessage && isModelError(result.errorMessage) && ctx.hasUI) {
+				const selected = await selectModel(
+								ctx,
+								"Model Error",
+								`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
+				);
+				if (selected) {
+								model = selected;
+								ctx.ui.notify(
+										`Switching to ${model.name} for synthesis...`,
+										"info",
+								);
+								const retryResult = await runLensSubagent(
+										ctx,
+										cwd,
+										model,
+										systemPrompt,
+										userPrompt,
+										"synthesis",
+								);
+								if (retryResult.errorMessage) {
+										job.synthesisResult = createFallbackSynthesis(
+												`Synthesis failed: ${retryResult.errorMessage}`,
+										);
+								} else {
+										job.synthesisResult = parseSynthesis(
+												retryResult.text || "{}",
+										);
+								}
+				} else {
+								job.synthesisResult = createFallbackSynthesis(
+										`Synthesis failed: ${result.errorMessage}`,
+								);
+				}
+			} else if (result.errorMessage) {
+				job.synthesisResult = createFallbackSynthesis(
+								`Synthesis failed: ${result.errorMessage}`,
+				);
+			} else {
+				job.synthesisResult = parseSynthesis(result.text || "{}");
+			}
 			job.synthesisStatus = "done";
 		} catch (err: any) {
 			job.synthesisStatus = "error";
