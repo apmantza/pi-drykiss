@@ -156,8 +156,14 @@ export async function selectModel(
 }
 
 export function isQuotaError(err: unknown): boolean {
-	if (!(err instanceof Error)) return false;
-	const msg = err.message.toLowerCase();
+	let msg: string;
+	if (err instanceof Error) {
+		msg = err.message.toLowerCase();
+	} else if (typeof err === "string") {
+		msg = err.toLowerCase();
+	} else {
+		return false;
+	}
 	return (
 		msg.includes("quota") ||
 		msg.includes("rate limit") ||
@@ -176,8 +182,14 @@ export function isQuotaError(err: unknown): boolean {
 }
 
 export function isAuthError(err: unknown): boolean {
-	if (!(err instanceof Error)) return false;
-	const msg = err.message.toLowerCase();
+	let msg: string;
+	if (err instanceof Error) {
+		msg = err.message.toLowerCase();
+	} else if (typeof err === "string") {
+		msg = err.toLowerCase();
+	} else {
+		return false;
+	}
 	return (
 		msg.includes("api key") ||
 		msg.includes("authentication") ||
