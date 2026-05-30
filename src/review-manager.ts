@@ -242,9 +242,12 @@ export class ReviewManager {
 
 		state.durationMs = result.durationMs;
 		state.session = result.session;
+		console.log(`[DRYKISS] ${task.lens} result:`, { hasError: !!result.errorMessage, errorMessage: result.errorMessage?.slice(0, 100) });
 		if (result.errorMessage) {
 			// Check if this is a model error (quota/auth) that should trigger model selection
-			if (isModelError(result.errorMessage) && ctx.hasUI) {
+			const isModelErr = isModelError(result.errorMessage);
+			console.log(`[DRYKISS] ${task.lens} isModelError:`, isModelErr, `hasUI:`, ctx.hasUI);
+			if (isModelErr && ctx.hasUI) {
 				const selected = await selectModel(
 					ctx,
 					"Model Error",
@@ -393,43 +396,42 @@ export class ReviewManager {
 			);
 
 			// Check for model error and retry with user-selected model
-			if (result.errorMessage && isModelError(result.errorMessage) && ctx.hasUI) {
+			if (
+				result.errorMessage &&
+				isModelError(result.errorMessage) &&
+				ctx.hasUI
+			) {
 				const selected = await selectModel(
-								ctx,
-								"Model Error",
-								`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
+					ctx,
+					"Model Error",
+					`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
 				);
 				if (selected) {
-								model = selected;
-								ctx.ui.notify(
-										`Switching to ${model.name} for synthesis...`,
-										"info",
-								);
-								const retryResult = await runLensSubagent(
-										ctx,
-										cwd,
-										model,
-										systemPrompt,
-										userPrompt,
-										"synthesis",
-								);
-								if (retryResult.errorMessage) {
-										job.synthesisResult = createFallbackSynthesis(
-												`Synthesis failed: ${retryResult.errorMessage}`,
-										);
-								} else {
-										job.synthesisResult = parseSynthesis(
-												retryResult.text || "{}",
-										);
-								}
+					model = selected;
+					ctx.ui.notify(`Switching to ${model.name} for synthesis...`, "info");
+					const retryResult = await runLensSubagent(
+						ctx,
+						cwd,
+						model,
+						systemPrompt,
+						userPrompt,
+						"synthesis",
+					);
+					if (retryResult.errorMessage) {
+						job.synthesisResult = createFallbackSynthesis(
+							`Synthesis failed: ${retryResult.errorMessage}`,
+						);
+					} else {
+						job.synthesisResult = parseSynthesis(retryResult.text || "{}");
+					}
 				} else {
-								job.synthesisResult = createFallbackSynthesis(
-										`Synthesis failed: ${result.errorMessage}`,
-								);
+					job.synthesisResult = createFallbackSynthesis(
+						`Synthesis failed: ${result.errorMessage}`,
+					);
 				}
 			} else if (result.errorMessage) {
 				job.synthesisResult = createFallbackSynthesis(
-								`Synthesis failed: ${result.errorMessage}`,
+					`Synthesis failed: ${result.errorMessage}`,
 				);
 			} else {
 				job.synthesisResult = parseSynthesis(result.text || "{}");
