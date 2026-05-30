@@ -173,14 +173,18 @@ export async function runLensSubagent(
 				// Switch model in-place and retry within the same session
 				try {
 					await session.setModel(selected);
-					ctx.ui.notify(`Switching to ${selected.name} and retrying...`, "info");
+					ctx.ui.notify(
+						`Switching to ${selected.name} and retrying...`,
+						"info",
+					);
 					await session.prompt(userPrompt);
 					await session.agent.waitForIdle();
 					// If we get here, the retry succeeded — fall through to return
 				} catch (retryErr: any) {
 					// Second failure — don't retry again
 					if (!errorMessage) {
-						errorMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+						errorMessage =
+							retryErr instanceof Error ? retryErr.message : String(retryErr);
 					}
 				}
 			}

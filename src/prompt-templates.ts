@@ -26,6 +26,26 @@ Rules:
 - severity must be one of: critical, high, medium, low, nit
 - Every finding must have a non-empty category and summary
 
+## Writing Good Suggestions
+
+Your suggestions should be specific and actionable. Show the fix, don't just describe it.
+
+BAD suggestion: "Fix the query"
+GOOD suggestion: "This will cause N+1 queries - one per post. Use include: [Author] to eager load in a single query."
+
+BAD suggestion: "Add error handling"
+GOOD suggestion: "Wrap in try/catch and log the error. Currently if the API call fails, the promise rejects silently and the user sees no feedback."
+
+BAD suggestion: "Simplify this"
+GOOD suggestion: "Replace the nested if-else chain with early returns:\n\nif (!user || !user.isActive) return;\nif (!user.hasPermission) return;\ndoSomething();"
+
+## Acknowledging Good Work
+
+If you see well-written code, note it in a separate finding with severity "nit" and category "Positive Pattern". This reinforces good practices. Examples:
+- "Clean use of early returns - much more readable than nested ifs"
+- "Nice extraction of validation logic into a reusable function"
+- "Good error messages that will help debugging in production"
+
 ## Severity Action Mapping
 - **critical**: Blocks merge. Author MUST fix before merge. Security vulnerabilities, data loss, broken functionality.
 - **high**: Should fix. Significant impact on maintainability, correctness, or reliability.
@@ -114,6 +134,63 @@ Don't just identify local cleanup opportunities. Look for moves that make the co
 - If you can delete complexity rather than rearrange it, push hard for that path
 - Prefer solutions that remove moving parts over refactors that spread the same complexity around
 
+## Common Patterns — Before & After
+
+### Deep Nesting → Early Returns
+// BAD
+if (user) {
+  if (user.isActive) {
+    if (user.hasPermission) {
+      doSomething();
+    }
+  }
+}
+
+// GOOD
+if (!user || !user.isActive || !user.hasPermission) return;
+doSomething();
+
+### God Function → Single Responsibility
+// BAD: does too much
+async function processOrder(order) {
+  // validate, check inventory, process payment, send email, update database
+}
+
+// GOOD: each step is a focused function
+async function processOrder(order) {
+  await validateOrder(order);
+  await reserveInventory(order);
+  await chargePayment(order);
+  await sendConfirmation(order);
+}
+
+### Unnecessary Abstraction → Inline It
+// BAD: wrapper that does nothing
+function getConfig() {
+  return { ...defaultConfig, ...userConfig };
+}
+
+// GOOD: just inline it (if used once)
+const config = { ...defaultConfig, ...userConfig };
+
+### Clever One-Liner → Readable Code
+// BAD: dense ternary chain
+const status = user.isAdmin ? 'admin' : user.isMod ? 'mod' : user.isActive ? 'user' : 'inactive';
+
+// GOOD: clear mapping
+const status = user.isAdmin ? 'admin'
+  : user.isMod ? 'mod'
+  : user.isActive ? 'user'
+  : 'inactive';
+
+// BETTER: use a helper or lookup
+const getRole = (user) => {
+  if (user.isAdmin) return 'admin';
+  if (user.isMod) return 'mod';
+  if (user.isActive) return 'user';
+  return 'inactive';
+};
+
 ## File Size Awareness
 - Do not let a PR push a file from under 500 lines to over 500 lines without a strong reason
 - Treat growing files as a smell — prefer extracting helpers, subcomponents, or modules
@@ -173,6 +250,113 @@ Don't just identify local cleanup opportunities. Look for moves that make the co
 - Wrong abstraction is worse than duplication. If extracting creates an abstraction that doesn't fit, leave the duplication alone
 - Don't create shared utilities for code that's only used twice — wait for the third use case
 
+## Common Patterns — Before & After
+
+### Copy-Pasted Logic
+// BAD: same validation in two places
+function validateUser(user) {
+  if (!user.email) throw new Error('Email required');
+  if (!user.name) throw new Error('Name required');
+}
+
+function validateAdmin(admin) {
+  if (!admin.email) throw new Error('Email required');
+  if (!admin.name) throw new Error('Name required');
+  if (!admin.role) throw new Error('Role required');
+}
+
+// GOOD: shared base + extension
+function validateRequiredFields(data, fields) {
+  for (const field of fields) {
+    if (!data[field]) throw new Error(field + ' required');
+  }
+}
+
+function validateUser(user) {
+  validateRequiredFields(user, ['email', 'name']);
+}
+
+function validateAdmin(admin) {
+  validateRequiredFields(admin, ['email', 'name', 'role']);
+}
+
+### Duplicated Magic Values
+// BAD: magic string scattered across files
+await fetch('/api/users');
+await fetch('/api/posts');
+await fetch('/api/comments');
+
+// GOOD: centralized constants
+const API_ENDPOINTS = {
+  USERS: '/api/users',
+  POSTS: '/api/posts',
+  COMMENTS: '/api/comments',
+};
+
+await fetch(API_ENDPOINTS.USERS);
+
+### Parallel Conditional Chains
+// BAD: same logic in multiple switch/if-else chains
+function getStatusColor(status) {
+  switch (status) {
+    case 'active': return 'green';
+    case 'pending': return 'yellow';
+    case 'banned': return 'red';
+  }
+}
+
+function getStatusIcon(status) {
+  switch (status) {
+    case 'active': return '✓';
+    case 'pending': return '⏳';
+    case 'banned': return '🚫';
+  }
+}
+
+// GOOD: single lookup table
+const STATUS_CONFIG = {
+  active: { color: 'green', icon: '✓' },
+  pending: { color: 'yellow', icon: '⏳' },
+  banned: { color: 'red', icon: '🚫' },
+};
+
+function getStatusColor(status) {
+  return STATUS_CONFIG[status]?.color;
+}
+
+function getStatusIcon(status) {
+  return STATUS_CONFIG[status]?.icon;
+}
+
+### Duplicated Error Handling
+// BAD: same error handling pattern repeated
+try {
+  const user = await fetchUser(id);
+} catch (err) {
+  console.error('Failed to fetch user:', err);
+  throw new AppError('Could not load user');
+}
+
+try {
+  const post = await fetchPost(id);
+} catch (err) {
+  console.error('Failed to fetch post:', err);
+  throw new AppError('Could not load post');
+}
+
+// GOOD: generic error wrapper
+async function withErrorHandling(fn, context) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error('Failed to ' + context + ':', err);
+    throw new AppError('Could not ' + context);
+  }
+}
+
+const user = await withErrorHandling(() => fetchUser(id), 'fetch user');
+const post = await withErrorHandling(() => fetchPost(id), 'fetch post');
+
 ## What to Flag
 - Copy-pasted or near-identical blocks of code (5+ lines)
 - Functions with identical or near-identical logic
@@ -201,6 +385,57 @@ Don't just identify local cleanup opportunities. Look for moves that make the co
 - Comments should explain WHY, not WHAT (the code should explain what)
 - Deep nesting is a readability tax — prefer guard clauses and early returns
 - Follow existing project patterns. Simplification that breaks project consistency is churn, not improvement
+
+## Common Patterns — Before & After
+
+### Poor Naming
+// BAD: unclear names
+const d = new Date();
+const cfg = loadConfig();
+function proc(u) { ... }
+
+// GOOD: intention-revealing names
+const createdAt = new Date();
+const config = loadConfig();
+function processUser(user) { ... }
+
+### N+1 Query Problem
+// BAD: query inside loop
+for (const post of posts) {
+  post.author = await User.findById(post.authorId); // N queries!
+}
+
+// GOOD: single query with join
+const posts = await Post.findAll({ include: [User] });
+
+// GOOD: batch load
+const authorIds = posts.map(p => p.authorId);
+const authors = await User.findByIds(authorIds);
+
+### Magic Numbers
+// BAD
+if (user.age >= 18) { ... }
+setTimeout(fn, 86400000);
+
+// GOOD: named constants
+const MINIMUM_AGE = 18;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+if (user.age >= MINIMUM_AGE) { ... }
+setTimeout(fn, ONE_DAY_MS);
+
+### Missing Null Checks
+// BAD: unsafe access
+const name = user.profile.name;
+
+// GOOD: safe access
+const name = user?.profile?.name ?? 'Unknown';
+
+### Sync File Operations
+// BAD: blocks event loop
+const data = fs.readFileSync('file.txt');
+
+// GOOD: non-blocking
+const data = await fs.promises.readFile('file.txt');
 
 ## Correctness Check
 - Does the code handle edge cases? (null, empty, boundary values, race conditions)
