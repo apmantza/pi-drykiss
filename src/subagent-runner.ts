@@ -170,22 +170,19 @@ export async function runLensSubagent(
 				`Model "${model.name}" failed: ${err.message}\n\nChoose a different model:`,
 			);
 			if (selected) {
-				// Dispose current session and retry with new model
+				// Switch model in-place and retry within the same session
 				try {
-					session.dispose();
-				} catch {
-					/* ignore */
+					await session.setModel(selected);
+					ctx.ui.notify(`Switching to ${selected.name} and retrying...`, "info");
+					await session.prompt(userPrompt);
+					await session.agent.waitForIdle();
+					// If we get here, the retry succeeded — fall through to return
+				} catch (retryErr: any) {
+					// Second failure — don't retry again
+					if (!errorMessage) {
+						errorMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+					}
 				}
-				return runLensSubagent(
-					ctx,
-					cwd,
-					selected,
-					systemPrompt,
-					userPrompt,
-					lens,
-					signal,
-					onStreamUpdate,
-				);
 			}
 		}
 		if (!errorMessage) {
