@@ -22,6 +22,15 @@ import type {
 } from "./types.js";
 import { parseFindingsArray } from "./types.js";
 import { sanitizeJsonString } from "./json-utils.js";
+import {
+	isPrReference,
+	isGhAvailable,
+	getGitRemote,
+	fetchPrDiff,
+	fetchPrFileContents,
+	parsePrUrl,
+	type PrInfo,
+} from "./github-pr.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -35,6 +44,8 @@ const MAX_FILES = 20;
 
 export interface ParsedArgs extends ReviewOptions {
 	readonly model?: string;
+	/** PR reference if reviewing a GitHub PR */
+	readonly pr?: PrInfo;
 }
 
 export function parseArgs(args: string): ParsedArgs {
@@ -44,6 +55,7 @@ export function parseArgs(args: string): ParsedArgs {
 	let staged = false;
 	let all = false;
 	let model: string | undefined;
+	let pr: PrInfo | undefined;
 
 	for (const token of tokens) {
 		if (token === "--staged") {
@@ -54,12 +66,15 @@ export function parseArgs(args: string): ParsedArgs {
 			ref = token.slice("--ref=".length);
 		} else if (token.startsWith("--model=")) {
 			model = token.slice("--model=".length);
+		} else if (isPrReference(token)) {
+			// Will be resolved in prepareReview after we get the git remote
+			pr = { owner: "", repo: "", number: 0, _raw: token } as PrInfo & { _raw: string };
 		} else {
 			files.push(token);
 		}
 	}
 
-	return { files, ref, staged, all, model };
+	return { files, ref, staged, all, model, pr };
 }
 
 async function gatherDiffs(
@@ -121,6 +136,13 @@ async function prepareReview(
 	config: Awaited<ReturnType<typeof loadConfig>>;
 } | null> {
 	const options = parseArgs(args);
+
+	// Check if this is a PR review
+	const rawPr = options.pr as (PrInfo & { _raw: string }) | undefined;
+	if (rawPr?._raw) {
+		return preparePrReview(rawPr._raw, ctx, pi, needsProjectIndex);
+	}
+
 	const files = await getChangedFiles(pi, ctx.cwd, options);
 
 	if (files.length === 0) {
@@ -160,6 +182,112 @@ async function prepareReview(
 			: undefined;
 
 	return { options, files, diffs, contents, projectIndex, config };
+}
+
+/**
+ * Prepare a review for a GitHub PR.
+ */
+async function preparePrReview(
+	prInput: string,
+	ctx: ExtensionCommandContext,
+	_pi: ExtensionAPI,
+	needsProjectIndex: boolean,
+): Promise<{
+	options: ParsedArgs;
+	files: ChangedFile[];
+	diffs: Map<string, string>;
+	contents:
+		| Map<string, { content: string; lineCount: number; truncated: boolean }>
+		| undefined;
+	projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined;
+	config: Awaited<ReturnType<typeof loadConfig>>;
+} | null> {
+	// Check if gh CLI is available
+	if (!(await isGhAvailable())) {
+		ctx.ui.notify(
+			"GitHub CLI (gh) is required for PR reviews. Install it from https://cli.github.com/",
+			"error",
+		);
+		return null;
+	}
+
+	// Resolve PR URL using git remote if needed
+	let prInfo = parsePrUrl(prInput);
+	if (!prInfo || !prInfo.owner) {
+		const remote = await getGitRemote(ctx.cwd);
+		if (remote) {
+			prInfo = parsePrUrl(prInput, remote);
+		}
+	}
+
+	if (!prInfo || !prInfo.owner) {
+		ctx.ui.notify(
+			"Could not parse PR reference. Use: /drykiss https://github.com/owner/repo/pull/123 or /drykiss owner/repo#123",
+			"error",
+		);
+		return null;
+	}
+
+	// Fetch PR diff
+	ctx.ui.notify(
+		`[DRYKISS] Fetching PR #${prInfo.number} from ${prInfo.owner}/${prInfo.repo}...`,
+		"info",
+	);
+
+	let prDiff;
+	try {
+		prDiff = await fetchPrDiff(ctx.cwd, prInfo.owner, prInfo.repo, prInfo.number);
+	} catch (err: any) {
+		ctx.ui.notify(
+			`Failed to fetch PR: ${err.message}`,
+			"error",
+		);
+		return null;
+	}
+
+	if (prDiff.files.length === 0) {
+		ctx.ui.notify("PR has no changed files.", "info");
+		return null;
+	}
+
+	if (prDiff.files.length > MAX_FILES) {
+		ctx.ui.notify(
+			`PR has ${prDiff.files.length} changed files. DRYKISS reviews max ${MAX_FILES} files at a time.`,
+			"warning",
+		);
+		return null;
+	}
+
+	await ensureDefaultPrompts(ctx.cwd);
+	const config = await loadConfig(ctx.cwd);
+
+	// Fetch full file contents for context (PR reviews always use full context)
+	ctx.ui.notify(
+		`[DRYKISS] Fetching full file contents for ${prDiff.files.length} files...`,
+		"info",
+	);
+
+	const filePaths = prDiff.files.map((f) => f.path);
+	const contents = await fetchPrFileContents(
+		ctx.cwd,
+		prInfo.owner,
+		prInfo.repo,
+		prDiff.headSha,
+		filePaths,
+	);
+
+	const projectIndex = needsProjectIndex
+		? await getProjectIndex(ctx.cwd)
+		: undefined;
+
+	return {
+		options: { files: [], ref: "HEAD", staged: false, all: false },
+		files: prDiff.files,
+		diffs: prDiff.diffs,
+		contents,
+		projectIndex,
+		config,
+	};
 }
 
 export interface ParseFindingsResult {
