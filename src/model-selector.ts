@@ -163,12 +163,15 @@ export function isQuotaError(err: unknown): boolean {
 		msg.includes("rate limit") ||
 		msg.includes("ratelimit") ||
 		msg.includes("429") ||
+		msg.includes("402") ||
+		msg.includes("payment") ||
 		msg.includes("too many requests") ||
 		msg.includes("insufficient") ||
 		msg.includes("capacity") ||
 		msg.includes("overloaded") ||
 		msg.includes("exceeded") ||
-		msg.includes("budget")
+		msg.includes("budget") ||
+		msg.includes("credit")
 	);
 }
 

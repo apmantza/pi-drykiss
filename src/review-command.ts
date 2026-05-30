@@ -68,7 +68,9 @@ export function parseArgs(args: string): ParsedArgs {
 			model = token.slice("--model=".length);
 		} else if (isPrReference(token)) {
 			// Will be resolved in prepareReview after we get the git remote
-			pr = { owner: "", repo: "", number: 0, _raw: token } as PrInfo & { _raw: string };
+			pr = { owner: "", repo: "", number: 0, _raw: token } as PrInfo & {
+				_raw: string;
+			};
 		} else {
 			files.push(token);
 		}
@@ -236,12 +238,14 @@ async function preparePrReview(
 
 	let prDiff;
 	try {
-		prDiff = await fetchPrDiff(ctx.cwd, prInfo.owner, prInfo.repo, prInfo.number);
-	} catch (err: any) {
-		ctx.ui.notify(
-			`Failed to fetch PR: ${err.message}`,
-			"error",
+		prDiff = await fetchPrDiff(
+			ctx.cwd,
+			prInfo.owner,
+			prInfo.repo,
+			prInfo.number,
 		);
+	} catch (err: any) {
+		ctx.ui.notify(`Failed to fetch PR: ${err.message}`, "error");
 		return null;
 	}
 

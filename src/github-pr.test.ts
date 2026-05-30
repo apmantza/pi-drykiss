@@ -23,10 +23,7 @@ describe("parsePrUrl", () => {
 	});
 
 	it("parses just a number with git remote", () => {
-		const result = parsePrUrl(
-			"42",
-			"https://github.com/myorg/myrepo.git",
-		);
+		const result = parsePrUrl("42", "https://github.com/myorg/myrepo.git");
 		expect(result).toEqual({ owner: "myorg", repo: "myrepo", number: 42 });
 	});
 

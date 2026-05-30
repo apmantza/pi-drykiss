@@ -95,9 +95,13 @@ export async function isGhAvailable(): Promise<boolean> {
  */
 export async function getGitRemote(cwd: string): Promise<string | null> {
 	try {
-		const { stdout } = await execFileAsync("git", ["remote", "get-url", "origin"], {
-			cwd,
-		});
+		const { stdout } = await execFileAsync(
+			"git",
+			["remote", "get-url", "origin"],
+			{
+				cwd,
+			},
+		);
 		return stdout.trim();
 	} catch {
 		return null;
@@ -231,14 +235,17 @@ export async function fetchPrFileContents(
 					);
 
 					// gh api returns base64-encoded content
-					const decoded = Buffer.from(stdout.trim(), "base64").toString("utf-8");
+					const decoded = Buffer.from(stdout.trim(), "base64").toString(
+						"utf-8",
+					);
 					const lineCount = decoded.split("\n").length;
 
 					// Truncate if too large (same as local files)
 					const MAX_LINES = 2000;
 					const truncated = lineCount > MAX_LINES;
 					const content = truncated
-						? decoded.split("\n").slice(0, MAX_LINES).join("\n") + "\n... (truncated)"
+						? decoded.split("\n").slice(0, MAX_LINES).join("\n") +
+							"\n... (truncated)"
 						: decoded;
 
 					return { path, content, lineCount, truncated };

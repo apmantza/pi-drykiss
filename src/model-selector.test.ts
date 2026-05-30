@@ -21,6 +21,12 @@ describe("isQuotaError", () => {
 		expect(isQuotaError(new Error("Capacity reached"))).toBe(true);
 	});
 
+	it("detects payment/billing errors", () => {
+		expect(isQuotaError(new Error("402 Payment Required"))).toBe(true);
+		expect(isQuotaError(new Error("Payment required"))).toBe(true);
+		expect(isQuotaError(new Error("out of credits"))).toBe(true);
+	});
+
 	it("returns false for unrelated errors", () => {
 		expect(isQuotaError(new Error("Network timeout"))).toBe(false);
 		expect(isQuotaError(new Error("File not found"))).toBe(false);
