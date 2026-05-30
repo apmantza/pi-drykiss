@@ -9,7 +9,7 @@ src/
   index.ts            # Extension entry point — registers commands, tools, event handlers
   review-command.ts   # Command handlers (/drykiss, /drykiss-kiss, etc.) + review orchestration
   review-manager.ts   # Manages review jobs, parallel lens execution, synthesis
-  subagent-runner.ts  # Spawns lens reviews as Pi agent sessions with model error retry
+  subagent-runner.ts  # Spawns lens reviews as Pi agent sessions
   llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
   prompt-builder.ts   # Builds system prompts for each lens from .md templates
   prompt-templates.ts # Default lens prompts, synthesis prompt, JSON output instructions
@@ -30,7 +30,7 @@ src/
 3. **Project-wide DRY** — The deduplication lens gets an index of all existing modules/exports across the codebase.
 4. **Structured JSON output** — Each lens returns `{ findings: Finding[] }` with severity, confidence, line numbers, and suggestions. Synthesis deduplicates and ranks them.
 5. **Auto-injection** — After any turn that edits files, a lightweight KISS/DRY checklist is prepended to the next system prompt (zero extra LLM calls).
-6. **Model error retry** — When a model fails with quota/auth error, the user is prompted to select a different model and the review retries automatically.
+6. **Model error retry** — When a subagent completes with a quota/auth error, `review-manager.ts` detects it via `isModelError()`, prompts the user to select a different model, and retries the lens review automatically.
 
 ## Testing
 
@@ -53,7 +53,7 @@ src/
 - **Severity action mapping**: Critical = must fix, High = should fix, Medium = worth fixing, Low = nice-to-have, Nit = optional
 - **Confidence levels**: `confirmed` (seen by ≥2 lenses), `likely` (single lens, high severity), `suspect` (single lens, low severity)
 - **Model hints**: Users can pass `--model=haiku` or `--model=sonnet`. `model-selector.ts` maps these to actual model IDs with a fallback chain.
-- **Model error handling**: `isModelError()` in `model-selector.ts` detects quota/auth errors. `subagent-runner.ts` retries with user-selected model on failure.
+- **Model error handling**: `isModelError()` in `model-selector.ts` detects quota/auth errors. `review-manager.ts` checks `result.errorMessage` after subagent completion and triggers model selection popup + retry if needed.
 
 ## When Modifying
 
