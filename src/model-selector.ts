@@ -164,9 +164,11 @@ export function isQuotaError(err: unknown): boolean {
 		msg.includes("ratelimit") ||
 		msg.includes("429") ||
 		msg.includes("too many requests") ||
-		msg.includes("insufficient_quota") ||
+		msg.includes("insufficient") ||
 		msg.includes("capacity") ||
-		msg.includes("overloaded")
+		msg.includes("overloaded") ||
+		msg.includes("exceeded") ||
+		msg.includes("budget")
 	);
 }
 
