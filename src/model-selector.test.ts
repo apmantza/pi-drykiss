@@ -33,18 +33,18 @@ describe("isQuotaError", () => {
 		expect(isQuotaError(new Error("Syntax error"))).toBe(false);
 	});
 
-it("returns false for non-errors", () => {
+	it("returns false for non-errors", () => {
 		expect(isQuotaError(42)).toBe(false);
 		expect(isQuotaError(null)).toBe(false);
 		expect(isQuotaError(undefined)).toBe(false);
-});
+	});
 
-		it("detects quota keywords in plain strings", () => {
+	it("detects quota keywords in plain strings", () => {
 		expect(isQuotaError("402 Payment Required")).toBe(true);
 		expect(isQuotaError("Rate limit exceeded")).toBe(true);
 		expect(isQuotaError("insufficient_quota")).toBe(true);
 		expect(isQuotaError("Budget exceeded")).toBe(true);
-});
+	});
 });
 
 describe("isAuthError", () => {
@@ -55,14 +55,14 @@ describe("isAuthError", () => {
 		expect(isAuthError(new Error("Forbidden: 403"))).toBe(true);
 	});
 
-it("returns false for unrelated errors", () => {
+	it("returns false for unrelated errors", () => {
 		expect(isAuthError(new Error("Network timeout"))).toBe(false);
 		expect(isAuthError(new Error("Rate limit"))).toBe(false);
-});
+	});
 
-		it("detects auth keywords in plain strings", () => {
+	it("detects auth keywords in plain strings", () => {
 		expect(isAuthError("Invalid API key")).toBe(true);
 		expect(isAuthError("Unauthorized: 401")).toBe(true);
 		expect(isAuthError("Forbidden: 403")).toBe(true);
-});
+	});
 });
