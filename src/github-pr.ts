@@ -235,9 +235,20 @@ export async function fetchPrFileContents(
 					);
 
 					// gh api returns base64-encoded content
-					const decoded = Buffer.from(stdout.trim(), "base64").toString(
-						"utf-8",
-					);
+					// Validate the output looks like base64 before decoding
+					const trimmed = stdout.trim();
+					const isBase64 =
+						/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 0;
+					if (!isBase64) {
+						console.warn(
+							`[DRYKISS] Unexpected API response for ${path}: ${trimmed.slice(
+								0,
+								100,
+							)}`,
+						);
+						return null;
+					}
+					const decoded = Buffer.from(trimmed, "base64").toString("utf-8");
 					const lineCount = decoded.split("\n").length;
 
 					// Truncate if too large (same as local files)

@@ -21,7 +21,6 @@ import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
 import { extractAssistantText } from "./content-utils.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
-import { isModelError, selectModel } from "./model-selector.js";
 
 export interface SubagentResult {
 	lens: string;
@@ -162,33 +161,8 @@ export async function runLensSubagent(
 		await session.prompt(userPrompt);
 		await session.agent.waitForIdle();
 	} catch (err: any) {
-		// On model-level errors (quota/auth), prompt user to pick a different model and retry once
-		if (isModelError(err) && ctx.hasUI) {
-			const selected = await selectModel(
-				ctx,
-				"Model Error",
-				`Model "${model.name}" failed: ${err.message}\n\nChoose a different model:`,
-			);
-			if (selected) {
-				// Switch model in-place and retry within the same session
-				try {
-					await session.setModel(selected);
-					ctx.ui.notify(
-						`Switching to ${selected.name} and retrying...`,
-						"info",
-					);
-					await session.prompt(userPrompt);
-					await session.agent.waitForIdle();
-					// If we get here, the retry succeeded — fall through to return
-				} catch (retryErr: any) {
-					// Second failure — don't retry again
-					if (!errorMessage) {
-						errorMessage =
-							retryErr instanceof Error ? retryErr.message : String(retryErr);
-					}
-				}
-			}
-		}
+		// Surface the error to the caller — retry logic is handled by ReviewManager
+		// so the user is only prompted once (not here and again at the job level).
 		if (!errorMessage) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 		}

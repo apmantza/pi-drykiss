@@ -201,7 +201,7 @@ export function isAuthError(err: unknown): boolean {
 		msg.includes("403") ||
 		msg.includes("permission") ||
 		msg.includes("forbidden")
-);
+	);
 }
 
 /** Check if an error is a model-level error (quota or auth) that warrants model switching. */

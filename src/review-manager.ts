@@ -71,6 +71,9 @@ export class ReviewManager {
 	/** Abort controllers per job for cancelling running sessions. */
 	private abortControllers = new Map<string, AbortController>();
 
+	/** Locks to prevent concurrent synthesis runs for the same job. */
+	private synthesisLocks = new Set<string>();
+
 	constructor(onUpdate?: OnReviewUpdate, onComplete?: OnReviewComplete) {
 		this.onUpdate = onUpdate;
 		this.onComplete = onComplete;
@@ -242,11 +245,19 @@ export class ReviewManager {
 
 		state.durationMs = result.durationMs;
 		state.session = result.session;
-		console.log(`[DRYKISS] ${task.lens} result:`, { hasError: !!result.errorMessage, errorMessage: result.errorMessage?.slice(0, 100) });
+		console.log(`[DRYKISS] ${task.lens} result:`, {
+			hasError: !!result.errorMessage,
+			errorMessage: result.errorMessage?.slice(0, 100),
+		});
 		if (result.errorMessage) {
 			// Check if this is a model error (quota/auth) that should trigger model selection
 			const isModelErr = isModelError(result.errorMessage);
-			console.log(`[DRYKISS] ${task.lens} isModelError:`, isModelErr, `hasUI:`, ctx.hasUI);
+			console.log(
+				`[DRYKISS] ${task.lens} isModelError:`,
+				isModelErr,
+				`hasUI:`,
+				ctx.hasUI,
+			);
 			if (isModelErr && ctx.hasUI) {
 				const selected = await selectModel(
 					ctx,
@@ -344,8 +355,13 @@ export class ReviewManager {
 			return s.status === "done" || s.status === "error";
 		});
 
-		// Atomic check-and-set: use compareExchange pattern to prevent race condition
-		if (allDone && job.synthesisStatus === "idle") {
+		// Atomic check-and-set: use a lock set to prevent concurrent synthesis runs
+		if (
+			allDone &&
+			job.synthesisStatus === "idle" &&
+			!this.synthesisLocks.has(job.id)
+		) {
+			this.synthesisLocks.add(job.id);
 			job.synthesisStatus = "running";
 			try {
 				this.onUpdate?.(job);
@@ -436,7 +452,7 @@ export class ReviewManager {
 			} else {
 				job.synthesisResult = parseSynthesis(result.text || "{}");
 			}
-			job.synthesisStatus = "done";
+			job.synthesisStatus = result.errorMessage ? "error" : "done";
 		} catch (err: any) {
 			job.synthesisStatus = "error";
 			job.synthesisResult = createFallbackSynthesis(
@@ -451,7 +467,8 @@ export class ReviewManager {
 				: "done";
 		job.completedAt = Date.now();
 
-		// Persist
+		// Release synthesis lock
+		this.synthesisLocks.delete(job.id);
 		if (job.synthesisResult) {
 			await saveReview(job.files, job.synthesisResult);
 		}

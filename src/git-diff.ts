@@ -193,8 +193,13 @@ export async function getFileContent(
 	cwd: string,
 	filePath: string,
 ): Promise<FileContent | null> {
-	// Prevent path traversal: reject absolute paths
-	if (filePath.startsWith("/") || filePath.startsWith("\\")) {
+	// Prevent path traversal: reject absolute paths and Windows drive letters
+	const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/.test(filePath);
+	if (
+		filePath.startsWith("/") ||
+		filePath.startsWith("\\") ||
+		isWindowsAbsolute
+	) {
 		console.error(`[DRYKISS] Rejected absolute path: ${filePath}`);
 		return null;
 	}
