@@ -17,7 +17,7 @@ export async function handleConfigCommand(
 	const subcommand = tokens[0]?.toLowerCase();
 
 	if (!subcommand || subcommand === "show") {
-		const config = await loadConfig(ctx.cwd);
+		const config = await loadConfig();
 		const lines = [
 			"## DRYKISS Configuration",
 			"",
@@ -61,7 +61,7 @@ export async function handleConfigCommand(
 					ctx.ui.notify("No model selected.", "info");
 					return;
 				}
-				await setDefaultModel(ctx.cwd, `${selected.provider}/${selected.id}`);
+				await setDefaultModel(`${selected.provider}/${selected.id}`);
 				ctx.ui.notify(
 					`Set ${selected.name} as the default DRYKISS model.`,
 					"info",
@@ -71,7 +71,7 @@ export async function handleConfigCommand(
 			ctx.ui.notify("Usage: /drykiss-config set-default <model>", "warning");
 			return;
 		}
-		await setDefaultModel(ctx.cwd, model);
+		await setDefaultModel(model);
 		ctx.ui.notify(`Set ${model} as the default DRYKISS model.`, "info");
 		return;
 	}
@@ -93,14 +93,14 @@ export async function handleConfigCommand(
 			);
 			return;
 		}
-		await setLensModel(ctx.cwd, lens, model);
+		await setLensModel(lens, model);
 		ctx.ui.notify(`Set ${model} for ${lens} reviews.`, "info");
 		return;
 	}
 
 	if (subcommand === "interactive") {
 		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig(ctx.cwd);
+		const config = await loadConfig();
 		if (val === "on" || val === "true") {
 			config.interactive = true;
 		} else if (val === "off" || val === "false") {
@@ -109,7 +109,7 @@ export async function handleConfigCommand(
 			ctx.ui.notify("Usage: /drykiss-config interactive <on|off>", "warning");
 			return;
 		}
-		await saveConfig(ctx.cwd, config);
+		await saveConfig(config);
 		ctx.ui.notify(
 			`Interactive model selection ${config.interactive ? "enabled" : "disabled"}.`,
 			"info",
@@ -119,7 +119,7 @@ export async function handleConfigCommand(
 
 	if (subcommand === "confirm") {
 		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig(ctx.cwd);
+		const config = await loadConfig();
 		if (val === "on" || val === "true") {
 			config.confirmBeforeRun = true;
 		} else if (val === "off" || val === "false") {
@@ -128,7 +128,7 @@ export async function handleConfigCommand(
 			ctx.ui.notify("Usage: /drykiss-config confirm <on|off>", "warning");
 			return;
 		}
-		await saveConfig(ctx.cwd, config);
+		await saveConfig(config);
 		ctx.ui.notify(
 			`Pre-run confirmation ${config.confirmBeforeRun ? "enabled" : "disabled"}.`,
 			"info",
@@ -138,7 +138,7 @@ export async function handleConfigCommand(
 
 	if (subcommand === "context-mode") {
 		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig(ctx.cwd);
+		const config = await loadConfig();
 		if (val === "diff" || val === "full") {
 			config.contextMode = val;
 		} else {
@@ -148,13 +148,13 @@ export async function handleConfigCommand(
 			);
 			return;
 		}
-		await saveConfig(ctx.cwd, config);
+		await saveConfig(config);
 		ctx.ui.notify(`Context mode set to ${config.contextMode}.`, "info");
 		return;
 	}
 
 	if (subcommand === "reset-prompts") {
-		await resetPrompts(ctx.cwd);
+		await resetPrompts();
 		ctx.ui.notify(
 			"Default prompt templates regenerated in `~/.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
 			"info",

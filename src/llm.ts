@@ -34,7 +34,7 @@ export async function resolveModelSmart(
 	}
 
 	// 2-3. Config
-	const config = await loadConfig(cwd);
+	const config = await loadConfig();
 	const configHint = getModelForLens(config, lens);
 	if (configHint) {
 		const m = findModelByHint(available, configHint);
@@ -60,7 +60,7 @@ export async function resolveModelSmart(
 			}
 			// Always save as default so remaining lenses don't re-prompt
 			config.defaultModel = `${selected.provider}/${selected.id}`;
-			await saveConfig(cwd, config);
+			await saveConfig(config);
 			ctx.ui.notify(
 				`Saved ${selected.name} as default${lens ? ` for ${lens}` : ""}.`,
 				"info",

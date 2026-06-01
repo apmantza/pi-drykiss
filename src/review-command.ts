@@ -21,7 +21,7 @@ import type {
 	Finding,
 } from "./types.js";
 import { parseFindingsArray } from "./types.js";
-import { sanitizeJsonString } from "./json-utils.js";
+import { lenientJsonParse, sanitizeJsonString } from "./json-utils.js";
 import {
 	isPrReference,
 	isGhAvailable,
@@ -164,7 +164,7 @@ async function prepareReview(
 	}
 
 	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig(ctx.cwd);
+	const config = await loadConfig();
 
 	// --all implies full context (diffs are empty for unchanged files)
 	const contextMode = options.all ? "full" : config.contextMode;
@@ -263,7 +263,7 @@ async function preparePrReview(
 	}
 
 	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig(ctx.cwd);
+	const config = await loadConfig();
 
 	// Fetch full file contents for context (PR reviews always use full context)
 	ctx.ui.notify(
@@ -343,7 +343,19 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 			);
 		}
 
-		// Both attempts failed
+		// Both attempts failed — try lenient parse as last resort before giving up
+		try {
+			const lenient = lenientJsonParse<unknown[]>(jsonStr);
+			if (Array.isArray(lenient)) {
+				console.log(`[DRYKISS] ${lens} lens: JSON recovered via lenient parse`);
+				return {
+					findings: parseFindingsArray(lenient, lens),
+				};
+			}
+		} catch {
+			/* lenient parse also failed — fall through to error */
+		}
+
 		const msg = `Failed to parse JSON. The LLM output may contain unescaped characters.`;
 		console.error(`[DRYKISS] Failed to parse JSON for ${lens} lens.`);
 		console.error(
@@ -734,7 +746,7 @@ export async function executeDrykissReviewTool(
 			`[DRYKISS] Could not retrieve diffs for: ${failedFiles.join(", ")}`,
 		);
 	}
-	const config = await loadConfig(ctx.cwd);
+	const config = await loadConfig();
 	const contents =
 		config.contextMode !== "diff"
 			? await gatherContents(ctx.cwd, filesToReview)

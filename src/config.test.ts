@@ -24,7 +24,7 @@ describe("loadConfig", () => {
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify({ defaultModel: "sonnet", interactive: false }),
 		);
-		const config = await loadConfig("/cwd");
+		const config = await loadConfig();
 		expect(config.defaultModel).toBe("sonnet");
 		expect(config.interactive).toBe(false);
 	});
@@ -33,7 +33,7 @@ describe("loadConfig", () => {
 		vi.mocked(readFile).mockRejectedValue(
 			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
 		);
-		const config = await loadConfig("/cwd");
+		const config = await loadConfig();
 		expect(config.defaultModel).toBeUndefined();
 		expect(config.interactive).toBe(true);
 		expect(config.confirmBeforeRun).toBe(true);
@@ -41,7 +41,7 @@ describe("loadConfig", () => {
 
 	it("returns defaults when file has invalid JSON", async () => {
 		vi.mocked(readFile).mockResolvedValue("not json");
-		const config = await loadConfig("/cwd");
+		const config = await loadConfig();
 		expect(config.interactive).toBe(true);
 	});
 
@@ -51,19 +51,19 @@ describe("loadConfig", () => {
 				code: "EACCES" as const,
 			}),
 		);
-		await expect(loadConfig("/cwd")).rejects.toThrow("Permission denied");
+		await expect(loadConfig()).rejects.toThrow("Permission denied");
 	});
 
 	it("rethrows generic Error that is not ENOENT or SyntaxError", async () => {
 		vi.mocked(readFile).mockRejectedValue(new Error("Disk full"));
-		await expect(loadConfig("/cwd")).rejects.toThrow("Disk full");
+		await expect(loadConfig()).rejects.toThrow("Disk full");
 	});
 });
 
 describe("saveConfig", () => {
 	it("writes config to .pi/drykiss/config.json", async () => {
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await saveConfig("/cwd", { defaultModel: "haiku", interactive: false });
+		await saveConfig( { defaultModel: "haiku", interactive: false });
 		expect(mkdir).toHaveBeenCalled();
 		const mkdirPath = vi.mocked(mkdir).mock.calls[0][0] as string;
 		expect(mkdirPath).toMatch(/\.pi[/\\]drykiss$/);
@@ -110,7 +110,7 @@ describe("setLensModel", () => {
 			}),
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await setLensModel("/cwd", "clarity", "sonnet");
+		await setLensModel( "clarity", "sonnet");
 		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
 		expect(written.lensModels).toEqual({
 			simplicity: "haiku",
@@ -126,7 +126,7 @@ describe("setDefaultModel", () => {
 			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await setDefaultModel("/cwd", "sonnet");
+		await setDefaultModel( "sonnet");
 		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
 		expect(written.defaultModel).toBe("sonnet");
 	});
@@ -134,7 +134,7 @@ describe("setDefaultModel", () => {
 	it("propagates writeFile errors", async () => {
 		vi.mocked(readFile).mockResolvedValue(JSON.stringify({}));
 		vi.mocked(writeFile).mockRejectedValue(new Error("Write failed"));
-		await expect(setDefaultModel("/cwd", "haiku")).rejects.toThrow(
+		await expect(setDefaultModel( "haiku")).rejects.toThrow(
 			"Write failed",
 		);
 	});

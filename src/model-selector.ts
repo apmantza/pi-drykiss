@@ -155,53 +155,52 @@ export async function selectModel(
 	);
 }
 
-export function isQuotaError(err: unknown): boolean {
+function matchesErrorPattern(err: unknown, keywords: string[]): boolean {
 	let msg: string;
 	if (err instanceof Error) {
 		msg = err.message.toLowerCase();
 	} else if (typeof err === "string") {
 		msg = err.toLowerCase();
+	} else if (typeof err === "object" && err !== null) {
+		// Structured API error: {error: {type: "permission_error", message: "..."}, status: 403}
+		msg = JSON.stringify(err).toLowerCase();
 	} else {
 		return false;
 	}
-	return (
-		msg.includes("quota") ||
-		msg.includes("rate limit") ||
-		msg.includes("ratelimit") ||
-		msg.includes("429") ||
-		msg.includes("402") ||
-		msg.includes("payment") ||
-		msg.includes("too many requests") ||
-		msg.includes("insufficient") ||
-		msg.includes("capacity") ||
-		msg.includes("overloaded") ||
-		msg.includes("exceeded") ||
-		msg.includes("budget") ||
-		msg.includes("credit") ||
-		msg.includes("inference") ||
-		msg.includes("failed to create stream") ||
-		msg.includes("request failed")
-	);
+	return keywords.some((kw) => msg.includes(kw));
+}
+
+export function isQuotaError(err: unknown): boolean {
+	return matchesErrorPattern(err, [
+		"quota",
+		"rate limit",
+		"ratelimit",
+		"429",
+		"402",
+		"payment",
+		"too many requests",
+		"insufficient",
+		"capacity",
+		"overloaded",
+		"exceeded",
+		"budget",
+		"credit",
+		"inference",
+		"failed to create stream",
+		"request failed",
+	]);
 }
 
 export function isAuthError(err: unknown): boolean {
-	let msg: string;
-	if (err instanceof Error) {
-		msg = err.message.toLowerCase();
-	} else if (typeof err === "string") {
-		msg = err.toLowerCase();
-	} else {
-		return false;
-	}
-	return (
-		msg.includes("api key") ||
-		msg.includes("authentication") ||
-		msg.includes("unauthorized") ||
-		msg.includes("401") ||
-		msg.includes("403") ||
-		msg.includes("permission") ||
-		msg.includes("forbidden")
-	);
+	return matchesErrorPattern(err, [
+		"api key",
+		"authentication",
+		"unauthorized",
+		"401",
+		"403",
+		"permission",
+		"forbidden",
+	]);
 }
 
 /** Check if an error is a model-level error (quota or auth) that warrants model switching. */

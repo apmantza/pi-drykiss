@@ -71,7 +71,7 @@ describe("handleConfigCommand", () => {
 	it("sets default model", async () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("set-default haiku", ctx);
-		expect(setDefaultModel).toHaveBeenCalledWith("/cwd", "haiku");
+		expect(setDefaultModel).toHaveBeenCalledWith("haiku");
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
 			expect.stringContaining("haiku"),
 			"info",
@@ -87,16 +87,13 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("set-default", ctx);
 		expect(selectModel).toHaveBeenCalled();
-		expect(setDefaultModel).toHaveBeenCalledWith(
-			"/cwd",
-			"anthropic/claude-haiku",
-		);
+		expect(setDefaultModel).toHaveBeenCalledWith("anthropic/claude-haiku");
 	});
 
 	it("sets per-lens model", async () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("set-lens clarity sonnet", ctx);
-		expect(setLensModel).toHaveBeenCalledWith("/cwd", "clarity", "sonnet");
+		expect(setLensModel).toHaveBeenCalledWith("clarity", "sonnet");
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
 			expect.stringContaining("sonnet"),
 			"info",
@@ -118,7 +115,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("interactive on", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ interactive: true }),
 		);
 	});
@@ -128,7 +124,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("interactive off", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ interactive: false }),
 		);
 	});
@@ -138,7 +133,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("confirm on", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ confirmBeforeRun: true }),
 		);
 	});
@@ -148,7 +142,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("confirm off", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ confirmBeforeRun: false }),
 		);
 	});
@@ -158,7 +151,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("context-mode diff", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ contextMode: "diff" }),
 		);
 	});
@@ -168,7 +160,6 @@ describe("handleConfigCommand", () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("context-mode full", ctx);
 		expect(saveConfig).toHaveBeenCalledWith(
-			"/cwd",
 			expect.objectContaining({ contextMode: "full" }),
 		);
 	});
@@ -186,7 +177,7 @@ describe("handleConfigCommand", () => {
 	it("resets prompts", async () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("reset-prompts", ctx);
-		expect(resetPrompts).toHaveBeenCalledWith("/cwd");
+		expect(resetPrompts).toHaveBeenCalled();
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
 			expect.stringContaining("regenerated"),
 			"info",

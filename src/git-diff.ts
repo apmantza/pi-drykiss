@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
 
@@ -11,8 +11,8 @@ const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	D: "deleted",
 };
 
-export function detectLanguage(path: string): string | null {
-	const ext = path.split(".").pop()?.toLowerCase();
+export function detectLanguage(p: string): string | null {
+	const ext = p.split(".").pop()?.toLowerCase();
 	const map: Record<string, string> = {
 		ts: "TypeScript",
 		tsx: "TypeScript/React",
@@ -56,9 +56,9 @@ function parseDiffOutput(stdout: string): ChangedFile[] {
 		if (!statusCode) continue;
 		const status = STATUS_MAP[statusCode];
 		if (!status) continue;
-		const path = parts[1];
-		if (!path) continue;
-		files.push({ path, status, language: detectLanguage(path) });
+		const filePath = parts[1];
+		if (!filePath) continue;
+		files.push({ path: filePath, status, language: detectLanguage(filePath) });
 	}
 	return files;
 }
@@ -94,10 +94,10 @@ export async function getChangedFiles(
 	}
 
 	if (options.files.length > 0) {
-		return options.files.map((path) => ({
-			path,
+		return options.files.map((fp) => ({
+			path: fp,
 			status: "modified" as const,
-			language: detectLanguage(path),
+			language: detectLanguage(fp),
 		}));
 	}
 
@@ -174,7 +174,7 @@ async function getSourceDirs(cwd: string): Promise<string[]> {
 	const dirsToWalk: string[] = [];
 	for (const d of SOURCE_DIRS) {
 		try {
-			const s = await stat(join(cwd, d));
+			const s = await stat(path.join(cwd, d));
 			if (s.isDirectory()) dirsToWalk.push(d);
 		} catch {
 			// skip
@@ -203,13 +203,36 @@ export async function getFileContent(
 		console.error(`[DRYKISS] Rejected absolute path: ${filePath}`);
 		return null;
 	}
-	// Reject paths that escape the cwd
-	if (filePath.includes("..") || filePath.includes("~")) {
+	// Decode URI-encoded sequences (handles %2e%2e etc.) and normalize
+	let decodedPath: string;
+	try {
+		decodedPath = decodeURIComponent(filePath);
+	} catch {
+		console.error(`[DRYKISS] Rejected malformed path: ${filePath}`);
+		return null;
+	}
+	// After decoding, reject literal dot-dot, tilde, OR any encoded variants that survived
+	if (
+		decodedPath.includes("..") ||
+		decodedPath.includes("~") ||
+		filePath.toLowerCase().includes("%2e") ||
+		filePath.toLowerCase().includes("..") // check original too
+	) {
 		console.error(`[DRYKISS] Rejected suspicious path: ${filePath}`);
 		return null;
 	}
+	// Verify resolved path stays within cwd (defense-in-depth for Unicode/other tricks)
+	const resolved = path.resolve(cwd, decodedPath);
+	const cwdResolved = path.resolve(cwd);
+	if (
+		!resolved.startsWith(cwdResolved + path.sep) &&
+		resolved !== cwdResolved
+	) {
+		console.error(`[DRYKISS] Rejected path escaping cwd: ${filePath}`);
+		return null;
+	}
 	try {
-		const raw = await readFile(join(cwd, filePath), "utf8");
+		const raw = await readFile(resolved, "utf8");
 		const lines = raw.split("\n");
 		const truncated = lines.length > MAX_FILE_LINES;
 		const content = truncated
@@ -245,15 +268,15 @@ export interface ProjectIndexEntry {
 }
 
 async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
-	const entries = await readdir(join(cwd, dir), { withFileTypes: true });
+	const entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
 	for (const entry of entries) {
 		if (entry.isDirectory()) {
 			if (SKIP_DIRS.has(entry.name)) continue;
-			yield* walkDir(cwd, join(dir, entry.name));
+			yield* walkDir(cwd, path.join(dir, entry.name));
 		} else if (entry.isFile()) {
 			const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
 			if (CODE_EXTS.has(ext)) {
-				yield join(dir, entry.name);
+				yield path.join(dir, entry.name);
 			}
 		}
 	}
@@ -264,8 +287,9 @@ function extractExports(content: string, ext: string): string[] {
 	const seen = new Set<string>();
 
 	// TypeScript/JavaScript: export function/class/const/interface/type/enum name
+	// Handles optional 'async' keyword before function declarations
 	const declRe =
-		/export\s+(?:default\s+)?(?:function\s+(?:\*\s*)?|class\s+|const\s+|let\s+|var\s+|interface\s+|type\s+|enum\s+)(\w+)/g;
+		/export\s+(?:default\s+)?(?:async\s+)?(?:function\s+(?:\*\s*)?|class\s+|const\s+|let\s+|var\s+|interface\s+|type\s+|enum\s+)(\w+)/g;
 	let m: RegExpExecArray | null;
 	while ((m = declRe.exec(content)) !== null) {
 		if (!seen.has(m[1])) {
@@ -341,7 +365,7 @@ export async function getProjectIndex(
 			if (entries.length >= maxFiles) break;
 
 			try {
-				const raw = await readFile(join(cwd, filePath), "utf8");
+				const raw = await readFile(path.join(cwd, filePath), "utf8");
 				const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
 				const exports = extractExports(raw, ext);
 				if (exports.length > 0) {

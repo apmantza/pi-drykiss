@@ -28,7 +28,7 @@ export function getConfigPath(): string {
 	return join(getGlobalBaseDir(), CONFIG_FILE);
 }
 
-export async function loadConfig(cwd: string): Promise<DrykissConfig> {
+export async function loadConfig(): Promise<DrykissConfig> {
 	try {
 		const raw = await readFile(getConfigPath(), "utf8");
 		return JSON.parse(raw) as DrykissConfig;
@@ -52,32 +52,22 @@ export async function loadConfig(cwd: string): Promise<DrykissConfig> {
 	}
 }
 
-export async function saveConfig(
-	cwd: string,
-	config: DrykissConfig,
-): Promise<void> {
+export async function saveConfig(config: DrykissConfig): Promise<void> {
 	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
 	await writeFile(getConfigPath(), JSON.stringify(config, null, 2), "utf8");
 }
 
-export async function setLensModel(
-	cwd: string,
-	lens: string,
-	model: string,
-): Promise<void> {
-	const config = await loadConfig(cwd);
+export async function setLensModel(lens: string, model: string): Promise<void> {
+	const config = await loadConfig();
 	config.lensModels = { ...config.lensModels, [lens]: model };
-	await saveConfig(cwd, config);
+	await saveConfig(config);
 }
 
-export async function setDefaultModel(
-	cwd: string,
-	model: string,
-): Promise<void> {
-	const config = await loadConfig(cwd);
+export async function setDefaultModel(model: string): Promise<void> {
+	const config = await loadConfig();
 	config.defaultModel = model;
-	await saveConfig(cwd, config);
+	await saveConfig(config);
 }
 
 export function getModelForLens(
