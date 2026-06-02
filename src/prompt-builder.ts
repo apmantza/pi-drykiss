@@ -590,7 +590,7 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 	}
 }
 
-export async function resetPrompts(_cwd: string): Promise<void> {
+export async function resetPrompts(): Promise<void> {
 	const dir = getGlobalPromptsDir();
 	await mkdir(dir, { recursive: true });
 

@@ -323,7 +323,7 @@ describe("prompt template management", () => {
 
 	it("resetPrompts overwrites all prompt files", async () => {
 		vi.mocked(readFile).mockResolvedValue("existing content");
-		await resetPrompts("/cwd");
+		await resetPrompts();
 		expect(mkdir).toHaveBeenCalled();
 		expect(writeFile).toHaveBeenCalledTimes(8); // 7 lenses + synthesis
 	});
