@@ -38,10 +38,9 @@ export interface SubagentResult {
  */
 export async function resolveModel(
 	ctx: ExtensionContext,
-	cwd: string,
 	lens: string,
 ): Promise<Model<Api>> {
-	const model = await resolveModelSmart(ctx, cwd, undefined, lens);
+	const model = await resolveModelSmart(ctx, undefined, lens);
 	if (!model) {
 		throw new Error("No models available. Configure an API key with /login.");
 	}
@@ -54,12 +53,11 @@ export async function resolveModel(
  */
 export async function resolveAllModels(
 	ctx: ExtensionContext,
-	cwd: string,
 	lenses: ReviewLens[],
 ): Promise<Map<ReviewLens, Model<Api>>> {
 	const resolved = new Map<ReviewLens, Model<Api>>();
 	for (const lens of lenses) {
-		resolved.set(lens, await resolveModel(ctx, cwd, lens));
+		resolved.set(lens, await resolveModel(ctx, lens));
 	}
 	return resolved;
 }

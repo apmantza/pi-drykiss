@@ -24,7 +24,6 @@ export interface LLMOptions {
  */
 export async function resolveModelSmart(
 	ctx: ExtensionContext,
-	cwd: string,
 	hint?: string,
 	lens?: string,
 ): Promise<Model<Api> | undefined> {
@@ -107,13 +106,12 @@ export function findModelByHint(
  */
 export async function callLLM(
 	ctx: ExtensionContext,
-	cwd: string,
 	systemPrompt: string,
 	userPrompt: string,
 	options?: LLMOptions,
 	lens?: string,
 ): Promise<{ text: string; model: Model<Api> }> {
-	let model = await resolveModelSmart(ctx, cwd, undefined, lens);
+	let model = await resolveModelSmart(ctx, undefined, lens);
 	if (!model) {
 		throw new Error("No model available. Configure an API key with /login.");
 	}

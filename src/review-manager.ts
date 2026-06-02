@@ -113,7 +113,7 @@ export class ReviewManager {
 			if (!m) throw new Error(`Model "${options.model}" not found.`);
 			modelMap = new Map(lenses.map((l) => [l, m]));
 		} else {
-			modelMap = await resolveAllModels(ctx, cwd, lenses);
+			modelMap = await resolveAllModels(ctx, lenses);
 		}
 
 		// Build prompts
@@ -415,7 +415,7 @@ export class ReviewManager {
 			lensReviews,
 		);
 
-		let model = await resolveModel(ctx, cwd, "synthesis");
+		let model = await resolveModel(ctx, "synthesis");
 
 		try {
 			const result = await runLensSubagent(

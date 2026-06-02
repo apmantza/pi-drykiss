@@ -128,13 +128,13 @@ describe("resolveModelSmart", () => {
 	it("returns undefined when no models available", async () => {
 		const ctx = makeCtx();
 		ctx.modelRegistry.getAvailable.mockReturnValue([]);
-		const result = await resolveModelSmart(ctx, "/test");
+		const result = await resolveModelSmart(ctx);
 		expect(result).toBeUndefined();
 	});
 
 	it("uses explicit hint when provided", async () => {
 		const ctx = makeCtx();
-		const result = await resolveModelSmart(ctx, "/test", "gpt");
+		const result = await resolveModelSmart(ctx, "gpt");
 		expect(result?.id).toBe("gpt-4o");
 	});
 
@@ -145,7 +145,6 @@ describe("resolveModelSmart", () => {
 		);
 		const result = await resolveModelSmart(
 			ctx,
-			"/test",
 			undefined,
 			"simplicity",
 		);
@@ -158,20 +157,20 @@ describe("resolveModelSmart", () => {
 		vi.mocked(loadConfig).mockResolvedValue({
 			defaultModel: "openai/gpt-4o",
 		} as any);
-		const result = await resolveModelSmart(ctx, "/test");
+		const result = await resolveModelSmart(ctx);
 		expect(result?.id).toBe("gpt-4o");
 	});
 
 	it("returns first available model as final fallback", async () => {
 		const ctx = makeCtx();
-		const result = await resolveModelSmart(ctx, "/test");
+		const result = await resolveModelSmart(ctx);
 		expect(result?.id).toBe("claude-sonnet-4-20250514");
 	});
 
 	it("skips interactive selector when hasUI is false", async () => {
 		const ctx = makeCtx({ hasUI: false });
 		vi.mocked(loadConfig).mockResolvedValue({ interactive: true } as any);
-		const result = await resolveModelSmart(ctx, "/test");
+		const result = await resolveModelSmart(ctx);
 		// Should fall through to first available model
 		expect(result?.id).toBe("claude-sonnet-4-20250514");
 		expect(selectModelWithAutoroute).not.toHaveBeenCalled();
@@ -186,7 +185,7 @@ describe("resolveModelSmart", () => {
 		} as any);
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(freeModel);
 
-		const result = await resolveModelSmart(ctx, "/test");
+		const result = await resolveModelSmart(ctx);
 		expect(result?.id).toBe("claude-3-5-haiku");
 		expect(saveConfig).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -225,7 +224,7 @@ describe("callLLM", () => {
 
 	it("returns text from LLM response", async () => {
 		const ctx = makeCtx();
-		const result = await callLLM(ctx, "/test", "system", "user");
+		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("response");
 		expect(result.model.id).toBe("claude-sonnet-4-20250514");
 	});
@@ -233,7 +232,7 @@ describe("callLLM", () => {
 	it("throws when no model available", async () => {
 		const ctx = makeCtx();
 		ctx.modelRegistry.getAvailable.mockReturnValue([]);
-		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow(
 			"No model available",
 		);
 	});
@@ -244,7 +243,7 @@ describe("callLLM", () => {
 			ok: false,
 			error: "No key",
 		});
-		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow(
 			"No API key",
 		);
 	});
@@ -263,7 +262,7 @@ describe("callLLM", () => {
 			} as any);
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
-		const result = await callLLM(ctx, "/test", "system", "user");
+		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("retry-success");
 		expect(selectModelWithAutoroute).toHaveBeenCalled();
 	});
@@ -281,7 +280,7 @@ describe("callLLM", () => {
 			} as any);
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
-		const result = await callLLM(ctx, "/test", "system", "user");
+		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("retry-success");
 	});
 
@@ -300,7 +299,7 @@ describe("callLLM", () => {
 			} as any);
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
-		const result = await callLLM(ctx, "/test", "system", "user");
+		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("autoroute-recovered");
 		expect(selectModelWithAutoroute).toHaveBeenCalled();
 	});
@@ -318,7 +317,7 @@ describe("callLLM", () => {
 			} as any);
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
-		await callLLM(ctx, "/test", "system", "user");
+		await callLLM(ctx, "system", "user");
 		expect(selectModelWithAutoroute).toHaveBeenCalledWith(
 			ctx,
 			expect.anything(),
@@ -340,7 +339,7 @@ describe("callLLM", () => {
 		vi.mocked(complete).mockRejectedValueOnce(new Error("Rate limit"));
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(undefined);
 
-		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow(
 			"Rate limit",
 		);
 	});

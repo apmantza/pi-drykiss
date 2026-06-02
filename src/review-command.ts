@@ -400,8 +400,8 @@ async function runLensReview(
 	const available = ctx.modelRegistry.getAvailable();
 	const model = options.modelHint
 		? (findModelByHint(available, options.modelHint) ??
-			(await resolveModel(ctx, cwd, lens)))
-		: await resolveModel(ctx, cwd, lens);
+			(await resolveModel(ctx, lens)))
+		: await resolveModel(ctx, lens);
 
 	ctx.ui.notify(
 		`[DRYKISS] Launching ${lens} subagent with ${model.name}...`,
