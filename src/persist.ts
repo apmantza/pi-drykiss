@@ -1,10 +1,15 @@
 import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Finding, SynthesisResult } from "./types.js";
 import { getGlobalBaseDir } from "./constants.js";
 
 function getGlobalReviewsDir(): string {
 	return join(getGlobalBaseDir(), "reviews");
+}
+
+function getGlobalSessionsDir(): string {
+	return join(getGlobalBaseDir(), "sessions");
 }
 
 export interface PersistedReview {
@@ -44,6 +49,43 @@ export async function saveReview(
 	const path = join(dir, `${timestamp}.json`);
 	await writeFile(path, JSON.stringify(review, null, 2), "utf8");
 	return path;
+}
+
+/**
+ * Persist a subagent session transcript as JSONL so the user can open it
+ * with an external tool (or `/resume` it in Pi). The output is Pi's
+ * standard session format — one header line followed by one entry per
+ * message.
+ *
+ * Returns the absolute path to the written file. If the session is
+ * undefined (lens never produced one) or the export throws (e.g. session
+ * is already disposed), returns undefined so the caller can degrade
+ * gracefully — the session is still accessible via /drykiss-jobs.
+ */
+export async function saveSessionLog(
+	jobId: string,
+	lens: string,
+	session: { exportToJsonl: (outputPath: string) => string } | undefined,
+): Promise<string | undefined> {
+	if (!session) return undefined;
+	const dir = getGlobalSessionsDir();
+	await mkdir(dir, { recursive: true });
+	const path = join(dir, `${jobId}-${lens}.jsonl`);
+	try {
+		const resolved = session.exportToJsonl(path);
+		// exportToJsonl returns the resolved output path; prefer it in case
+		// the implementation ever normalises or rewrites the path.
+		return resolved || path;
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[DRYKISS] Failed to export session log for ${lens}: ${msg}`);
+		return undefined;
+	}
+}
+
+/** Build a `file://` URL from an absolute path, suitable for OSC 8 hyperlinks. */
+export function pathToFileLink(absolutePath: string): string {
+	return pathToFileURL(absolutePath).toString();
 }
 
 export async function listReviews(): Promise<PersistedReview[]> {

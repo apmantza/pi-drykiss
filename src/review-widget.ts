@@ -1,6 +1,8 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, hyperlink } from "@earendil-works/pi-tui";
+import { basename } from "node:path";
 import type { ReviewJob, LensStatus } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
+import { pathToFileLink } from "./persist.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -19,6 +21,26 @@ function formatElapsed(ms: number): string {
 	const hours = Math.floor(mins / 60);
 	const remMins = mins % 60;
 	return `${hours}h ${remMins.toString().padStart(2, "0")}m`;
+}
+
+/**
+ * Render an OSC 8 hyperlink pointing at a lens's exported session
+ * transcript, or an empty string if no log path is available.
+ *
+ * Falls back to plain text in terminals that don't support OSC 8 — the
+ * escape sequences are ignored and the user sees the basename, which is
+ * still copy-pasteable.
+ */
+function renderLogLink(logPath: string | undefined, theme: Theme): string {
+	if (!logPath) return "";
+	const name = basename(logPath);
+	const url = pathToFileLink(logPath);
+	// OSC 8 hyperlinks render with the terminal's default link styling
+	// (typically colored + underlined) in supporting terminals. In others
+	// the escape codes are stripped, leaving just the dim-colored basename
+	// which is still copy-pasteable.
+	const label = theme.fg("dim", name);
+	return ` · ${hyperlink(label, url)}`;
 }
 
 type Theme = {
@@ -140,6 +162,7 @@ export class ReviewProgressWidget {
 			durationMs: number;
 			errorMessage?: string;
 			findingsCount: number;
+			logPath?: string;
 			startedAt?: number;
 			streamingText?: string;
 		},
@@ -148,6 +171,7 @@ export class ReviewProgressWidget {
 	): string {
 		let icon: string;
 		let statusText: string;
+		let linkSegment = "";
 		if (state.status === "queued") {
 			icon = theme.fg("dim", "○");
 			statusText = theme.fg("dim", "queued");
@@ -167,18 +191,20 @@ export class ReviewProgressWidget {
 				"dim",
 				`${(state.durationMs / 1000).toFixed(1)}s${findings}`,
 			);
+			linkSegment = renderLogLink(state.logPath, theme);
 		} else {
 			icon = theme.fg("error", "✗");
 			statusText = theme.fg(
 				"error",
 				state.errorMessage ? state.errorMessage.slice(0, 40) : "error",
 			);
+			linkSegment = renderLogLink(state.logPath, theme);
 		}
 
 		const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
 		const name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 		const model = theme.fg("dim", `@ ${state.modelName}`);
-		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}`;
+		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}${linkSegment}`;
 	}
 
 	private update() {

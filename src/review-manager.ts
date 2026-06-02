@@ -12,7 +12,7 @@ import {
 	parseSynthesis,
 } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
-import { saveReview } from "./persist.js";
+import { saveReview, saveSessionLog } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelWithAutoroute } from "./model-selector.js";
@@ -31,6 +31,8 @@ export interface LensState {
 	rawOutput: string;
 	/** Wall-clock timestamp when the lens transitioned to 'running'. Used by the widget to render a live elapsed timer. */
 	startedAt?: number;
+	/** Absolute path to the exported session transcript, set when the lens finishes. */
+	logPath?: string;
 	/** Live session object — kept alive for conversation viewing. */
 	session?: AgentSession;
 	/** Streaming text from the subagent (updated in real-time for live progress). */
@@ -251,6 +253,7 @@ export class ReviewManager {
 
 		state.durationMs = result.durationMs;
 		state.session = result.session;
+		state.logPath = await saveSessionLog(job.id, task.lens, result.session);
 		console.log(`[DRYKISS] ${task.lens} result:`, {
 			hasError: !!result.errorMessage,
 			errorMessage: result.errorMessage?.slice(0, 100),

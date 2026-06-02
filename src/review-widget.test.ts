@@ -3,6 +3,39 @@ import { ReviewProgressWidget } from "./review-widget.js";
 import type { LensState, ReviewJob } from "./review-manager.js";
 import type { ReviewLens } from "./types.js";
 
+function buildLensState(overrides: Partial<LensState>): LensState {
+	return {
+		status: "queued",
+		modelName: "m",
+		durationMs: 0,
+		findingsCount: 0,
+		rawOutput: "",
+		...overrides,
+	};
+}
+
+function renderJobLine(job: ReviewJob, lineIndex = 2): string {
+	let captured: (() => string[]) | undefined;
+	const widget = new ReviewProgressWidget();
+	const theme = {
+		fg: (_c: string, t: string) => t,
+		bold: (t: string) => t,
+	};
+	const uiCtx = {
+		setWidget: (
+			_key: string,
+			fn: (tui: any, theme: any) => { render: () => string[] },
+		) => {
+			captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+		},
+	};
+	widget.attach(uiCtx);
+	widget.setJobs([job]);
+	const lines = captured?.() ?? [];
+	widget.dispose();
+	return lines[lineIndex] ?? "";
+}
+
 function buildRunningJob(elapsedMs: number): ReviewJob {
 	const lens: ReviewLens = "simplicity";
 	const state: LensState = {
@@ -106,5 +139,79 @@ describe("formatElapsed (via widget render)", () => {
 		// Should show "running" with NO elapsed suffix.
 		expect(lensLine).toMatch(/·\s*running\s*$/);
 		expect(lensLine).not.toMatch(/running\s*·/);
+	});
+});
+
+describe("renderLensLine — session log link", () => {
+	const lens: ReviewLens = "simplicity";
+
+	function buildJobWithState(state: LensState): ReviewJob {
+		return {
+			id: "j1",
+			files: [],
+			lenses: [lens],
+			states: new Map([[lens, state]]),
+			synthesisStatus: "idle",
+			overallStatus: "running",
+			startedAt: Date.now(),
+		};
+	}
+
+	it("appends an OSC 8 hyperlink to the basename for a done lens with logPath", () => {
+		const job = buildJobWithState(
+			buildLensState({
+				status: "done",
+				durationMs: 8400,
+				findingsCount: 5,
+				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
+			}),
+		);
+		const line = renderJobLine(job);
+		// Hyperlink escape sequence: ESC ] 8 ; ; <url> ESC \
+		expect(line).toContain("\x1b]8;;file://");
+		expect(line).toContain("j1-simplicity.jsonl");
+		// pathToFileURL adds a drive letter on Windows — just verify the path
+		// components and the file:// scheme.
+		expect(line).toMatch(/file:\/\/\/[A-Z]:?.*\.pi[\\/]drykiss[\\/]sessions/);
+	});
+
+	it("appends the link for an errored lens with logPath", () => {
+		const job = buildJobWithState(
+			buildLensState({
+				status: "error",
+				errorMessage: "boom",
+				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
+			}),
+		);
+		const line = renderJobLine(job);
+		expect(line).toContain("\x1b]8;;");
+		expect(line).toContain("j1-simplicity.jsonl");
+	});
+
+	it("does NOT append a link for a done lens without logPath", () => {
+		const job = buildJobWithState(
+			buildLensState({ status: "done", durationMs: 1000, findingsCount: 0 }),
+		);
+		const line = renderJobLine(job);
+		expect(line).not.toContain("\x1b]8;;");
+		expect(line).not.toContain(".jsonl");
+	});
+
+	it("does NOT append a link for a running lens even if logPath is set", () => {
+		const job = buildJobWithState(
+			buildLensState({
+				status: "running",
+				startedAt: Date.now() - 1000,
+				logPath: "/some/path.jsonl", // shouldn't happen, but defensive
+			}),
+		);
+		const line = renderJobLine(job);
+		expect(line).not.toContain("\x1b]8;;");
+	});
+
+	it("does NOT append a link for a queued lens", () => {
+		const job = buildJobWithState(buildLensState({ status: "queued" }));
+		const line = renderJobLine(job);
+		expect(line).not.toContain("\x1b]8;;");
 	});
 });

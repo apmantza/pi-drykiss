@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
-import { saveReview, listReviews, formatReviewForDisplay } from "./persist.js";
+import {
+	saveReview,
+	listReviews,
+	formatReviewForDisplay,
+	saveSessionLog,
+	pathToFileLink,
+} from "./persist.js";
 import type { SynthesisResult } from "./types.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -125,6 +131,61 @@ describe("listReviews", () => {
 
 		const reviews = await listReviews();
 		expect(reviews).toHaveLength(1);
+	});
+});
+
+describe("saveSessionLog", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns undefined for an undefined session (no agent session was created)", async () => {
+		const result = await saveSessionLog("job-1", "simplicity", undefined);
+		expect(result).toBeUndefined();
+		expect(mkdir).not.toHaveBeenCalled();
+	});
+
+	it("exports a session transcript to ~/.pi/drykiss/sessions/<jobId>-<lens>.jsonl", async () => {
+		const session = {
+			exportToJsonl: vi.fn().mockReturnValue("/resolved/path.jsonl"),
+		};
+		const result = await saveSessionLog("abc123def456", "simplicity", session);
+		expect(result).toBe("/resolved/path.jsonl");
+		expect(session.exportToJsonl).toHaveBeenCalled();
+		const callArg = vi.mocked(session.exportToJsonl).mock.calls[0][0] as string;
+		expect(callArg).toMatch(/[/\\]\.pi[/\\]drykiss[/\\]sessions[/\\]/);
+		expect(callArg).toContain("abc123def456");
+		expect(callArg).toContain("simplicity");
+		expect(callArg).toMatch(/\.jsonl$/);
+	});
+
+	it("returns undefined and warns when exportToJsonl throws", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const session = {
+			exportToJsonl: vi.fn().mockImplementation(() => {
+				throw new Error("session is disposed");
+			}),
+		};
+		const result = await saveSessionLog("j1", "simplicity", session);
+		expect(result).toBeUndefined();
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to export session log"),
+		);
+		warnSpy.mockRestore();
+	});
+});
+
+describe("pathToFileLink", () => {
+	it("builds a file:// URL from an absolute path", () => {
+		const link = pathToFileLink("/tmp/foo.jsonl");
+		expect(link.startsWith("file://")).toBe(true);
+		expect(link).toContain("foo.jsonl");
+	});
+
+	it("encodes special characters in the path", () => {
+		const link = pathToFileLink("/tmp/some dir/file.jsonl");
+		// Spaces and other unsafe characters should be percent-encoded.
+		expect(link).not.toMatch(/ /);
 	});
 });
 
