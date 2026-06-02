@@ -490,7 +490,12 @@ export class ReviewManager {
 		// Release synthesis lock
 		this.synthesisLocks.delete(job.id);
 		if (job.synthesisResult) {
-			await saveReview(job.files, job.synthesisResult);
+			try {
+				await saveReview(job.files, job.synthesisResult);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(`[DRYKISS] Failed to persist review ${job.id}:`, msg);
+			}
 		}
 
 		this.onComplete?.(job);

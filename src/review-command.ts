@@ -432,7 +432,14 @@ export async function handleDrykissCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const prepared = await prepareReview(args, ctx, pi, true);
+	let prepared: Awaited<ReturnType<typeof prepareReview>> = null;
+	try {
+		prepared = await prepareReview(args, ctx, pi, true);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`[DRYKISS] Failed to prepare review: ${msg}`, "error");
+		return;
+	}
 	if (!prepared) return;
 
 	const { options, files, diffs, contents, projectIndex, config } = prepared;
@@ -485,7 +492,14 @@ async function handleSingleLensCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const prepared = await prepareReview(args, ctx, pi, needsProjectIndex);
+	let prepared: Awaited<ReturnType<typeof prepareReview>> = null;
+	try {
+		prepared = await prepareReview(args, ctx, pi, needsProjectIndex);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`[DRYKISS] Failed to prepare review: ${msg}`, "error");
+		return;
+	}
 	if (!prepared) return;
 
 	const { options, files, diffs, contents, projectIndex } = prepared;

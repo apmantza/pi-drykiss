@@ -196,6 +196,51 @@ function parseUnifiedDiff(diffOutput: string): {
 }
 
 /**
+ * Decode a `gh api` `.content` response (base64-encoded file content)
+ * into a UTF-8 string.
+ *
+ * GitHub's contents API returns file content as base64. Some encoders
+ * insert newlines every 76 characters, so the input may have embedded
+ * whitespace that must be stripped before validation. An empty response
+ * is valid (it represents a brand-new empty file).
+ *
+ * Returns `null` if the input doesn't look like base64 after cleanup —
+ * the caller should log and skip the file rather than treating garbage
+ * as content.
+ */
+export function decodeBase64Content(trimmed: string): string | null {
+	if (trimmed.length === 0) return "";
+	const cleaned = trimmed.replace(/\s+/g, "");
+	if (!/^[A-Za-z0-9+/=]+$/.test(cleaned)) return null;
+	return Buffer.from(cleaned, "base64").toString("utf-8");
+}
+
+/**
+ * Validate a file path before interpolating it into a URL.
+ *
+ * File paths in a PR diff come from the PR author — a code-review tool is
+ * the wrong place to be lenient. Reject anything that could be used for
+ * path traversal (`..`) or URL injection (`?`/`#`/`&`/`=`) or header
+ * injection (control characters / newlines).
+ *
+ * Also rejects absolute paths and embedded `//` segments that would change
+ * the URL structure.
+ */
+export function isValidFilePath(path: unknown): path is string {
+	if (typeof path !== "string" || path.length === 0) return false;
+	if (path.length > 4096) return false;
+	if (path.startsWith("/")) return false;
+	if (path.includes("//")) return false;
+	// Reject control characters (incl. \n, \r, \t, \0)
+	if (/[\x00-\x1f\x7f]/.test(path)) return false;
+	// Reject path-traversal segments
+	if (path.split("/").some((seg) => seg === ".." || seg === ".")) return false;
+	// Reject URL-structural characters
+	if (/[?#&=]/.test(path)) return false;
+	return true;
+}
+
+/**
  * Fetch full file contents for context using `gh api`.
  */
 export async function fetchPrFileContents(
@@ -218,6 +263,14 @@ export async function fetchPrFileContents(
 		const batch = filePaths.slice(i, i + BATCH_SIZE);
 		const results = await Promise.allSettled(
 			batch.map(async (path) => {
+				if (!isValidFilePath(path)) {
+					console.warn(
+						`[DRYKISS] Refusing to fetch unsafe file path: ${String(
+							path,
+						).slice(0, 100)}`,
+					);
+					return null;
+				}
 				try {
 					const { stdout } = await execFileAsync(
 						"gh",
@@ -234,21 +287,19 @@ export async function fetchPrFileContents(
 						{ cwd, maxBuffer: 1 * 1024 * 1024 }, // 1MB per file
 					);
 
-					// gh api returns base64-encoded content
-					// Validate the output looks like base64 before decoding
-					const trimmed = stdout.trim();
-					const isBase64 =
-						/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 0;
-					if (!isBase64) {
+					// gh api returns base64-encoded content. Some encoders embed
+					// newlines every 76 chars; strip any whitespace before
+					// validating so multi-line responses don't get rejected.
+					const decoded = decodeBase64Content(stdout);
+					if (decoded === null) {
 						console.warn(
-							`[DRYKISS] Unexpected API response for ${path}: ${trimmed.slice(
+							`[DRYKISS] Unexpected API response for ${path}: ${stdout.slice(
 								0,
 								100,
 							)}`,
 						);
 						return null;
 					}
-					const decoded = Buffer.from(trimmed, "base64").toString("utf-8");
 					const lineCount = decoded.split("\n").length;
 
 					// Truncate if too large (same as local files)

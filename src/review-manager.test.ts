@@ -265,7 +265,7 @@ describe("ReviewManager", () => {
 			if (callCount === 1) throw new Error("simulated subagent crash");
 			return {
 				lens,
-				text: '[]',
+				text: "[]",
 				modelName: "mock-model",
 				durationMs: 1,
 				session: { dispose: vi.fn() },

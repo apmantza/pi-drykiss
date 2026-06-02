@@ -148,6 +148,40 @@ describe("review command error handling", () => {
 		expect(mockManager.startReview).not.toHaveBeenCalled();
 	});
 
+	it("handles prepareReview throwing from getChangedFiles (no unhandled rejection)", async () => {
+		// Regression: prior to wrapping prepareReview in try/catch, if
+		// getChangedFiles (or any other step inside prepareReview) threw,
+		// the rejection propagated out of handleDrykissCommand as an
+		// unhandled promise rejection. Now we catch it and show a clear
+		// "Failed to prepare review" notification.
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockRejectedValue(
+			new Error("git diff exploded"),
+		);
+
+		// Spy on unhandled rejections on the test process so we can assert
+		// that this call doesn't trigger one. Use a process-level listener
+		// that's removed in cleanup.
+		const handler = vi.fn();
+		process.on("unhandledRejection", handler);
+		try {
+			await handleDrykissCommand("", mockCtx, mockPi, mockManager);
+			expect(handler).not.toHaveBeenCalled();
+		} finally {
+			process.removeListener("unhandledRejection", handler);
+		}
+
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to prepare review"),
+			"error",
+		);
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("git diff exploded"),
+			"error",
+		);
+		expect(mockManager.startReview).not.toHaveBeenCalled();
+	});
+
 	it("handles startReview failure gracefully", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([

@@ -99,9 +99,17 @@ export async function handleConfigCommand(
 	if (subcommand === "set-lens") {
 		const lens = tokens[1];
 		const model = tokens[2];
-		if (!(LENS_NAMES as readonly string[]).includes(lens)) {
+		// Allow "synthesis" as a settable lens — it appears in `show` and is
+		// resolved by getModelForLens in llm.ts, so users should be able to
+		// configure it. LENS_NAMES excludes it (it's not a review lens).
+		if (
+			!(LENS_NAMES as readonly string[]).includes(lens) &&
+			lens !== "synthesis"
+		) {
 			ctx.ui.notify(
-				`Invalid lens: ${lens}. Valid: ${LENS_NAMES.join(", ")}`,
+				`Invalid lens: ${lens}. Valid: ${[...LENS_NAMES, "synthesis"].join(
+					", ",
+				)}`,
 				"error",
 			);
 			return;

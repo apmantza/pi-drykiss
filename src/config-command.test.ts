@@ -100,6 +100,22 @@ describe("handleConfigCommand", () => {
 		);
 	});
 
+	it("sets synthesis lens model (not in LENS_NAMES but valid)", async () => {
+		// Regression: set-lens previously rejected "synthesis" because the
+		// validator only checked LENS_NAMES (which excludes the synthesis
+		// lens), but the `show` command displays synthesis as settable and
+		// resolveModelSmart reads it via getModelForLens. So users couldn't
+		// configure their synthesis model — the command would always say
+		// "Invalid lens: synthesis".
+		const ctx = mockCtx();
+		await handleConfigCommand("set-lens synthesis opus", ctx);
+		expect(setLensModel).toHaveBeenCalledWith("synthesis", "opus");
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("opus"),
+			"info",
+		);
+	});
+
 	it("rejects invalid lens", async () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("set-lens invalid-model sonnet", ctx);

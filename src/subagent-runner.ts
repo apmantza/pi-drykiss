@@ -81,94 +81,103 @@ export async function runLensSubagent(
 	const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
 	const agentDir = getAgentDir();
 
-	const resourceLoader = new DefaultResourceLoader({
-		cwd,
-		agentDir,
-		systemPrompt,
-		noExtensions: true,
-		noSkills: true,
-		noPromptTemplates: true,
-		noThemes: true,
-		noContextFiles: true,
-	});
-	await resourceLoader.reload();
-
-	// Create session with SettingsManager and modelRegistry for full Pi integration
-	// (matches pi-subagents pattern for visible sessions)
-	const { session } = await createAgentSession({
-		cwd,
-		agentDir,
-		model,
-		sessionManager: SessionManager.inMemory(cwd),
-		settingsManager: SettingsManager.create(cwd, agentDir),
-		modelRegistry: ctx.modelRegistry,
-		resourceLoader,
-		noTools: "all",
-	});
-
-	// Name the session so it appears in Pi's session list (like pi-subagents)
-	session.setSessionName(`DRYKISS: ${displayName}`);
-
-	// Bind extensions so session_start fires and the session is fully initialized
-	// This is critical for the session to be visible in Pi's UI
-	await session.bindExtensions({
-		onError: (err) => {
-			console.error(`[DRYKISS] Extension error in ${displayName}:`, err);
-		},
-	});
-
 	let finalText = "";
 	let errorMessage: string | undefined;
 	let currentText = "";
-
-	// Subscribe to session events for streaming progress (like pi-subagents)
-	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-		if (event.type === "message_start") {
-			currentText = "";
-		}
-		if (
-			event.type === "message_update" &&
-			event.assistantMessageEvent?.type === "text_delta"
-		) {
-			currentText += event.assistantMessageEvent.delta;
-			onStreamUpdate?.();
-		}
-		if (event.type === "message_end") {
-			const message = event.message as {
-				role?: string;
-				content?: unknown;
-				stopReason?: string;
-				errorMessage?: string;
-			};
-			if (message.role !== "assistant") return;
-			if (message.errorMessage) errorMessage = message.errorMessage;
-			const text = extractAssistantText(message.content);
-			if (text) finalText = text;
-		}
-	});
-
-	// Wire abort signal to cancel the session
-	let detachAbort: (() => void) | undefined;
-	if (signal) {
-		const onAbort = () => session.abort();
-		signal.addEventListener("abort", onAbort, { once: true });
-		detachAbort = () => signal.removeEventListener("abort", onAbort);
-	}
+	let session: AgentSession | undefined;
 
 	try {
-		await session.prompt(userPrompt);
-		await session.agent.waitForIdle();
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			systemPrompt,
+			noExtensions: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			noContextFiles: true,
+		});
+		await resourceLoader.reload();
+
+		// Create session with SettingsManager and modelRegistry for full Pi integration
+		// (matches pi-subagents pattern for visible sessions)
+		const { session: created } = await createAgentSession({
+			cwd,
+			agentDir,
+			model,
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.create(cwd, agentDir),
+			modelRegistry: ctx.modelRegistry,
+			resourceLoader,
+			noTools: "all",
+		});
+		session = created;
+
+		// Name the session so it appears in Pi's session list (like pi-subagents)
+		session.setSessionName(`DRYKISS: ${displayName}`);
+
+		// Bind extensions so session_start fires and the session is fully initialized
+		// This is critical for the session to be visible in Pi's UI
+		await session.bindExtensions({
+			onError: (err) => {
+				console.error(`[DRYKISS] Extension error in ${displayName}:`, err);
+			},
+		});
+
+		// Subscribe to session events for streaming progress (like pi-subagents)
+		const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+			if (event.type === "message_start") {
+				currentText = "";
+			}
+			if (
+				event.type === "message_update" &&
+				event.assistantMessageEvent?.type === "text_delta"
+			) {
+				currentText += event.assistantMessageEvent.delta;
+				onStreamUpdate?.();
+			}
+			if (event.type === "message_end") {
+				const message = event.message as {
+					role?: string;
+					content?: unknown;
+					stopReason?: string;
+					errorMessage?: string;
+				};
+				if (message.role !== "assistant") return;
+				if (message.errorMessage) errorMessage = message.errorMessage;
+				const text = extractAssistantText(message.content);
+				if (text) finalText = text;
+			}
+		});
+
+		// Wire abort signal to cancel the session
+		let detachAbort: (() => void) | undefined;
+		if (signal) {
+			const onAbort = () => session?.abort();
+			signal.addEventListener("abort", onAbort, { once: true });
+			detachAbort = () => signal?.removeEventListener("abort", onAbort);
+		}
+
+		try {
+			await session.prompt(userPrompt);
+			await session.agent.waitForIdle();
+		} finally {
+			// Always clean up listeners, even if prompt() throws
+			unsubscribe();
+			detachAbort?.();
+			// NOTE: session is NOT disposed here — caller (ReviewManager) keeps
+			// it alive so the conversation can be viewed via /drykiss-jobs.
+		}
 	} catch (err: any) {
-		// Surface the error to the caller — retry logic is handled by ReviewManager
-		// so the user is only prompted once (not here and again at the job level).
+		// Surface any error from setup, session creation, binding, or prompt
+		// to the caller as an errorMessage on the result, rather than letting
+		// the promise reject. This keeps the caller's retry/error pipeline
+		// single-pathed and avoids unhandled rejection warnings.
+		// Retry logic is handled by ReviewManager so the user is only prompted
+		// once (not here and again at the job level).
 		if (!errorMessage) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 		}
-	} finally {
-		unsubscribe();
-		detachAbort?.();
-		// NOTE: session is NOT disposed here — caller (ReviewManager) keeps it
-		// alive so the conversation can be viewed via /drykiss-jobs.
 	}
 
 	return {
