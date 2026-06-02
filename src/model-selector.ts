@@ -205,6 +205,22 @@ export function isAuthError(err: unknown): boolean {
 	]);
 }
 
+/**
+ * Build the trailing scope note shown in the "Auto-routing to <model>" toast.
+ * Handles both the single-hint and list forms of `config.modelScope`.
+ */
+function formatScopeNote(scope: string | string[] | undefined): string {
+	if (scope === undefined) return "";
+	if (Array.isArray(scope)) {
+		const hints = scope.filter((s) => typeof s === "string" && s.trim());
+		if (hints.length === 0) return "";
+		return `, scope: [${hints.join(", ")}]`;
+	}
+	const trimmed = scope.trim();
+	if (trimmed.length === 0) return "";
+	return `, scope: ${trimmed}`;
+}
+
 /** Check if an error is a model-level error (quota or auth) that warrants model switching. */
 export function isModelError(err: unknown): boolean {
 	return isQuotaError(err) || isAuthError(err);
@@ -239,9 +255,7 @@ export async function selectModelWithAutoroute(
 	if (config.autoroute === true) {
 		const free = selectFreeModel(ctx, config.modelScope, excluded);
 		if (free) {
-			const scopeNote = config.modelScope
-				? `, scope: ${config.modelScope}`
-				: "";
+			const scopeNote = formatScopeNote(config.modelScope);
 			ctx.ui.notify(`Auto-routing to ${free.name} (free${scopeNote})`, "info");
 			return free;
 		}

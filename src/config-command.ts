@@ -9,6 +9,22 @@ import { selectModel } from "./model-selector.js";
 import { resetPrompts } from "./prompt-builder.js";
 import { LENS_NAMES } from "./types.js";
 
+/**
+ * Format a `modelScope` value for display. Handles the legacy single-hint
+ * form, the new list form, and an unset value.
+ */
+function formatModelScope(scope: string | string[] | undefined): string {
+	if (scope === undefined) return "(any free model)";
+	if (Array.isArray(scope)) {
+		const hints = scope.filter((s) => typeof s === "string" && s.trim());
+		if (hints.length === 0) return "(any free model)";
+		return hints.map((h) => `\`${h}\``).join(", ");
+	}
+	const trimmed = scope.trim();
+	if (trimmed.length === 0) return "(any free model)";
+	return `\`${trimmed}\``;
+}
+
 export async function handleConfigCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
@@ -33,7 +49,7 @@ export async function handleConfigCommand(
 			`**Confirm before run:** ${config.confirmBeforeRun !== false ? "enabled" : "disabled"}`,
 			`**Context mode:** ${config.contextMode ?? "full"}`,
 			`**Autoroute (free models):** ${config.autoroute === true ? "enabled" : "disabled"}`,
-			`**Model scope:** ${config.modelScope ? `\`${config.modelScope}\`` : "(any free model)"}`,
+			`**Model scope:** ${formatModelScope(config.modelScope)}`,
 			"",
 			"Config file: `~/.pi/drykiss/config.json`",
 			"Prompts dir: `~/.pi/drykiss/prompts/`",
@@ -186,24 +202,44 @@ export async function handleConfigCommand(
 	}
 
 	if (subcommand === "model-scope") {
-		const val = tokens[1];
 		const config = await loadConfig();
-		if (val === undefined) {
+		if (tokens.length <= 1) {
 			ctx.ui.notify(
-				"Usage: /drykiss-config model-scope <scope|clear>",
+				"Usage: /drykiss-config model-scope <scope[,scope2,...]|clear>",
 				"warning",
 			);
 			return;
 		}
-		if (val === "clear" || val === "none" || val === "") {
+		// Accept either `model-scope a,b,c` or `model-scope a b c d`. Tokens
+		// after the subcommand are joined and re-split on commas so both
+		// forms produce the same parsed list.
+		const joined = tokens.slice(1).join(" ");
+		if (joined === "clear" || joined === "none" || joined === "") {
 			delete config.modelScope;
 			await saveConfig(config);
 			ctx.ui.notify("Model scope cleared (any free model).", "info");
-		} else {
-			config.modelScope = val;
-			await saveConfig(config);
-			ctx.ui.notify(`Model scope set to \`${val}\`.`, "info");
+			return;
 		}
+		const hints = joined
+			.split(/[\s,]+/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+		if (hints.length === 0) {
+			delete config.modelScope;
+			await saveConfig(config);
+			ctx.ui.notify("Model scope cleared (any free model).", "info");
+			return;
+		}
+		if (hints.length === 1) {
+			config.modelScope = hints[0];
+		} else {
+			config.modelScope = hints;
+		}
+		await saveConfig(config);
+		ctx.ui.notify(
+			`Model scope set to ${formatModelScope(config.modelScope)}.`,
+			"info",
+		);
 		return;
 	}
 

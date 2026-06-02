@@ -138,7 +138,7 @@ function isExcluded(m: FreeModelShape, excluded?: ExcludedModel): boolean {
  */
 export function selectFreeModel(
 	ctx: ExtensionContext,
-	scope?: string,
+	scope?: string | string[],
 	excluded?: ExcludedModel,
 ): Model<Api> | undefined {
 	const available = ctx.modelRegistry.getAvailable() as FreeModelShape[];
@@ -150,12 +150,18 @@ export function selectFreeModel(
 	const filterExcluded = (ms: FreeModelShape[]): FreeModelShape[] =>
 		excluded ? ms.filter((m) => !isExcluded(m, excluded)) : ms;
 
-	// 1. Scope match within the free set
-	if (scope && scope.trim().length > 0) {
+	// 1. Scope match within the free set. When `scope` is an array, hints
+	// are tried in order — the first matching free model wins. Empty
+	// strings and whitespace-only hints are skipped so a stray comma in
+	// the config doesn't widen the match to anything.
+	const hints = normalizeScopeHints(scope);
+	if (hints.length > 0) {
 		const scoped = filterExcluded(free);
 		if (scoped.length > 0) {
-			const hit = findModelByHint(scoped as unknown as Model<Api>[], scope);
-			if (hit) return hit as unknown as Model<Api>;
+			for (const hint of hints) {
+				const hit = findModelByHint(scoped as unknown as Model<Api>[], hint);
+				if (hit) return hit as unknown as Model<Api>;
+			}
 		}
 	}
 
@@ -170,4 +176,23 @@ export function selectFreeModel(
 	// choice: if the user has only one provider and it errored, the popup
 	// will let them see the situation.)
 	return free[0] as unknown as Model<Api>;
+}
+
+/**
+ * Normalize a `modelScope` config value to a clean array of hint strings.
+ * - `undefined` / empty / whitespace -> `[]`
+ * - Single string -> `[string]` (trimmed)
+ * - Array -> filtered to non-empty trimmed entries, preserving order
+ *
+ * Exported for tests and for callers that want the same parsing rules as
+ * `selectFreeModel` without invoking the registry.
+ */
+export function normalizeScopeHints(
+	scope: string | string[] | undefined,
+): string[] {
+	if (scope === undefined) return [];
+	const raw = Array.isArray(scope) ? scope : [scope];
+	return raw
+		.map((s) => (typeof s === "string" ? s.trim() : ""))
+		.filter((s) => s.length > 0);
 }

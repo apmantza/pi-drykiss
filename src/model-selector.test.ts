@@ -255,4 +255,73 @@ describe("selectModelWithAutoroute", () => {
 			}),
 		);
 	});
+
+	// --- List-form modelScope (preference order) ---
+
+	it("returns the first matching free model when modelScope is a list", async () => {
+		const ctx = makeCtx();
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true, modelScope: ["haiku", "gpt-4o"] },
+			"Title",
+			"Message",
+		);
+		// Both hints match a free model; "haiku" comes first in the list.
+		expect(result?.id).toBe("claude-3-5-haiku");
+	});
+
+	it("falls through to the second hint when the first doesn't match", async () => {
+		const ctx = makeCtx();
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true, modelScope: ["nonexistent", "gpt-4o"] },
+			"Title",
+			"Message",
+		);
+		expect(result?.id).toBe("gpt-4o-free");
+	});
+
+	it("falls back to any free model when none of the list hints match", async () => {
+		const ctx = makeCtx();
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{
+				autoroute: true,
+				modelScope: ["nonexistent-a", "nonexistent-b"],
+			},
+			"Title",
+			"Message",
+		);
+		// Both list entries miss, so the resolver falls through to "any free"
+		// — the first non-excluded free model is returned.
+		expect(result?.cost?.input).toBe(0);
+	});
+
+	it("formats the scope notification as a bracketed list when modelScope is an array", async () => {
+		const ctx = makeCtx();
+		await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true, modelScope: ["haiku", "gpt-4o"] },
+			"Title",
+			"Message",
+		);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("scope: [haiku, gpt-4o]"),
+			"info",
+		);
+	});
+
+	it("ignores empty / whitespace-only entries in the list (no widening)", async () => {
+		const ctx = makeCtx();
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true, modelScope: ["", "  ", "haiku"] },
+			"Title",
+			"Message",
+		);
+		// Empty entries are dropped — the substantive hint still drives the
+		// match. A naive implementation that treated "" as "match anything"
+		// would return the first free model instead.
+		expect(result?.id).toBe("claude-3-5-haiku");
+	});
 });

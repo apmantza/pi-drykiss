@@ -31,14 +31,26 @@ export interface DrykissConfig {
 	autoroute?: boolean;
 	/**
 	 * Free-text scope hint for auto-routing. Matched against model id/name
-	 * using the same substring rules as the `--model` flag. Examples:
+	 * using the same substring rules as the `--model` flag.
+	 *
+	 * Single-hint form (legacy):
 	 *   "claude"  — any free Claude model
 	 *   "haiku"   — any free model whose id/name contains "haiku"
 	 *   "minimax" — any free model whose id/name contains "minimax"
 	 *
+	 * List form (preference order):
+	 *   ["minimax", "deepseek-v4-flash", "kimi", "step-flash"]
+	 *
+	 * When a list is supplied, hints are tried in order and the first
+	 * matching free model wins. If none of the listed hints match, the
+	 * caller falls back to "any free model" (preserving the single-hint
+	 * behaviour). This shape exists for users who want to restrict auto-
+	 * routing to a curated set of preferred providers without writing a
+	 * per-lens override for every lens.
+	 *
 	 * If unset (or no scoped match is found), any free model is used.
 	 */
-	modelScope?: string;
+	modelScope?: string | string[];
 }
 
 export function getConfigPath(): string {
