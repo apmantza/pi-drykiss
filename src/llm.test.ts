@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { findModelByHint, resolveModelSmart, callLLM } from "./llm.js";
-import { loadConfig, getModelForLens } from "./config.js";
-import { selectModel } from "./model-selector.js";
+import { loadConfig, getModelForLens, saveConfig } from "./config.js";
+import { selectModelWithAutoroute } from "./model-selector.js";
 import { complete } from "@earendil-works/pi-ai";
 import type { Model, Api } from "@earendil-works/pi-ai";
 
@@ -16,6 +16,7 @@ vi.mock("./config.js", () => ({
 
 vi.mock("./model-selector.js", () => ({
 	selectModel: vi.fn().mockResolvedValue(undefined),
+	selectModelWithAutoroute: vi.fn().mockResolvedValue(undefined),
 	isQuotaError: vi.fn().mockReturnValue(false),
 	isAuthError: vi.fn().mockReturnValue(false),
 }));
@@ -172,7 +173,25 @@ describe("resolveModelSmart", () => {
 		const result = await resolveModelSmart(ctx, "/test");
 		// Should fall through to first available model
 		expect(result?.id).toBe("claude-sonnet-4-20250514");
-		expect(selectModel).not.toHaveBeenCalled();
+		expect(selectModelWithAutoroute).not.toHaveBeenCalled();
+	});
+
+	it("saves autoroute-picked model as default", async () => {
+		const freeModel = mockModel("anthropic", "claude-3-5-haiku", "Haiku");
+		const ctx = makeCtx({ hasUI: true });
+		vi.mocked(loadConfig).mockResolvedValue({
+			autoroute: true,
+			modelScope: "haiku",
+		} as any);
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(freeModel);
+
+		const result = await resolveModelSmart(ctx, "/test");
+		expect(result?.id).toBe("claude-3-5-haiku");
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				defaultModel: "anthropic/claude-3-5-haiku",
+			}),
+		);
 	});
 });
 
@@ -241,11 +260,11 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "retry-success" }],
 			} as any);
-		vi.mocked(selectModel).mockResolvedValue(models[0]);
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
 		const result = await callLLM(ctx, "/test", "system", "user");
 		expect(result.text).toBe("retry-success");
-		expect(selectModel).toHaveBeenCalled();
+		expect(selectModelWithAutoroute).toHaveBeenCalled();
 	});
 
 	it("retries on auth error when hasUI is true", async () => {
@@ -259,10 +278,36 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "retry-success" }],
 			} as any);
-		vi.mocked(selectModel).mockResolvedValue(models[0]);
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
 
 		const result = await callLLM(ctx, "/test", "system", "user");
 		expect(result.text).toBe("retry-success");
+	});
+
+	it("passes the failed model as excluded to selectModelWithAutoroute on retry", async () => {
+		const { isQuotaError } = await import("./model-selector.js");
+		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+		const ctx = makeCtx();
+		ctx.hasUI = true;
+
+		vi.mocked(complete)
+			.mockRejectedValueOnce(new Error("Rate limit"))
+			.mockResolvedValueOnce({
+				content: [{ type: "text", text: "ok" }],
+			} as any);
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+
+		await callLLM(ctx, "/test", "system", "user");
+		expect(selectModelWithAutoroute).toHaveBeenCalledWith(
+			ctx,
+			expect.anything(),
+			expect.any(String),
+			expect.any(String),
+			expect.objectContaining({
+				provider: "anthropic",
+				id: "claude-sonnet-4-20250514",
+			}),
+		);
 	});
 
 	it("throws quota error when hasUI is false", async () => {

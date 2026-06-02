@@ -62,6 +62,8 @@ Each lens focuses on one thing:
 /drykiss-config set-lens clarity sonnet   # per-lens model override
 /drykiss-config confirm off               # skip confirmation dialog
 /drykiss-config context-mode diff         # review diffs only (faster)
+/drykiss-config autoroute on              # auto-pick free models
+/drykiss-config model-scope haiku         # prefer free models matching "haiku"
 /drykiss-config reset-prompts             # regenerate default prompts
 ```
 
@@ -99,10 +101,26 @@ Models are resolved in this order:
 1. `--model` CLI flag
 2. Per-lens config (`/drykiss-config set-lens ...`)
 3. Global default (`/drykiss-config set-default ...`)
-4. Interactive picker (on first use, saved automatically)
+4. Auto-route to a free model (if `/drykiss-config autoroute on`), otherwise the interactive picker (on first use, saved automatically)
 5. First available model
 
-If a model hits a quota limit, you'll be prompted to pick a different one and the review retries automatically.
+If a model hits a quota limit, you'll be prompted to pick a different one and the review retries automatically. With autoroute on, the retry will prefer another free model first; the picker only appears if no free model is available.
+
+### Auto-routing to free models
+
+`/drykiss-config autoroute on` makes DRYKISS prefer free models over the interactive picker — useful when you have multiple providers configured and want DRYKISS to just pick a free one without bothering you.
+
+Optionally combine it with a `modelScope` hint to bias the choice:
+
+```
+/drykiss-config model-scope haiku    # prefer a free model whose id/name contains "haiku"
+/drykiss-config model-scope claude   # prefer a free Claude variant
+/drykiss-config model-scope clear    # back to "any free model"
+```
+
+If no free model matches the scope, DRYKISS falls back to any other free model. If no free model is available at all, the standard interactive picker appears.
+
+Free-model detection is the same logic used by the `pi-free` extension (per-provider pricing check + name-based fallback) but is inlined here so DRYKISS does not require `pi-free` to be installed.
 
 ## Severity Levels
 

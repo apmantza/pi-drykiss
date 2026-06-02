@@ -8,6 +8,8 @@ import {
 	Text,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
+import type { DrykissConfig } from "./config.js";
+import { selectFreeModel, type ExcludedModel } from "./free-models.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
 
@@ -206,4 +208,47 @@ export function isAuthError(err: unknown): boolean {
 /** Check if an error is a model-level error (quota or auth) that warrants model switching. */
 export function isModelError(err: unknown): boolean {
 	return isQuotaError(err) || isAuthError(err);
+}
+
+/**
+ * Model selection with optional auto-routing to free models.
+ *
+ * Behavior:
+ *   1. If `config.autoroute === true`, try to pick a free model:
+ *      a. If `config.modelScope` is set, prefer a free model whose id/name
+ *         matches the scope (substring match).
+ *      b. Otherwise (or if no scope match), pick any free model.
+ *      c. `excluded` (a model that just failed) is always skipped.
+ *   2. If autorouting produced a model, return it. Notify the user so they
+ *      know what was picked and why the popup didn't appear.
+ *   3. If autorouting is disabled or produced no model, fall through to the
+ *      standard interactive popup (`selectModel`).
+ *
+ * Use this in place of `selectModel` whenever a model is being picked and
+ * the user has potentially configured auto-routing — the initial selection
+ * in `resolveModelSmart`, the quota/auth retry in `callLLM`, and the
+ * per-lens / synthesis retry in `ReviewManager`.
+ */
+export async function selectModelWithAutoroute(
+	ctx: ExtensionContext,
+	config: DrykissConfig,
+	title: string,
+	message: string,
+	excluded?: ExcludedModel,
+): Promise<Model<Api> | undefined> {
+	if (config.autoroute === true) {
+		const free = selectFreeModel(ctx, config.modelScope, excluded);
+		if (free) {
+			const scopeNote = config.modelScope
+				? `, scope: ${config.modelScope}`
+				: "";
+			ctx.ui.notify(
+				`Auto-routing to ${free.name} (free${scopeNote})`,
+				"info",
+			);
+			return free;
+		}
+	}
+
+	return selectModel(ctx, title, message);
 }

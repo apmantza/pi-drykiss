@@ -184,6 +184,75 @@ describe("handleConfigCommand", () => {
 		);
 	});
 
+	it("enables autoroute", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({ autoroute: false });
+		const ctx = mockCtx();
+		await handleConfigCommand("autoroute on", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({ autoroute: true }),
+		);
+	});
+
+	it("disables autoroute", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({ autoroute: true });
+		const ctx = mockCtx();
+		await handleConfigCommand("autoroute off", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({ autoroute: false }),
+		);
+	});
+
+	it("rejects autoroute with no value", async () => {
+		const ctx = mockCtx();
+		await handleConfigCommand("autoroute", ctx);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Usage"),
+			"warning",
+		);
+		expect(saveConfig).not.toHaveBeenCalled();
+	});
+
+	it("sets model-scope", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({});
+		const ctx = mockCtx();
+		await handleConfigCommand("model-scope haiku", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({ modelScope: "haiku" }),
+		);
+	});
+
+	it("clears model-scope with the 'clear' keyword", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({ modelScope: "haiku" });
+		const ctx = mockCtx();
+		await handleConfigCommand("model-scope clear", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.not.objectContaining({ modelScope: expect.anything() }),
+		);
+	});
+
+	it("rejects model-scope with no value", async () => {
+		const ctx = mockCtx();
+		await handleConfigCommand("model-scope", ctx);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Usage"),
+			"warning",
+		);
+		expect(saveConfig).not.toHaveBeenCalled();
+	});
+
+	it("shows autoroute and model-scope in the show output", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({
+			autoroute: true,
+			modelScope: "claude",
+		});
+		const ctx = mockCtx();
+		await handleConfigCommand("show", ctx);
+		const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+		expect(msg).toContain("Autoroute");
+		expect(msg).toContain("enabled");
+		expect(msg).toContain("claude");
+	});
+
 	it("reports unknown subcommand", async () => {
 		const ctx = mockCtx();
 		await handleConfigCommand("unknown-thing", ctx);

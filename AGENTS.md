@@ -19,6 +19,7 @@ src/
   auto-injector.ts    # Injects KISS/DRY checklist into system prompt after editing turns
   config.ts           # Per-project config (.pi/drykiss/config.json) persistence
   config-command.ts   # /drykiss-config command handler
+  free-models.ts      # Free-model detection (isFreeModel) and auto-routing (selectFreeModel)
   persist.ts          # Saves review results to .pi/drykiss/reviews/
   types.ts            # Shared domain types (Finding, SynthesisResult, ReviewLens, etc.)
 ```
@@ -54,6 +55,7 @@ src/
 - **Confidence levels**: `confirmed` (seen by ≥2 lenses), `likely` (single lens, high severity), `suspect` (single lens, low severity)
 - **Model hints**: Users can pass `--model=haiku` or `--model=sonnet`. `model-selector.ts` maps these to actual model IDs with a fallback chain.
 - **Model error handling**: `isModelError()` in `model-selector.ts` detects quota/auth errors. `review-manager.ts` checks `result.errorMessage` after subagent completion and triggers model selection popup + retry if needed.
+- **Auto-routing to free models**: When `autoroute: true` is set in `~/.pi/drykiss/config.json`, `selectModelWithAutoroute` in `model-selector.ts` consults `selectFreeModel` in `free-models.ts` (which uses an inlined copy of pi-free's `isFreeModel` logic) before falling through to the standard popup. The optional `modelScope` field narrows the choice to a substring of the model id/name. Auto-routing applies to initial selection (`resolveModelSmart`), the callLLM retry path, and the per-lens / synthesis retry paths in ReviewManager. The just-failed model is always passed as `excluded` to avoid infinite loops.
 
 ## When Modifying
 

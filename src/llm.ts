@@ -2,7 +2,11 @@ import { complete } from "@earendil-works/pi-ai";
 import type { Context, Model, Api } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import { selectModel, isQuotaError, isAuthError } from "./model-selector.js";
+import {
+	selectModelWithAutoroute,
+	isQuotaError,
+	isAuthError,
+} from "./model-selector.js";
 
 export interface LLMOptions {
 	readonly temperature?: number;
@@ -15,7 +19,8 @@ export interface LLMOptions {
  * 1. Explicit hint (CLI --model flag)
  * 2. Per-lens config (e.g. lensModels.simplicity)
  * 3. Default config (defaultModel)
- * 4. Interactive selector (if interactive: true and hasUI)
+ * 4. Auto-route to a free model (if config.autoroute) or interactive
+ *    selector popup (if interactive: true and hasUI)
  * 5. Fallback to first available model
  */
 export async function resolveModelSmart(
@@ -41,10 +46,11 @@ export async function resolveModelSmart(
 		if (m) return m;
 	}
 
-	// 4. Interactive selector
+	// 4. Auto-route to free models (if configured) or interactive selector
 	if (config.interactive !== false && ctx.hasUI) {
-		const selected = await selectModel(
+		const selected = await selectModelWithAutoroute(
 			ctx,
+			config,
 			"Select Model",
 			lens
 				? `Choose a model for the ${lens} review`
@@ -147,10 +153,15 @@ export async function callLLM(
 		if (isQuotaError(err) || isAuthError(err)) {
 			if (!ctx.hasUI) throw err;
 
-			const selected = await selectModel(
+			// Auto-route to a free model if the user has configured it;
+			// otherwise show the standard picker popup.
+			const config = await loadConfig();
+			const selected = await selectModelWithAutoroute(
 				ctx,
+				config,
 				"Model Error",
 				`${model.name} failed: ${err.message}\n\nChoose a different model:`,
+				{ provider: model.provider, id: model.id },
 			);
 			if (!selected) throw err;
 

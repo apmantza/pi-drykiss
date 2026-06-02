@@ -15,7 +15,8 @@ import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
-import { isModelError, selectModel } from "./model-selector.js";
+import { isModelError, selectModelWithAutoroute } from "./model-selector.js";
+import { loadConfig } from "./config.js";
 
 const CONCURRENCY = 3;
 
@@ -259,10 +260,16 @@ export class ReviewManager {
 				ctx.hasUI,
 			);
 			if (isModelErr && ctx.hasUI) {
-				const selected = await selectModel(
+				// Auto-route to a free model if the user has configured it;
+				// otherwise show the standard picker popup. Exclude the model
+				// that just failed so autorouting can't loop on it.
+				const config = await loadConfig();
+				const selected = await selectModelWithAutoroute(
 					ctx,
+					config,
 					"Model Error",
 					`Model "${task.model.name}" failed: ${result.errorMessage}\n\nChoose a different model to retry:`,
+					{ provider: task.model.provider, id: task.model.id },
 				);
 				if (selected) {
 					// Retry with the selected model
@@ -417,10 +424,16 @@ export class ReviewManager {
 				isModelError(result.errorMessage) &&
 				ctx.hasUI
 			) {
-				const selected = await selectModel(
+				// Auto-route to a free model if the user has configured it;
+				// otherwise show the standard picker popup. Exclude the model
+				// that just failed so autorouting can't loop on it.
+				const config = await loadConfig();
+				const selected = await selectModelWithAutoroute(
 					ctx,
+					config,
 					"Model Error",
 					`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
+					{ provider: model.provider, id: model.id },
 				);
 				if (selected) {
 					model = selected;

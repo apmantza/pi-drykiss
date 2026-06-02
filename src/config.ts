@@ -22,6 +22,23 @@ export interface DrykissConfig {
 	confirmBeforeRun?: boolean;
 	/** Context mode: "diff" = changed hunks only, "full" = full file + diff (default) */
 	contextMode?: "diff" | "full";
+	/**
+	 * Auto-route to free models instead of showing the model selection popup.
+	 * When true, pi-drykiss will try to find a free model that matches
+	 * `modelScope` first, then any free model, before falling back to the
+	 * popup (or the first available model in headless mode).
+	 */
+	autoroute?: boolean;
+	/**
+	 * Free-text scope hint for auto-routing. Matched against model id/name
+	 * using the same substring rules as the `--model` flag. Examples:
+	 *   "claude"  — any free Claude model
+	 *   "haiku"   — any free model whose id/name contains "haiku"
+	 *   "minimax" — any free model whose id/name contains "minimax"
+	 *
+	 * If unset (or no scoped match is found), any free model is used.
+	 */
+	modelScope?: string;
 }
 
 export function getConfigPath(): string {

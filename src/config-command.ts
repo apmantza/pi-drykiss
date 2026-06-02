@@ -32,6 +32,8 @@ export async function handleConfigCommand(
 			`**Interactive prompts:** ${config.interactive !== false ? "enabled" : "disabled"}`,
 			`**Confirm before run:** ${config.confirmBeforeRun !== false ? "enabled" : "disabled"}`,
 			`**Context mode:** ${config.contextMode ?? "full"}`,
+			`**Autoroute (free models):** ${config.autoroute === true ? "enabled" : "disabled"}`,
+			`**Model scope:** ${config.modelScope ? `\`${config.modelScope}\`` : "(any free model)"}`,
 			"",
 			"Config file: `~/.pi/drykiss/config.json`",
 			"Prompts dir: `~/.pi/drykiss/prompts/`",
@@ -42,6 +44,8 @@ export async function handleConfigCommand(
 			"  /drykiss-config interactive <on|off>",
 			"  /drykiss-config confirm <on|off>",
 			"  /drykiss-config context-mode <diff|full>",
+			"  /drykiss-config autoroute <on|off>",
+			"  /drykiss-config model-scope <scope|clear>",
 			"  /drykiss-config reset-prompts",
 		];
 		ctx.ui.notify(lines.join("\n"), "info");
@@ -159,6 +163,44 @@ export async function handleConfigCommand(
 			"Default prompt templates regenerated in `~/.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
 			"info",
 		);
+		return;
+	}
+
+	if (subcommand === "autoroute") {
+		const val = tokens[1]?.toLowerCase();
+		const config = await loadConfig();
+		if (val === "on" || val === "true") {
+			config.autoroute = true;
+		} else if (val === "off" || val === "false") {
+			config.autoroute = false;
+		} else {
+			ctx.ui.notify("Usage: /drykiss-config autoroute <on|off>", "warning");
+			return;
+		}
+		await saveConfig(config);
+		ctx.ui.notify(
+			`Auto-routing to free models ${config.autoroute ? "enabled" : "disabled"}.`,
+			"info",
+		);
+		return;
+	}
+
+	if (subcommand === "model-scope") {
+		const val = tokens[1];
+		const config = await loadConfig();
+		if (val === undefined) {
+			ctx.ui.notify("Usage: /drykiss-config model-scope <scope|clear>", "warning");
+			return;
+		}
+		if (val === "clear" || val === "none" || val === "") {
+			delete config.modelScope;
+			await saveConfig(config);
+			ctx.ui.notify("Model scope cleared (any free model).", "info");
+		} else {
+			config.modelScope = val;
+			await saveConfig(config);
+			ctx.ui.notify(`Model scope set to \`${val}\`.`, "info");
+		}
 		return;
 	}
 
