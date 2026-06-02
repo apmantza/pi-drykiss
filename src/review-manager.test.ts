@@ -249,4 +249,89 @@ describe("ReviewManager", () => {
 		// After synthesis triggers, it should be running or done
 		// (depends on whether synthesis completes in the test)
 	});
+
+	it("continues draining the queue when a task rejects", async () => {
+		// Regression test: prior to the .finally() re-drain fix, the queue
+		// would stall as soon as any concurrent task rejected — runningCount
+		// would decrement but drain() was never re-entered, leaving queued
+		// tasks stranded. With CONCURRENCY=3 and 4 lenses, this test verifies
+		// the queued lens is still started after a rejection.
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		const mockRun = vi.mocked(runLensSubagent);
+		let callCount = 0;
+		mockRun.mockImplementation(async (...args: unknown[]) => {
+			callCount++;
+			const lens = args[5] as string;
+			if (callCount === 1) throw new Error("simulated subagent crash");
+			return {
+				lens,
+				text: '[]',
+				modelName: "mock-model",
+				durationMs: 1,
+				session: { dispose: vi.fn() },
+			} as any;
+		});
+
+		const ctx = makeMinimalCtx();
+		const pi = makeMinimalPi();
+		const files = [
+			{ path: "test.ts", status: "modified" as const, language: "TypeScript" },
+		];
+		const diffs = new Map([["test.ts", "diff"]]);
+
+		const jobId = await manager.startReview(
+			ctx,
+			pi,
+			"/tmp/test",
+			files,
+			diffs,
+			undefined,
+			undefined,
+			{
+				// 4 lenses: 3 will run concurrently (CONCURRENCY=3), 1 sits in
+				// the queue. If the failing lens is one of the concurrent three,
+				// the queue must still drain to start the 4th.
+				lenses: ["simplicity", "deduplication", "tests", "clarity"],
+			},
+		);
+
+		// Wait for all 4 lenses to finish (each rejects once or resolves).
+		const job = manager.getJob(jobId)!;
+		await vi.waitFor(
+			() => {
+				const allDone = job.lenses.every(
+					(l) =>
+						job.states.get(l)!.status === "done" ||
+						job.states.get(l)!.status === "error",
+				);
+				if (!allDone) {
+					const statuses = job.lenses.map(
+						(l) => `${l}=${job.states.get(l)!.status}`,
+					);
+					throw new Error(`not all lenses finished: ${statuses.join(", ")}`);
+				}
+			},
+			{ timeout: 2000, interval: 50 },
+		);
+
+		// The lens that rejected should be in error state.
+		const errored = job.lenses.find(
+			(l) => job.states.get(l)!.status === "error",
+		);
+		expect(errored).toBeDefined();
+		expect(job.states.get(errored!)!.errorMessage).toContain(
+			"simulated subagent crash",
+		);
+
+		// All 4 lenses must have been visited — including the queued one.
+		// If drain() had stalled, the queued lens would still be "queued".
+		const queued = job.lenses.filter(
+			(l) => job.states.get(l)!.status === "queued",
+		);
+		expect(queued).toEqual([]);
+
+		// The queued lens (clarity) was the one that proves the re-drain
+		// works — before the fix, it would never have been started.
+		expect(job.states.get("clarity")!.status).toBe("done");
+	});
 });

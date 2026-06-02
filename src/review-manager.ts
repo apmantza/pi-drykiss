@@ -187,25 +187,38 @@ export class ReviewManager {
 		while (this.taskQueue.length > 0 && this.runningCount < CONCURRENCY) {
 			const task = this.taskQueue.shift()!;
 			this.runningCount++;
-			this.runLens(ctx, pi, cwd, task).catch((err) => {
-				/* Ensure runningCount is always decremented even on unexpected errors */
-				const job = this.jobs.get(task.jobId);
-				if (job) {
-					const state = job.states.get(task.lens);
-					if (state && state.status === "running") {
-						state.status = "error";
-						state.errorMessage =
-							err instanceof Error ? err.message : String(err);
+			this.runLens(ctx, pi, cwd, task)
+				.catch((err) => {
+					/* Mark the lens as errored when runLens throws unexpectedly.
+					 * Note: the runningCount decrement + re-drain happen in
+					 * .finally() below so the queue keeps processing even when
+					 * a task rejects. */
+					const job = this.jobs.get(task.jobId);
+					if (job) {
+						const state = job.states.get(task.lens);
+						if (state && state.status === "running") {
+							state.status = "error";
+							state.errorMessage =
+								err instanceof Error ? err.message : String(err);
+						}
 					}
-				}
-				this.runningCount--;
-				try {
-					this.onUpdate?.(job!);
-				} catch {
-					/* don't let callback errors crash the loop */
-				}
-				console.error(`[DRYKISS] runLens crashed for ${task.lens}:`, err);
-			});
+					try {
+						this.onUpdate?.(job!);
+					} catch {
+						/* don't let callback errors crash the loop */
+					}
+					console.error(`[DRYKISS] runLens crashed for ${task.lens}:`, err);
+				})
+				.finally(() => {
+					/* Always decrement and re-drain, regardless of success or
+					 * failure. This is the single source of truth for
+					 * runningCount bookkeeping. Without the re-drain call here
+					 * the queue would stall as soon as any task rejected. */
+					this.runningCount--;
+					this.drain(ctx, pi, cwd).catch((err) => {
+						console.error(`[DRYKISS] drain failed:`, err);
+					});
+				});
 		}
 	}
 
@@ -347,7 +360,6 @@ export class ReviewManager {
 			}
 		}
 
-		this.runningCount--;
 		try {
 			this.onUpdate?.(job);
 		} catch {
