@@ -58,7 +58,10 @@ describe("isFreeModel", () => {
 		});
 
 		it("returns true for model whose name contains 'free' even if cost is non-zero", () => {
-			const trial = shape("p", "trial", "Trial (free)", { input: 1, output: 1 });
+			const trial = shape("p", "trial", "Trial (free)", {
+				input: 1,
+				output: 1,
+			});
 			expect(isFreeModel(trial, peers)).toBe(true);
 		});
 
@@ -79,7 +82,10 @@ describe("isFreeModel", () => {
 		];
 
 		it("returns true only when name contains 'free'", () => {
-			const freeModel = shape("p", "x", "Some Free Model", { input: 0, output: 0 });
+			const freeModel = shape("p", "x", "Some Free Model", {
+				input: 0,
+				output: 0,
+			});
 			const paidModel = shape("p", "y", "Pro Model", { input: 0, output: 0 });
 			expect(isFreeModel(freeModel, peers)).toBe(true);
 			expect(isFreeModel(paidModel, peers)).toBe(false);
@@ -153,10 +159,15 @@ describe("selectFreeModel", () => {
 		input: 3,
 		output: 15,
 	});
-	const freeHaiku = m("anthropic", "claude-3-5-haiku", "Claude 3.5 Haiku (free)", {
-		input: 0,
-		output: 0,
-	});
+	const freeHaiku = m(
+		"anthropic",
+		"claude-3-5-haiku",
+		"Claude 3.5 Haiku (free)",
+		{
+			input: 0,
+			output: 0,
+		},
+	);
 	const freeSonnet = m("anthropic", "claude-sonnet-free", "Sonnet Free Tier", {
 		input: 0,
 		output: 0,

@@ -98,27 +98,25 @@ describe("isAuthError", () => {
 });
 
 describe("selectModelWithAutoroute", () => {
-	const freeHaiku = mockModel(
-		"anthropic",
-		"claude-3-5-haiku",
-		"Haiku (free)",
-		{ input: 0, output: 0 },
-	);
+	const freeHaiku = mockModel("anthropic", "claude-3-5-haiku", "Haiku (free)", {
+		input: 0,
+		output: 0,
+	});
 	const freeOpenai = mockModel("openai", "gpt-4o-free", "GPT-4o Free", {
 		input: 0,
 		output: 0,
 	});
-	const paidSonnet = mockModel(
-		"anthropic",
-		"claude-sonnet-4",
-		"Sonnet 4",
-		{ input: 3, output: 15 },
-	);
+	const paidSonnet = mockModel("anthropic", "claude-sonnet-4", "Sonnet 4", {
+		input: 3,
+		output: 15,
+	});
 
 	function makeCtx(): any {
 		return {
 			modelRegistry: {
-				getAvailable: vi.fn().mockReturnValue([paidSonnet, freeHaiku, freeOpenai]),
+				getAvailable: vi
+					.fn()
+					.mockReturnValue([paidSonnet, freeHaiku, freeOpenai]),
 				find: vi.fn().mockImplementation((p: string, id: string) => {
 					const all = [paidSonnet, freeHaiku, freeOpenai];
 					return all.find((m) => m.provider === p && m.id === id);
@@ -128,9 +126,9 @@ describe("selectModelWithAutoroute", () => {
 				notify: vi.fn(),
 				// Stub the popup's custom renderer so the fallback path can be
 				// exercised in tests without rendering a real SelectList.
-				custom: vi.fn().mockResolvedValue(
-					`${paidSonnet.provider}/${paidSonnet.id}`,
-				),
+				custom: vi
+					.fn()
+					.mockResolvedValue(`${paidSonnet.provider}/${paidSonnet.id}`),
 			},
 		};
 	}
@@ -251,7 +249,10 @@ describe("selectModelWithAutoroute", () => {
 		expect(spy).toHaveBeenCalledWith(
 			ctx,
 			undefined,
-			expect.objectContaining({ provider: "anthropic", id: "claude-3-5-haiku" }),
+			expect.objectContaining({
+				provider: "anthropic",
+				id: "claude-3-5-haiku",
+			}),
 		);
 	});
 });

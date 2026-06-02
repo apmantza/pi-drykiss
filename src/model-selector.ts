@@ -242,10 +242,7 @@ export async function selectModelWithAutoroute(
 			const scopeNote = config.modelScope
 				? `, scope: ${config.modelScope}`
 				: "";
-			ctx.ui.notify(
-				`Auto-routing to ${free.name} (free${scopeNote})`,
-				"info",
-			);
+			ctx.ui.notify(`Auto-routing to ${free.name} (free${scopeNote})`, "info");
 			return free;
 		}
 	}

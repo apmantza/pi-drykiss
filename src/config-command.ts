@@ -189,7 +189,10 @@ export async function handleConfigCommand(
 		const val = tokens[1];
 		const config = await loadConfig();
 		if (val === undefined) {
-			ctx.ui.notify("Usage: /drykiss-config model-scope <scope|clear>", "warning");
+			ctx.ui.notify(
+				"Usage: /drykiss-config model-scope <scope|clear>",
+				"warning",
+			);
 			return;
 		}
 		if (val === "clear" || val === "none" || val === "") {

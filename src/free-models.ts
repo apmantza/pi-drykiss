@@ -79,7 +79,9 @@ export function isFreeModel(
  * Group models by provider so isFreeModel can do its per-provider
  * pricing-exposure check.
  */
-function groupByProvider(models: FreeModelShape[]): Map<string, FreeModelShape[]> {
+function groupByProvider(
+	models: FreeModelShape[],
+): Map<string, FreeModelShape[]> {
 	const groups = new Map<string, FreeModelShape[]>();
 	for (const m of models) {
 		const key = (m.provider ?? "").toLowerCase();
