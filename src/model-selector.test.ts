@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import {
-	isQuotaError,
 	isAuthError,
+	isModelError,
+	isQuotaError,
+	isServerError,
 	selectModelWithAutoroute,
 } from "./model-selector.js";
 import * as freeModels from "./free-models.js";
@@ -94,6 +96,74 @@ describe("isAuthError", () => {
 		expect(isAuthError("Invalid API key")).toBe(true);
 		expect(isAuthError("Unauthorized: 401")).toBe(true);
 		expect(isAuthError("Forbidden: 403")).toBe(true);
+	});
+});
+
+describe("isServerError", () => {
+	it("detects the 5xx HTTP status codes that warrant model switching", () => {
+		expect(isServerError(new Error("504 Gateway Timeout"))).toBe(true);
+		expect(isServerError(new Error("502 Bad Gateway"))).toBe(true);
+		expect(isServerError(new Error("503 Service Unavailable"))).toBe(true);
+		expect(isServerError(new Error("500 Internal Server Error"))).toBe(true);
+	});
+
+	it("detects Cloudflare edge-layer codes", () => {
+		expect(isServerError(new Error("522 Connection Timed Out"))).toBe(true);
+		expect(isServerError(new Error("524 A Timeout Occurred"))).toBe(true);
+	});
+
+	it("detects 5xx codes embedded in structured error objects", () => {
+		expect(isServerError({ status: 504 })).toBe(true);
+		expect(isServerError({ error: { type: "server_error", code: 502 } })).toBe(
+			true,
+		);
+	});
+
+	it("returns false for unrelated errors", () => {
+		expect(isServerError(new Error("Rate limit exceeded"))).toBe(false);
+		expect(isServerError(new Error("Invalid API key"))).toBe(false);
+		expect(isServerError(new Error("Network timeout"))).toBe(false);
+		expect(isServerError(new Error("File not found"))).toBe(false);
+	});
+
+	it("returns false for non-errors", () => {
+		expect(isServerError(42)).toBe(false);
+		expect(isServerError(null)).toBe(false);
+		expect(isServerError(undefined)).toBe(false);
+	});
+});
+
+describe("isModelError", () => {
+	it("returns true for quota errors", () => {
+		expect(isModelError(new Error("429 Too Many Requests"))).toBe(true);
+		expect(isModelError(new Error("insufficient_quota"))).toBe(true);
+	});
+
+	it("returns true for auth errors", () => {
+		expect(isModelError(new Error("Invalid API key"))).toBe(true);
+		expect(isModelError(new Error("Forbidden: 403"))).toBe(true);
+	});
+
+	it("returns true for server errors (5xx) — triggers autorouting", () => {
+		expect(isModelError(new Error("504 Gateway Timeout"))).toBe(true);
+		expect(isModelError(new Error("502 Bad Gateway"))).toBe(true);
+		expect(isModelError(new Error("503 Service Unavailable"))).toBe(true);
+		expect(isModelError(new Error("500 Internal Server Error"))).toBe(true);
+	});
+
+	it("detects 5xx in plain strings (e.g. body-less HTTP responses)", () => {
+		expect(isModelError("504")).toBe(true);
+		expect(isModelError("502")).toBe(true);
+	});
+
+	it("detects 5xx in structured error objects", () => {
+		expect(isModelError({ status: 504, message: "no body" })).toBe(true);
+	});
+
+	it("returns false for unrelated errors", () => {
+		expect(isModelError(new Error("File not found"))).toBe(false);
+		expect(isModelError(new Error("Syntax error"))).toBe(false);
+		expect(isModelError(new Error("Network timeout"))).toBe(false);
 	});
 });
 

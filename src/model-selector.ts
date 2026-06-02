@@ -206,6 +206,33 @@ export function isAuthError(err: unknown): boolean {
 }
 
 /**
+ * Detect server-side (5xx) errors from the model provider. These mean the
+ * provider's gateway / upstream is unreachable for the current model, so
+ * switching to a different model — ideally an autorouted free one — is a
+ * reasonable recovery.
+ */
+export function isServerError(err: unknown): boolean {
+	return matchesErrorPattern(err, [
+		// Standard 5xx codes most providers use
+		"500",
+		"502",
+		"503",
+		"504",
+		// Cloudflare / edge-layer equivalents
+		"520",
+		"521",
+		"522",
+		"523",
+		"524",
+		// Human-readable forms
+		"internal server error",
+		"bad gateway",
+		"service unavailable",
+		"gateway timeout",
+	]);
+}
+
+/**
  * Build the trailing scope note shown in the "Auto-routing to <model>" toast.
  * Handles both the single-hint and list forms of `config.modelScope`.
  */
@@ -221,9 +248,9 @@ function formatScopeNote(scope: string | string[] | undefined): string {
 	return `, scope: ${trimmed}`;
 }
 
-/** Check if an error is a model-level error (quota or auth) that warrants model switching. */
+/** Check if an error is a model-level error (quota, auth, or server-side) that warrants model switching. */
 export function isModelError(err: unknown): boolean {
-	return isQuotaError(err) || isAuthError(err);
+	return isQuotaError(err) || isAuthError(err) || isServerError(err);
 }
 
 /**
