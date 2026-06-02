@@ -4,6 +4,23 @@ import { LENS_DISPLAY_NAMES } from "./constants.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/** Format a millisecond duration as a compact elapsed-time string. */
+function formatElapsed(ms: number): string {
+	const safe = Math.max(0, ms);
+	const totalSec = Math.floor(safe / 1000);
+	if (totalSec < 60) {
+		return `${(safe / 1000).toFixed(1)}s`;
+	}
+	const mins = Math.floor(totalSec / 60);
+	const secs = totalSec % 60;
+	if (mins < 60) {
+		return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+	}
+	const hours = Math.floor(mins / 60);
+	const remMins = mins % 60;
+	return `${hours}h ${remMins.toString().padStart(2, "0")}m`;
+}
+
 type Theme = {
 	fg(color: string, text: string): string;
 	bold(text: string): string;
@@ -93,9 +110,13 @@ export class ReviewProgressWidget {
 						: job.synthesisStatus === "error"
 							? theme.fg("error", "✗")
 							: theme.fg("success", "✓");
+				const synthElapsed =
+					job.synthesisStatus === "running" && job.synthesisStartedAt
+						? ` · ${formatElapsed(Date.now() - job.synthesisStartedAt)}`
+						: "";
 				const statusText =
 					job.synthesisStatus === "running"
-						? theme.fg("accent", "running")
+						? theme.fg("accent", `running${synthElapsed}`)
 						: job.synthesisStatus === "error"
 							? theme.fg("error", "failed")
 							: theme.fg("dim", "done");
@@ -119,6 +140,7 @@ export class ReviewProgressWidget {
 			durationMs: number;
 			errorMessage?: string;
 			findingsCount: number;
+			startedAt?: number;
 			streamingText?: string;
 		},
 		theme: Theme,
@@ -131,9 +153,12 @@ export class ReviewProgressWidget {
 			statusText = theme.fg("dim", "queued");
 		} else if (state.status === "running") {
 			icon = theme.fg("accent", frame);
+			const elapsed = state.startedAt
+				? ` · ${formatElapsed(Date.now() - state.startedAt)}`
+				: "";
 			statusText = state.streamingText
 				? theme.fg("dim", state.streamingText.slice(0, 30))
-				: theme.fg("accent", "running");
+				: theme.fg("accent", `running${elapsed}`);
 		} else if (state.status === "done") {
 			icon = theme.fg("success", "✓");
 			const findings =

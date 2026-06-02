@@ -29,6 +29,8 @@ export interface LensState {
 	errorMessage?: string;
 	findingsCount: number;
 	rawOutput: string;
+	/** Wall-clock timestamp when the lens transitioned to 'running'. Used by the widget to render a live elapsed timer. */
+	startedAt?: number;
 	/** Live session object — kept alive for conversation viewing. */
 	session?: AgentSession;
 	/** Streaming text from the subagent (updated in real-time for live progress). */
@@ -42,6 +44,8 @@ export interface ReviewJob {
 	states: Map<ReviewLens, LensState>;
 	synthesisStatus: "idle" | "running" | "done" | "error";
 	synthesisResult?: SynthesisResult;
+	/** Wall-clock timestamp when synthesis transitioned to 'running'. */
+	synthesisStartedAt?: number;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
 	completedAt?: number;
@@ -223,6 +227,7 @@ export class ReviewManager {
 
 		const state = job.states.get(task.lens)!;
 		state.status = "running";
+		state.startedAt = Date.now();
 		try {
 			this.onUpdate?.(job);
 		} catch {
@@ -370,6 +375,7 @@ export class ReviewManager {
 		) {
 			this.synthesisLocks.add(job.id);
 			job.synthesisStatus = "running";
+			job.synthesisStartedAt = Date.now();
 			try {
 				this.onUpdate?.(job);
 			} catch {
