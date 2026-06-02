@@ -2,10 +2,7 @@ import { complete } from "@earendil-works/pi-ai";
 import type { Context, Model, Api } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import {
-	selectModelWithAutoroute,
-	isModelError,
-} from "./model-selector.js";
+import { selectModelWithAutoroute, isModelError } from "./model-selector.js";
 
 export interface LLMOptions {
 	readonly temperature?: number;
@@ -148,7 +145,6 @@ export async function callLLM(
 		return await attempt();
 	} catch (err: any) {
 		if (isModelError(err)) {
-
 			// Auto-route to a free model if the user has configured it;
 			// otherwise show the standard picker popup.
 			const config = await loadConfig();

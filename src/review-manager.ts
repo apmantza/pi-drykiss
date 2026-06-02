@@ -254,19 +254,9 @@ export class ReviewManager {
 		state.durationMs = result.durationMs;
 		state.session = result.session;
 		state.logPath = await saveSessionLog(job.id, task.lens, result.session);
-		console.log(`[DRYKISS] ${task.lens} result:`, {
-			hasError: !!result.errorMessage,
-			errorMessage: result.errorMessage?.slice(0, 100),
-		});
 		if (result.errorMessage) {
 			// Check if this is a model error (quota/auth) that should trigger model selection
 			const isModelErr = isModelError(result.errorMessage);
-			console.log(
-				`[DRYKISS] ${task.lens} isModelError:`,
-				isModelErr,
-				`hasUI:`,
-				ctx.hasUI,
-			);
 			if (isModelErr) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model

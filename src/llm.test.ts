@@ -143,11 +143,7 @@ describe("resolveModelSmart", () => {
 		vi.mocked(getModelForLens).mockReturnValue(
 			"anthropic/claude-sonnet-4-20250514",
 		);
-		const result = await resolveModelSmart(
-			ctx,
-			undefined,
-			"simplicity",
-		);
+		const result = await resolveModelSmart(ctx, undefined, "simplicity");
 		expect(result?.id).toBe("claude-sonnet-4-20250514");
 	});
 
@@ -243,9 +239,7 @@ describe("callLLM", () => {
 			ok: false,
 			error: "No key",
 		});
-		await expect(callLLM(ctx, "system", "user")).rejects.toThrow(
-			"No API key",
-		);
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow("No API key");
 	});
 
 	it("retries on quota error when hasUI is true", async () => {
@@ -339,8 +333,6 @@ describe("callLLM", () => {
 		vi.mocked(complete).mockRejectedValueOnce(new Error("Rate limit"));
 		vi.mocked(selectModelWithAutoroute).mockResolvedValue(undefined);
 
-		await expect(callLLM(ctx, "system", "user")).rejects.toThrow(
-			"Rate limit",
-		);
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow("Rate limit");
 	});
 });

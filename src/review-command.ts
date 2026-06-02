@@ -326,9 +326,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 			const sanitized = sanitizeJsonString(jsonStr);
 			const parsed = JSON.parse(sanitized);
 			if (Array.isArray(parsed)) {
-				console.log(
-					`[DRYKISS] ${lens} lens: JSON repaired successfully after sanitization`,
-				);
 				return {
 					findings: parseFindingsArray(parsed, lens),
 				};
@@ -347,7 +344,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 		try {
 			const lenient = lenientJsonParse<unknown[]>(jsonStr);
 			if (Array.isArray(lenient)) {
-				console.log(`[DRYKISS] ${lens} lens: JSON recovered via lenient parse`);
 				return {
 					findings: parseFindingsArray(lenient, lens),
 				};

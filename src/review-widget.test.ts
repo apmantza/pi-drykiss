@@ -172,7 +172,9 @@ describe("renderLensLine — session log link", () => {
 		expect(line).toContain("j1-simplicity.jsonl");
 		// pathToFileURL adds a drive letter on Windows but not on Linux/macOS.
 		// Verify the file:// scheme + path components, drive letter optional.
-		expect(line).toMatch(/file:\/\/\/(?:[A-Z]:)?[^ ]*\.pi[\\/]drykiss[\\/]sessions/);
+		expect(line).toMatch(
+			/file:\/\/\/(?:[A-Z]:)?[^ ]*\.pi[\\/]drykiss[\\/]sessions/,
+		);
 	});
 
 	it("appends the link for an errored lens with logPath", () => {
