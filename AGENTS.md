@@ -12,7 +12,6 @@ src/
   subagent-runner.ts  # Spawns lens reviews as Pi agent sessions
   llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
   prompt-builder.ts   # Builds system prompts for each lens from .md templates
-  prompt-templates.ts # Default lens prompts, synthesis prompt, JSON output instructions
   model-selector.ts   # Resolves model hints, interactive selection, isModelError detection
   git-diff.ts         # Git diff parsing, file status detection, project index generation
   edit-tracker.ts     # Tracks file edits across turns via tool_execution_end events

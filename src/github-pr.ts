@@ -265,9 +265,10 @@ export async function fetchPrFileContents(
 			batch.map(async (path) => {
 				if (!isValidFilePath(path)) {
 					console.warn(
-						`[DRYKISS] Refusing to fetch unsafe file path: ${String(
-							path,
-						).slice(0, 100)}`,
+						`[DRYKISS] Refusing to fetch unsafe file path: ${String(path).slice(
+							0,
+							100,
+						)}`,
 					);
 					return null;
 				}
