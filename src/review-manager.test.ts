@@ -41,6 +41,7 @@ vi.mock("./prompt-builder.js", () => ({
 
 vi.mock("./persist.js", () => ({
 	saveReview: vi.fn().mockResolvedValue(undefined),
+	saveSessionLog: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("./llm.js", () => ({

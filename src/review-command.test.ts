@@ -45,6 +45,7 @@ vi.mock("./llm.js", () => ({
 
 vi.mock("./persist.js", () => ({
 	saveReview: vi.fn().mockResolvedValue(undefined),
+	saveSessionLog: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Import after mocks
