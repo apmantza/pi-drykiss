@@ -288,5 +288,10 @@ export async function selectModelWithAutoroute(
 		}
 	}
 
+	// No autoroute, or no free model available: the popup fallback needs a UI.
+	// In a headless context, there's nothing more we can do — return undefined
+	// so the caller can decide how to handle the unrecoverable error.
+	if (!ctx.hasUI) return undefined;
+
 	return selectModel(ctx, title, message);
 }

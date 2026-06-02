@@ -267,7 +267,7 @@ export class ReviewManager {
 				`hasUI:`,
 				ctx.hasUI,
 			);
-			if (isModelErr && ctx.hasUI) {
+			if (isModelErr) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.
@@ -428,11 +428,7 @@ export class ReviewManager {
 			);
 
 			// Check for model error and retry with user-selected model
-			if (
-				result.errorMessage &&
-				isModelError(result.errorMessage) &&
-				ctx.hasUI
-			) {
+			if (result.errorMessage && isModelError(result.errorMessage)) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.

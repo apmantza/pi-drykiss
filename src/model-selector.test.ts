@@ -181,8 +181,9 @@ describe("selectModelWithAutoroute", () => {
 		output: 15,
 	});
 
-	function makeCtx(): any {
+	function makeCtx(overrides: { hasUI?: boolean } = {}): any {
 		return {
+			hasUI: overrides.hasUI ?? true,
 			modelRegistry: {
 				getAvailable: vi
 					.fn()
@@ -304,6 +305,37 @@ describe("selectModelWithAutoroute", () => {
 		// No free model to pick — popup runs.
 		expect(ctx.ui.custom).toHaveBeenCalled();
 		expect(result?.id).toBe("claude-sonnet-4");
+	});
+
+	it("returns undefined when no free model exists AND hasUI is false (headless)", async () => {
+		const ctx = makeCtx({ hasUI: false });
+		ctx.modelRegistry.getAvailable.mockReturnValue([paidSonnet]);
+
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true, modelScope: "haiku" },
+			"Title",
+			"Message",
+		);
+		// Neither autoroute nor popup can recover — caller will see the
+		// original error rather than a crash.
+		expect(result).toBeUndefined();
+		expect(ctx.ui.custom).not.toHaveBeenCalled();
+	});
+
+	it("returns undefined when autoroute is on with no free model, no UI, no popup", async () => {
+		// Same as above but explicitly verifying the popup is NOT called.
+		const ctx = makeCtx({ hasUI: false });
+		ctx.modelRegistry.getAvailable.mockReturnValue([freeHaiku]); // free model exists
+		const result = await selectModelWithAutoroute(
+			ctx,
+			{ autoroute: true },
+			"Title",
+			"Message",
+		);
+		// Autoroute picks the free model — no UI needed.
+		expect(result?.id).toBe("claude-3-5-haiku");
+		expect(ctx.ui.custom).not.toHaveBeenCalled();
 	});
 
 	it("forwards the excluded model to the free-model resolver", async () => {

@@ -19,6 +19,7 @@ vi.mock("./model-selector.js", () => ({
 	selectModelWithAutoroute: vi.fn().mockResolvedValue(undefined),
 	isQuotaError: vi.fn().mockReturnValue(false),
 	isAuthError: vi.fn().mockReturnValue(false),
+	isModelError: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@earendil-works/pi-ai", () => ({
@@ -249,8 +250,8 @@ describe("callLLM", () => {
 	});
 
 	it("retries on quota error when hasUI is true", async () => {
-		const { isQuotaError } = await import("./model-selector.js");
-		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+		const { isModelError } = await import("./model-selector.js");
+		vi.mocked(isModelError).mockReturnValueOnce(true);
 		const ctx = makeCtx();
 		ctx.hasUI = true;
 
@@ -268,8 +269,8 @@ describe("callLLM", () => {
 	});
 
 	it("retries on auth error when hasUI is true", async () => {
-		const { isAuthError } = await import("./model-selector.js");
-		vi.mocked(isAuthError).mockReturnValueOnce(true);
+		const { isModelError } = await import("./model-selector.js");
+		vi.mocked(isModelError).mockReturnValueOnce(true);
 		const ctx = makeCtx();
 		ctx.hasUI = true;
 
@@ -284,9 +285,29 @@ describe("callLLM", () => {
 		expect(result.text).toBe("retry-success");
 	});
 
+	it("retries on 5xx server error and autoroutes regardless of hasUI", async () => {
+		// 5xx detection is the key fix: prior to this, a 504 on a headless
+		// invocation would skip the retry entirely and bubble the raw error.
+		const { isModelError } = await import("./model-selector.js");
+		vi.mocked(isModelError).mockReturnValueOnce(true);
+		const ctx = makeCtx();
+		ctx.hasUI = false; // headless
+
+		vi.mocked(complete)
+			.mockRejectedValueOnce(new Error("504 status code (no body)"))
+			.mockResolvedValueOnce({
+				content: [{ type: "text", text: "autoroute-recovered" }],
+			} as any);
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+
+		const result = await callLLM(ctx, "/test", "system", "user");
+		expect(result.text).toBe("autoroute-recovered");
+		expect(selectModelWithAutoroute).toHaveBeenCalled();
+	});
+
 	it("passes the failed model as excluded to selectModelWithAutoroute on retry", async () => {
-		const { isQuotaError } = await import("./model-selector.js");
-		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+		const { isModelError } = await import("./model-selector.js");
+		vi.mocked(isModelError).mockReturnValueOnce(true);
 		const ctx = makeCtx();
 		ctx.hasUI = true;
 
@@ -310,12 +331,14 @@ describe("callLLM", () => {
 		);
 	});
 
-	it("throws quota error when hasUI is false", async () => {
-		const { isQuotaError } = await import("./model-selector.js");
-		vi.mocked(isQuotaError).mockReturnValueOnce(true);
+	it("throws the original error when autoroute returns undefined (no free model, no UI)", async () => {
+		const { isModelError } = await import("./model-selector.js");
+		vi.mocked(isModelError).mockReturnValueOnce(true);
 		const ctx = makeCtx();
+		ctx.hasUI = false; // headless
 
 		vi.mocked(complete).mockRejectedValueOnce(new Error("Rate limit"));
+		vi.mocked(selectModelWithAutoroute).mockResolvedValue(undefined);
 
 		await expect(callLLM(ctx, "/test", "system", "user")).rejects.toThrow(
 			"Rate limit",

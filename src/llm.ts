@@ -4,8 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
 import {
 	selectModelWithAutoroute,
-	isQuotaError,
-	isAuthError,
+	isModelError,
 } from "./model-selector.js";
 
 export interface LLMOptions {
@@ -150,8 +149,7 @@ export async function callLLM(
 	try {
 		return await attempt();
 	} catch (err: any) {
-		if (isQuotaError(err) || isAuthError(err)) {
-			if (!ctx.hasUI) throw err;
+		if (isModelError(err)) {
 
 			// Auto-route to a free model if the user has configured it;
 			// otherwise show the standard picker popup.
