@@ -15,8 +15,7 @@ import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview, saveSessionLog } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
-import { isModelError, selectModelWithAutoroute } from "./model-selector.js";
-import { loadConfig } from "./config.js";
+import { isModelError, selectModelOnError } from "./model-selector.js";
 
 const CONCURRENCY = 3;
 
@@ -48,6 +47,8 @@ export interface ReviewJob {
 	synthesisResult?: SynthesisResult;
 	/** Wall-clock timestamp when synthesis transitioned to 'running'. */
 	synthesisStartedAt?: number;
+	/** Session for the synthesis subagent, disposed on job cleanup. */
+	synthesisSession?: AgentSession;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
 	completedAt?: number;
@@ -150,37 +151,48 @@ export class ReviewManager {
 		const abortController = new AbortController();
 		this.abortControllers.set(id, abortController);
 
-		// Queue all lens tasks
-		for (const lens of lenses) {
-			const prompt = promptMap.get(lens);
-			const model = modelMap.get(lens);
-			if (!prompt || !model) {
-				const s = states.get(lens)!;
-				s.status = "error";
-				s.errorMessage = !prompt ? "No prompt generated" : "No model resolved";
-				continue;
+		try {
+			// Queue all lens tasks
+			for (const lens of lenses) {
+				const prompt = promptMap.get(lens);
+				const model = modelMap.get(lens);
+				if (!prompt || !model) {
+					const s = states.get(lens)!;
+					s.status = "error";
+					s.errorMessage = !prompt
+						? "No prompt generated"
+						: "No model resolved";
+					continue;
+				}
+				this.taskQueue.push({
+					jobId: id,
+					lens,
+					model,
+					systemPrompt: prompt.systemPrompt,
+					userPrompt: prompt.userPrompt,
+					signal: abortController.signal,
+					onStreamUpdate: () => {
+						// Notify UI on streaming updates for live progress
+						try {
+							this.onUpdate?.(job);
+						} catch {
+							/* don't let callback errors crash */
+						}
+					},
+				});
 			}
-			this.taskQueue.push({
-				jobId: id,
-				lens,
-				model,
-				systemPrompt: prompt.systemPrompt,
-				userPrompt: prompt.userPrompt,
-				signal: abortController.signal,
-				onStreamUpdate: () => {
-					// Notify UI on streaming updates for live progress
-					try {
-						this.onUpdate?.(job);
-					} catch {
-						/* don't let callback errors crash */
-					}
-				},
-			});
-		}
 
-		// Start draining
-		this.drain(ctx, pi, cwd);
-		return id;
+			// Start draining
+			this.drain(ctx, pi, cwd);
+			return id;
+		} catch (err) {
+			// If anything fails after adding the job, clean up so no stale
+			// job is left with lens states stuck at "queued".
+			console.error(`[DRYKISS] startReview failed:`, err);
+			this.jobs.delete(id);
+			this.abortControllers.delete(id);
+			throw err;
+		}
 	}
 
 	private async drain(ctx: ExtensionContext, pi: ExtensionAPI, cwd: string) {
@@ -274,13 +286,11 @@ export class ReviewManager {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.
-				const config = await loadConfig();
-				const selected = await selectModelWithAutoroute(
+				const selected = await selectModelOnError(
 					ctx,
-					config,
+					{ provider: task.model.provider, id: task.model.id },
 					"Model Error",
 					`Model "${task.model.name}" failed: ${result.errorMessage}\n\nChoose a different model to retry:`,
-					{ provider: task.model.provider, id: task.model.id },
 				);
 				if (selected) {
 					// Retry with the selected model
@@ -307,6 +317,20 @@ export class ReviewManager {
 							state.streamingText = "streaming...";
 							task.onStreamUpdate();
 						},
+					);
+					// Dispose the failed session and update with retry session
+					if (state.session && state.session !== retryResult.session) {
+						try {
+							state.session.dispose();
+						} catch {
+							/* ignore */
+						}
+					}
+					state.session = retryResult.session;
+					state.logPath = await saveSessionLog(
+						job.id,
+						task.lens,
+						retryResult.session,
 					);
 					if (retryResult.errorMessage) {
 						// Second failure - record the error
@@ -388,8 +412,21 @@ export class ReviewManager {
 			}
 			try {
 				await this.runSynthesis(ctx, cwd, job);
-			} catch {
-				/* handled inside */
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(`[DRYKISS] Synthesis threw unexpectedly: ${msg}`);
+				job.synthesisStatus = "error";
+				job.synthesisResult = createFallbackSynthesis(
+					`Synthesis crashed: ${msg}`,
+				);
+				job.overallStatus = "error";
+				job.completedAt = Date.now();
+				this.synthesisLocks.delete(job.id);
+				try {
+					this.onComplete?.(job);
+				} catch {
+					/* ignore */
+				}
 			}
 		}
 
@@ -429,18 +466,29 @@ export class ReviewManager {
 				"synthesis",
 			);
 
+			// Store the synthesis session so it can be disposed on job cleanup
+			if (result.session) {
+				// Dispose previous session if this is a retry
+				if (job.synthesisSession && job.synthesisSession !== result.session) {
+					try {
+						job.synthesisSession.dispose();
+					} catch {
+						/* ignore */
+					}
+				}
+				job.synthesisSession = result.session;
+			}
+
 			// Check for model error and retry with user-selected model
 			if (result.errorMessage && isModelError(result.errorMessage)) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.
-				const config = await loadConfig();
-				const selected = await selectModelWithAutoroute(
+				const selected = await selectModelOnError(
 					ctx,
-					config,
+					{ provider: model.provider, id: model.id },
 					"Model Error",
 					`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
-					{ provider: model.provider, id: model.id },
 				);
 				if (selected) {
 					model = selected;
@@ -453,6 +501,17 @@ export class ReviewManager {
 						userPrompt,
 						"synthesis",
 					);
+					// Dispose the failed session and store the retry session
+					if (result.session) {
+						try {
+							result.session.dispose();
+						} catch {
+							/* ignore */
+						}
+					}
+					if (retryResult.session) {
+						job.synthesisSession = retryResult.session;
+					}
 					if (retryResult.errorMessage) {
 						job.synthesisResult = createFallbackSynthesis(
 							`Synthesis failed: ${retryResult.errorMessage}`,
@@ -533,6 +592,14 @@ export class ReviewManager {
 				}
 				state.session = undefined;
 			}
+		}
+		if (job.synthesisSession) {
+			try {
+				job.synthesisSession.dispose();
+			} catch {
+				/* ignore */
+			}
+			job.synthesisSession = undefined;
 		}
 	}
 

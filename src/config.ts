@@ -72,7 +72,7 @@ export async function loadConfig(): Promise<DrykissConfig> {
 		// JSON parse error: corrupt file — warn and fall back to defaults
 		// Note: Don't log err.message as it may contain the malformed JSON content
 		if (err instanceof SyntaxError) {
-			console.error("[DRYKISS] Config file is corrupt, using defaults");
+			console.warn("[DRYKISS] Config file is corrupt, using defaults");
 			return { interactive: true, confirmBeforeRun: true };
 		}
 		const msg = err instanceof Error ? err.message : String(err);

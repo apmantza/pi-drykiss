@@ -283,13 +283,13 @@ describe("prompt template management", () => {
 	});
 
 	it("getPromptPath returns correct path", () => {
-		const path = getPromptPath("/cwd", "simplicity");
+		const path = getPromptPath("simplicity");
 		expect(path).toMatch(/\.pi[/\\]drykiss[/\\]prompts[/\\]simplicity\.md$/);
 	});
 
 	it("loadLensSystemPrompt loads custom prompt from disk", async () => {
 		vi.mocked(readFile).mockResolvedValue("Custom prompt body\n");
-		const prompt = await loadLensSystemPrompt("/cwd", "simplicity");
+		const prompt = await loadLensSystemPrompt("simplicity");
 		expect(prompt).toContain("Custom prompt body");
 		expect(prompt).toContain("Output findings as a single JSON array");
 		expect(readFile).toHaveBeenCalled();
@@ -299,7 +299,7 @@ describe("prompt template management", () => {
 		vi.mocked(readFile).mockRejectedValue(
 			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
 		);
-		const prompt = await loadLensSystemPrompt("/cwd", "simplicity");
+		const prompt = await loadLensSystemPrompt("simplicity");
 		expect(prompt).toContain("Simplicity Auditor");
 		expect(prompt).toContain("KISS");
 		expect(prompt).toContain("Output findings as a single JSON array");

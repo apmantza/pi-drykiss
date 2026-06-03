@@ -2,7 +2,18 @@ import { complete } from "@earendil-works/pi-ai";
 import type { Context, Model, Api } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import { selectModelWithAutoroute, isModelError } from "./model-selector.js";
+import {
+	selectModelWithAutoroute,
+	selectModelOnError,
+	isModelError,
+} from "./model-selector.js";
+import { findModelByHint } from "./model-utils.js";
+// Re-exported for tests and external callers. Implementation lives in
+// model-utils.ts to break the free-models.ts -> llm.ts ->
+// model-selector.ts -> free-models.ts cycle (free-models.ts also needs
+// findModelByHint, and if it lived in either of them, the other would
+// have to import it back, completing a cycle).
+export { findModelByHint };
 
 export interface LLMOptions {
 	readonly temperature?: number;
@@ -74,29 +85,6 @@ export async function resolveModelSmart(
 	return available[0];
 }
 
-export function findModelByHint(
-	available: Model<Api>[],
-	hint: string,
-): Model<Api> | undefined {
-	const lower = hint.toLowerCase();
-
-	// Exact provider/id match
-	const exact = available.find(
-		(m) => `${m.provider}/${m.id}`.toLowerCase() === lower,
-	);
-	if (exact) return exact;
-
-	// Partial id match
-	const byId = available.find((m) => m.id.toLowerCase().includes(lower));
-	if (byId) return byId;
-
-	// Partial name match
-	const byName = available.find((m) => m.name.toLowerCase().includes(lower));
-	if (byName) return byName;
-
-	return undefined;
-}
-
 /**
  * Call the LLM directly. On quota/auth errors, prompt the user to pick
  * a different model and retry once.
@@ -144,23 +132,18 @@ export async function callLLM(
 	try {
 		return await attempt();
 	} catch (err: any) {
-		if (isModelError(err)) {
-			// Auto-route to a free model if the user has configured it;
-			// otherwise show the standard picker popup.
-			const config = await loadConfig();
-			const selected = await selectModelWithAutoroute(
-				ctx,
-				config,
-				"Model Error",
-				`${model.name} failed: ${err.message}\n\nChoose a different model:`,
-				{ provider: model.provider, id: model.id },
-			);
-			if (!selected) throw err;
+		if (!isModelError(err)) throw err;
 
-			model = selected;
-			ctx.ui.notify(`Retrying with ${model.name}...`, "info");
-			return await attempt();
-		}
-		throw err;
+		const selected = await selectModelOnError(
+			ctx,
+			{ provider: model.provider, id: model.id },
+			"Model Error",
+			`${model.name} failed: ${err.message}\n\nChoose a different model:`,
+		);
+		if (!selected) throw err;
+
+		model = selected;
+		ctx.ui.notify(`Retrying with ${model.name}...`, "info");
+		return await attempt();
 	}
 }

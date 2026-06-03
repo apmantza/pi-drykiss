@@ -352,12 +352,8 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 			/* lenient parse also failed — fall through to error */
 		}
 
-		const msg = `Failed to parse JSON. The LLM output may contain unescaped characters.`;
-		console.error(`[DRYKISS] Failed to parse JSON for ${lens} lens.`);
-		console.error(
-			`[DRYKISS] Raw output (first 1200 chars):`,
-			raw.slice(0, 1200),
-		);
+		const msg = `Failed to parse JSON for ${lens} lens. The LLM output may contain unescaped characters.`;
+		console.error(`[DRYKISS] ${msg}`);
 		return { findings: [], parseError: msg };
 	}
 }

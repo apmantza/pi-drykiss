@@ -8,7 +8,7 @@ import {
 	Text,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
-import type { DrykissConfig } from "./config.js";
+import { loadConfig, type DrykissConfig } from "./config.js";
 import { selectFreeModel, type ExcludedModel } from "./free-models.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
@@ -294,4 +294,37 @@ export async function selectModelWithAutoroute(
 	if (!ctx.hasUI) return undefined;
 
 	return selectModel(ctx, title, message);
+}
+
+/**
+ * Attempt to select a different model when a model error occurs (quota/auth).
+ *
+ * Wraps selectModelWithAutoroute in a try/catch so that failures in the
+ * autoroute plumbing (loadConfig error, ui.custom reject, etc.) surface as
+ * a silent fallback to the caller — not an unhandled rejection. Returns
+ * undefined if no model was selected or if autorouting failed.
+ *
+ * This is the shared helper for the repeated retry pattern in:
+ *   - callLLM (llm.ts)
+ *   - runLens (review-manager.ts)
+ *   - runSynthesis (review-manager.ts)
+ */
+export async function selectModelOnError(
+	ctx: ExtensionContext,
+	failedModel: { provider: string; id: string },
+	title: string,
+	message: string,
+): Promise<Model<Api> | undefined> {
+	try {
+		const config = await loadConfig();
+		return await selectModelWithAutoroute(ctx, config, title, message, {
+			provider: failedModel.provider,
+			id: failedModel.id,
+		});
+	} catch (routeErr) {
+		const msg =
+			routeErr instanceof Error ? routeErr.message : String(routeErr);
+		console.error(`[DRYKISS] Model autoroute failed: ${msg}`);
+		return undefined;
+	}
 }

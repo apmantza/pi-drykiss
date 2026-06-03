@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, lstat } from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
@@ -203,7 +203,11 @@ export async function getFileContent(
 		console.error(`[DRYKISS] Rejected absolute path: ${filePath}`);
 		return null;
 	}
-	// Decode URI-encoded sequences (handles %2e%2e etc.) and normalize
+	// Decode URI-encoded sequences (handles %2e%2e etc.) and normalize.
+	// A single decode is sufficient: the path comes from git diff output,
+	// not a URL parameter. Double-encoded input stays encoded (the second
+	// layer is literal text, not encoding) — the forward check on both
+	// the original and decoded path catches smuggled sequences regardless.
 	let decodedPath: string;
 	try {
 		decodedPath = decodeURIComponent(filePath);
@@ -211,13 +215,8 @@ export async function getFileContent(
 		console.error(`[DRYKISS] Rejected malformed path: ${filePath}`);
 		return null;
 	}
-	// After decoding, reject literal dot-dot, tilde, OR any encoded variants that survived
-	if (
-		decodedPath.includes("..") ||
-		decodedPath.includes("~") ||
-		filePath.toLowerCase().includes("%2e") ||
-		filePath.toLowerCase().includes("..") // check original too
-	) {
+	// After decoding, reject literal dot-dot and tilde.
+	if (decodedPath.includes("..") || decodedPath.includes("~")) {
 		console.error(`[DRYKISS] Rejected suspicious path: ${filePath}`);
 		return null;
 	}
@@ -232,6 +231,16 @@ export async function getFileContent(
 		return null;
 	}
 	try {
+		// Reject non-regular files: symlinks (readFile follows them),
+		// FIFOs (readFile hangs indefinitely), sockets, and device files.
+		// A malicious repo could plant any of these to exfiltrate data,
+		// hang the review, or cause unexpected behavior. lstat reports
+		// the actual type (not the target's type), so this is safe.
+		const linkStats = await lstat(resolved);
+		if (!linkStats.isFile()) {
+			console.error(`[DRYKISS] Rejected non-regular file: ${filePath}`);
+			return null;
+		}
 		const raw = await readFile(resolved, "utf8");
 		const lines = raw.split("\n");
 		const truncated = lines.length > MAX_FILE_LINES;
@@ -270,6 +279,12 @@ export interface ProjectIndexEntry {
 async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
 	const entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
 	for (const entry of entries) {
+		// Skip symlinks at the directory AND file level — readdir's
+		// Dirent.isFile()/isDirectory() follow symlinks, so a symlink to
+		// /etc/passwd would otherwise be read by getProjectIndex and its
+		// contents (or its recursive contents, for symlink-to-dir) shipped
+		// to the LLM. We never recurse into a symlinked subtree.
+		if (entry.isSymbolicLink()) continue;
 		if (entry.isDirectory()) {
 			if (SKIP_DIRS.has(entry.name)) continue;
 			yield* walkDir(cwd, path.join(dir, entry.name));

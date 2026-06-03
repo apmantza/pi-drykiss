@@ -484,19 +484,13 @@ const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your jo
 
 // ── Prompt loading & default management ─────────────────────────────────
 
-export function getPromptPath(
-	_cwd: string,
-	lens: ReviewLens | "synthesis",
-): string {
+export function getPromptPath(lens: ReviewLens | "synthesis"): string {
 	return join(getGlobalPromptsDir(), `${lens}.md`);
 }
 
-async function loadPromptBody(
-	cwd: string,
-	lens: ReviewLens | "synthesis",
-): Promise<string> {
+async function loadPromptBody(lens: ReviewLens | "synthesis"): Promise<string> {
 	try {
-		const raw = await readFile(getPromptPath(cwd, lens), "utf8");
+		const raw = await readFile(getPromptPath(lens), "utf8");
 		// Handle null/undefined return (e.g., from mocks) — treat as missing file
 		if (raw == null) {
 			return lens === "synthesis"
@@ -527,15 +521,14 @@ async function loadPromptBody(
 }
 
 export async function loadLensSystemPrompt(
-	cwd: string,
 	lens: Exclude<ReviewLens, "all">,
 ): Promise<string> {
-	const body = await loadPromptBody(cwd, lens);
+	const body = await loadPromptBody(lens);
 	return body + "\n" + JSON_OUTPUT_INSTRUCTIONS + KISS_DRY_CHECKLIST;
 }
 
-export async function loadSynthesisSystemPrompt(cwd: string): Promise<string> {
-	const body = await loadPromptBody(cwd, "synthesis");
+export async function loadSynthesisSystemPrompt(): Promise<string> {
+	const body = await loadPromptBody("synthesis");
 	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
 }
 
@@ -659,7 +652,7 @@ function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
 // ── Public API ──────────────────────────────────────────────────────────
 
 export async function buildReviewPrompts(
-	cwd: string,
+	_cwd: string,
 	files: ChangedFile[],
 	diffs: Map<string, string>,
 	lens: ReviewLens,
@@ -677,7 +670,7 @@ export async function buildReviewPrompts(
 		: "";
 
 	if (lens !== "all") {
-		const systemPrompt = await loadLensSystemPrompt(cwd, lens);
+		const systemPrompt = await loadLensSystemPrompt(lens);
 		const userPrompt =
 			lens === "deduplication" && indexBlock
 				? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
@@ -687,7 +680,7 @@ export async function buildReviewPrompts(
 
 	const prompts: ReviewPrompt[] = [];
 	for (const l of LENS_NAMES) {
-		const systemPrompt = await loadLensSystemPrompt(cwd, l);
+		const systemPrompt = await loadLensSystemPrompt(l);
 		const userPrompt =
 			l === "deduplication" && indexBlock
 				? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
@@ -698,10 +691,10 @@ export async function buildReviewPrompts(
 }
 
 export async function buildSynthesisPrompt(
-	cwd: string,
+	_cwd: string,
 	lensReviews: Array<{ lens: string; rawOutput: string }>,
 ): Promise<{ systemPrompt: string; userPrompt: string }> {
-	const systemPrompt = await loadSynthesisSystemPrompt(cwd);
+	const systemPrompt = await loadSynthesisSystemPrompt();
 
 	let userPrompt = "# Independent Reviewer Findings\n\n";
 	for (const review of lensReviews) {

@@ -25,6 +25,38 @@ function formatModelScope(scope: string | string[] | undefined): string {
 	return `\`${trimmed}\``;
 }
 
+/**
+ * Helper for boolean toggle subcommands (interactive, confirm, autoroute).
+ * Loads config, validates the value, mutates the config key, saves, and
+ * notifies. All async operations are wrapped in try-catch for error handling.
+ */
+async function handleBooleanToggle(
+	ctx: ExtensionCommandContext,
+	tokens: string[],
+	configKey: "interactive" | "confirmBeforeRun" | "autoroute",
+	onLabel: string,
+	offLabel: string,
+): Promise<boolean> {
+	const val = tokens[1]?.toLowerCase();
+	try {
+		const config = await loadConfig();
+		if (val === "on" || val === "true") {
+			config[configKey] = true;
+		} else if (val === "off" || val === "false") {
+			config[configKey] = false;
+		} else {
+			ctx.ui.notify(`Usage: /drykiss-config ${tokens[0]} <on|off>`, "warning");
+			return false;
+		}
+		await saveConfig(config);
+		ctx.ui.notify(`${config[configKey] ? onLabel : offLabel}.`, "info");
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`Failed to update ${configKey}: ${msg}`, "error");
+	}
+	return true;
+}
+
 export async function handleConfigCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
@@ -69,185 +101,186 @@ export async function handleConfigCommand(
 	}
 
 	if (subcommand === "set-default") {
-		const model = tokens[1];
-		if (!model) {
-			if (ctx.hasUI) {
-				const selected = await selectModel(
-					ctx,
-					"Set Default Model",
-					"Choose the default model for all DRYKISS reviews:",
-				);
-				if (!selected) {
-					ctx.ui.notify("No model selected.", "info");
+		try {
+			const model = tokens[1];
+			if (!model) {
+				if (ctx.hasUI) {
+					const selected = await selectModel(
+						ctx,
+						"Set Default Model",
+						"Choose the default model for all DRYKISS reviews:",
+					);
+					if (!selected) {
+						ctx.ui.notify("No model selected.", "info");
+						return;
+					}
+					await setDefaultModel(`${selected.provider}/${selected.id}`);
+					ctx.ui.notify(
+						`Set ${selected.name} as the default DRYKISS model.`,
+						"info",
+					);
 					return;
 				}
-				await setDefaultModel(`${selected.provider}/${selected.id}`);
-				ctx.ui.notify(
-					`Set ${selected.name} as the default DRYKISS model.`,
-					"info",
-				);
+				ctx.ui.notify("Usage: /drykiss-config set-default <model>", "warning");
 				return;
 			}
-			ctx.ui.notify("Usage: /drykiss-config set-default <model>", "warning");
-			return;
+			await setDefaultModel(model);
+			ctx.ui.notify(`Set ${model} as the default DRYKISS model.`, "info");
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set default model: ${msg}`, "error");
 		}
-		await setDefaultModel(model);
-		ctx.ui.notify(`Set ${model} as the default DRYKISS model.`, "info");
 		return;
 	}
 
 	if (subcommand === "set-lens") {
-		const lens = tokens[1];
-		const model = tokens[2];
-		// Allow "synthesis" as a settable lens — it appears in `show` and is
-		// resolved by getModelForLens in llm.ts, so users should be able to
-		// configure it. LENS_NAMES excludes it (it's not a review lens).
-		if (
-			!(LENS_NAMES as readonly string[]).includes(lens) &&
-			lens !== "synthesis"
-		) {
-			ctx.ui.notify(
-				`Invalid lens: ${lens}. Valid: ${[...LENS_NAMES, "synthesis"].join(
-					", ",
-				)}`,
-				"error",
-			);
-			return;
+		try {
+			const lens = tokens[1];
+			const model = tokens[2];
+			// Allow "synthesis" as a settable lens — it appears in `show` and is
+			// resolved by getModelForLens in llm.ts, so users should be able to
+			// configure it. LENS_NAMES excludes it (it's not a review lens).
+			if (
+				!(LENS_NAMES as readonly string[]).includes(lens) &&
+				lens !== "synthesis"
+			) {
+				ctx.ui.notify(
+					`Invalid lens: ${lens}. Valid: ${[...LENS_NAMES, "synthesis"].join(
+						", ",
+					)}`,
+					"error",
+				);
+				return;
+			}
+			if (!model) {
+				ctx.ui.notify(
+					`Usage: /drykiss-config set-lens ${lens} <model>`,
+					"warning",
+				);
+				return;
+			}
+			await setLensModel(lens, model);
+			ctx.ui.notify(`Set ${model} for ${lens} reviews.`, "info");
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set lens model: ${msg}`, "error");
 		}
-		if (!model) {
-			ctx.ui.notify(
-				`Usage: /drykiss-config set-lens ${lens} <model>`,
-				"warning",
-			);
-			return;
-		}
-		await setLensModel(lens, model);
-		ctx.ui.notify(`Set ${model} for ${lens} reviews.`, "info");
 		return;
 	}
 
 	if (subcommand === "interactive") {
-		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig();
-		if (val === "on" || val === "true") {
-			config.interactive = true;
-		} else if (val === "off" || val === "false") {
-			config.interactive = false;
-		} else {
-			ctx.ui.notify("Usage: /drykiss-config interactive <on|off>", "warning");
-			return;
-		}
-		await saveConfig(config);
-		ctx.ui.notify(
-			`Interactive model selection ${config.interactive ? "enabled" : "disabled"}.`,
-			"info",
+		await handleBooleanToggle(
+			ctx,
+			tokens,
+			"interactive",
+			"Interactive model selection enabled",
+			"Interactive model selection disabled",
 		);
 		return;
 	}
 
 	if (subcommand === "confirm") {
-		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig();
-		if (val === "on" || val === "true") {
-			config.confirmBeforeRun = true;
-		} else if (val === "off" || val === "false") {
-			config.confirmBeforeRun = false;
-		} else {
-			ctx.ui.notify("Usage: /drykiss-config confirm <on|off>", "warning");
-			return;
-		}
-		await saveConfig(config);
-		ctx.ui.notify(
-			`Pre-run confirmation ${config.confirmBeforeRun ? "enabled" : "disabled"}.`,
-			"info",
+		await handleBooleanToggle(
+			ctx,
+			tokens,
+			"confirmBeforeRun",
+			"Pre-run confirmation enabled",
+			"Pre-run confirmation disabled",
 		);
 		return;
 	}
 
 	if (subcommand === "context-mode") {
-		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig();
-		if (val === "diff" || val === "full") {
-			config.contextMode = val;
-		} else {
-			ctx.ui.notify(
-				"Usage: /drykiss-config context-mode <diff|full>",
-				"warning",
-			);
-			return;
+		try {
+			const val = tokens[1]?.toLowerCase();
+			const config = await loadConfig();
+			if (val === "diff" || val === "full") {
+				config.contextMode = val;
+			} else {
+				ctx.ui.notify(
+					"Usage: /drykiss-config context-mode <diff|full>",
+					"warning",
+				);
+				return;
+			}
+			await saveConfig(config);
+			ctx.ui.notify(`Context mode set to ${config.contextMode}.`, "info");
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set context mode: ${msg}`, "error");
 		}
-		await saveConfig(config);
-		ctx.ui.notify(`Context mode set to ${config.contextMode}.`, "info");
 		return;
 	}
 
 	if (subcommand === "reset-prompts") {
-		await resetPrompts();
-		ctx.ui.notify(
-			"Default prompt templates regenerated in `~/.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
-			"info",
-		);
+		try {
+			await resetPrompts();
+			ctx.ui.notify(
+				"Default prompt templates regenerated in `~/.pi/drykiss/prompts/`. Edit them to customize reviewer behavior.",
+				"info",
+			);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to reset prompts: ${msg}`, "error");
+		}
 		return;
 	}
 
 	if (subcommand === "autoroute") {
-		const val = tokens[1]?.toLowerCase();
-		const config = await loadConfig();
-		if (val === "on" || val === "true") {
-			config.autoroute = true;
-		} else if (val === "off" || val === "false") {
-			config.autoroute = false;
-		} else {
-			ctx.ui.notify("Usage: /drykiss-config autoroute <on|off>", "warning");
-			return;
-		}
-		await saveConfig(config);
-		ctx.ui.notify(
-			`Auto-routing to free models ${config.autoroute ? "enabled" : "disabled"}.`,
-			"info",
+		await handleBooleanToggle(
+			ctx,
+			tokens,
+			"autoroute",
+			"Auto-routing to free models enabled",
+			"Auto-routing to free models disabled",
 		);
 		return;
 	}
 
 	if (subcommand === "model-scope") {
-		const config = await loadConfig();
-		if (tokens.length <= 1) {
+		try {
+			const config = await loadConfig();
+			if (tokens.length <= 1) {
+				ctx.ui.notify(
+					"Usage: /drykiss-config model-scope <scope[,scope2,...]|clear>",
+					"warning",
+				);
+				return;
+			}
+			// Accept either `model-scope a,b,c` or `model-scope a b c d`. Tokens
+			// after the subcommand are joined and re-split on commas so both
+			// forms produce the same parsed list.
+			const joined = tokens.slice(1).join(" ");
+			if (joined === "clear" || joined === "none" || joined === "") {
+				delete config.modelScope;
+				await saveConfig(config);
+				ctx.ui.notify("Model scope cleared (any free model).", "info");
+				return;
+			}
+			const hints = joined
+				.split(/[\s,]+/)
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+			if (hints.length === 0) {
+				delete config.modelScope;
+				await saveConfig(config);
+				ctx.ui.notify("Model scope cleared (any free model).", "info");
+				return;
+			}
+			if (hints.length === 1) {
+				config.modelScope = hints[0];
+			} else {
+				config.modelScope = hints;
+			}
+			await saveConfig(config);
 			ctx.ui.notify(
-				"Usage: /drykiss-config model-scope <scope[,scope2,...]|clear>",
-				"warning",
+				`Model scope set to ${formatModelScope(config.modelScope)}.`,
+				"info",
 			);
-			return;
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set model scope: ${msg}`, "error");
 		}
-		// Accept either `model-scope a,b,c` or `model-scope a b c d`. Tokens
-		// after the subcommand are joined and re-split on commas so both
-		// forms produce the same parsed list.
-		const joined = tokens.slice(1).join(" ");
-		if (joined === "clear" || joined === "none" || joined === "") {
-			delete config.modelScope;
-			await saveConfig(config);
-			ctx.ui.notify("Model scope cleared (any free model).", "info");
-			return;
-		}
-		const hints = joined
-			.split(/[\s,]+/)
-			.map((s) => s.trim())
-			.filter((s) => s.length > 0);
-		if (hints.length === 0) {
-			delete config.modelScope;
-			await saveConfig(config);
-			ctx.ui.notify("Model scope cleared (any free model).", "info");
-			return;
-		}
-		if (hints.length === 1) {
-			config.modelScope = hints[0];
-		} else {
-			config.modelScope = hints;
-		}
-		await saveConfig(config);
-		ctx.ui.notify(
-			`Model scope set to ${formatModelScope(config.modelScope)}.`,
-			"info",
-		);
 		return;
 	}
 

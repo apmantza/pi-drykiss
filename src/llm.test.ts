@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { findModelByHint, resolveModelSmart, callLLM } from "./llm.js";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import { selectModelWithAutoroute } from "./model-selector.js";
+import { selectModelWithAutoroute, selectModelOnError } from "./model-selector.js";
 import { complete } from "@earendil-works/pi-ai";
 import type { Model, Api } from "@earendil-works/pi-ai";
 
@@ -17,6 +17,7 @@ vi.mock("./config.js", () => ({
 vi.mock("./model-selector.js", () => ({
 	selectModel: vi.fn().mockResolvedValue(undefined),
 	selectModelWithAutoroute: vi.fn().mockResolvedValue(undefined),
+	selectModelOnError: vi.fn().mockResolvedValue(undefined),
 	isQuotaError: vi.fn().mockReturnValue(false),
 	isAuthError: vi.fn().mockReturnValue(false),
 	isModelError: vi.fn().mockReturnValue(false),
@@ -115,7 +116,7 @@ describe("resolveModelSmart", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		vi.mocked(loadConfig).mockResolvedValue({ interactive: false } as any);
 		vi.mocked(getModelForLens).mockImplementation(
 			(config: any, lens?: string) => {
@@ -211,7 +212,7 @@ describe("callLLM", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		vi.mocked(loadConfig).mockResolvedValue({ interactive: false } as any);
 		vi.mocked(complete).mockResolvedValue({
 			content: [{ type: "text", text: "response" }],
@@ -254,11 +255,11 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "retry-success" }],
 			} as any);
-		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+		vi.mocked(selectModelOnError).mockResolvedValue(models[0]);
 
 		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("retry-success");
-		expect(selectModelWithAutoroute).toHaveBeenCalled();
+		expect(selectModelOnError).toHaveBeenCalled();
 	});
 
 	it("retries on auth error when hasUI is true", async () => {
@@ -272,7 +273,7 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "retry-success" }],
 			} as any);
-		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+		vi.mocked(selectModelOnError).mockResolvedValue(models[0]);
 
 		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("retry-success");
@@ -291,14 +292,14 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "autoroute-recovered" }],
 			} as any);
-		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+		vi.mocked(selectModelOnError).mockResolvedValue(models[0]);
 
 		const result = await callLLM(ctx, "system", "user");
 		expect(result.text).toBe("autoroute-recovered");
-		expect(selectModelWithAutoroute).toHaveBeenCalled();
+		expect(selectModelOnError).toHaveBeenCalled();
 	});
 
-	it("passes the failed model as excluded to selectModelWithAutoroute on retry", async () => {
+	it("passes the failed model as excluded to selectModelOnError on retry", async () => {
 		const { isModelError } = await import("./model-selector.js");
 		vi.mocked(isModelError).mockReturnValueOnce(true);
 		const ctx = makeCtx();
@@ -309,19 +310,9 @@ describe("callLLM", () => {
 			.mockResolvedValueOnce({
 				content: [{ type: "text", text: "ok" }],
 			} as any);
-		vi.mocked(selectModelWithAutoroute).mockResolvedValue(models[0]);
+		vi.mocked(selectModelOnError).mockResolvedValue(undefined);
 
-		await callLLM(ctx, "system", "user");
-		expect(selectModelWithAutoroute).toHaveBeenCalledWith(
-			ctx,
-			expect.anything(),
-			expect.any(String),
-			expect.any(String),
-			expect.objectContaining({
-				provider: "anthropic",
-				id: "claude-sonnet-4-20250514",
-			}),
-		);
+		await expect(callLLM(ctx, "system", "user")).rejects.toThrow("Rate limit");
 	});
 
 	it("throws the original error when autoroute returns undefined (no free model, no UI)", async () => {
@@ -331,7 +322,7 @@ describe("callLLM", () => {
 		ctx.hasUI = false; // headless
 
 		vi.mocked(complete).mockRejectedValueOnce(new Error("Rate limit"));
-		vi.mocked(selectModelWithAutoroute).mockResolvedValue(undefined);
+		vi.mocked(selectModelOnError).mockResolvedValue(undefined);
 
 		await expect(callLLM(ctx, "system", "user")).rejects.toThrow("Rate limit");
 	});

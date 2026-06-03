@@ -21,7 +21,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import { findModelByHint } from "./llm.js";
+import { findModelByHint } from "./model-utils.js";
 
 /** Minimal model shape needed for free detection. */
 export interface FreeModelShape {
@@ -171,11 +171,11 @@ export function selectFreeModel(
 		return candidates[0] as unknown as Model<Api>;
 	}
 
-	// 3. All free models are excluded — fall back to the original free list
-	// so the caller at least gets *some* model. (Better than surfacing no
-	// choice: if the user has only one provider and it errored, the popup
-	// will let them see the situation.)
-	return free[0] as unknown as Model<Api>;
+	// 3. All free models are excluded. Return undefined so the caller
+	// falls through to the standard picker (or surfaces the error if
+	// headless). Returning the excluded model here would cause the
+	// caller to retry with the same model that just failed.
+	return undefined;
 }
 
 /**
