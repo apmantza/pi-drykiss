@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { findModelByHint, resolveModelSmart, callLLM } from "./llm.js";
 import { loadConfig, getModelForLens, saveConfig } from "./config.js";
-import { selectModelWithAutoroute, selectModelOnError } from "./model-selector.js";
+import {
+	selectModelWithAutoroute,
+	selectModelOnError,
+} from "./model-selector.js";
 import { complete } from "@earendil-works/pi-ai";
 import type { Model, Api } from "@earendil-works/pi-ai";
 

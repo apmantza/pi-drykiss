@@ -322,8 +322,7 @@ export async function selectModelOnError(
 			id: failedModel.id,
 		});
 	} catch (routeErr) {
-		const msg =
-			routeErr instanceof Error ? routeErr.message : String(routeErr);
+		const msg = routeErr instanceof Error ? routeErr.message : String(routeErr);
 		console.error(`[DRYKISS] Model autoroute failed: ${msg}`);
 		return undefined;
 	}

@@ -7,12 +7,13 @@ import {
 	getAllSourceFiles,
 } from "./git-diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat, lstat } from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({
 	readFile: vi.fn(),
 	readdir: vi.fn(),
 	stat: vi.fn(),
+	lstat: vi.fn(),
 }));
 
 function mockPi(stdout: string): ExtensionAPI {
@@ -164,6 +165,7 @@ describe("getAllSourceFiles", () => {
 			name,
 			isDirectory: () => isDir,
 			isFile: () => !isDir,
+			isSymbolicLink: () => false,
 		} as any;
 	}
 
@@ -275,9 +277,10 @@ describe("getFileDiff", () => {
 });
 
 describe("getFileContent", () => {
-	beforeEach(() => {
-		vi.resetAllMocks();
-	});
+beforeEach(() => {
+vi.resetAllMocks();
+vi.mocked(lstat).mockResolvedValue({ isFile: () => true } as any);
+});
 
 	it("returns full content for small files", async () => {
 		vi.mocked(readFile).mockResolvedValue("line1\nline2\nline3");
@@ -372,6 +375,7 @@ describe("getProjectIndex", () => {
 			name,
 			isDirectory: () => isDir,
 			isFile: () => !isDir,
+			isSymbolicLink: () => false,
 		} as any;
 	}
 
