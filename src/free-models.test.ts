@@ -230,18 +230,18 @@ describe("selectFreeModel", () => {
 		expect(result?.id).not.toBe("claude-3-5-haiku");
 	});
 
-	it("returns a model (the original free list) when ALL free models are excluded", () => {
+	it("returns undefined when ALL free models are excluded", () => {
 		// Edge case: only one free model exists and it just failed.
-		// Returning undefined would force the popup; returning the same model
-		// would loop. We return the original free list as a defensive fallback
-		// so the caller at least gets *some* signal and the popup can surface
-		// the situation.
+		// Returning undefined forces the caller to fall through to the
+		// standard model picker (or surface an error if headless).
+		// Returning the excluded model would cause the caller to retry
+		// with the same model that just failed, creating a loop.
 		const ctx = makeCtx([freeHaiku]);
 		const result = selectFreeModel(ctx, undefined, {
 			provider: "anthropic",
 			id: "claude-3-5-haiku",
 		});
-		expect(result?.id).toBe("claude-3-5-haiku");
+		expect(result).toBeUndefined();
 	});
 
 	it("treats scope as case-insensitive (delegated to findModelByHint)", () => {
