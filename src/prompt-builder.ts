@@ -754,9 +754,14 @@ export async function buildSynthesisPrompt(
 
 	let userPrompt = "# Independent Reviewer Findings\n\n";
 	for (const review of lensReviews) {
-		userPrompt += `## ${review.lens.toUpperCase()} REVIEWER\n\n${review.rawOutput}\n\n---\n\n`;
+		if (review.rawOutput.startsWith("ERROR:")) {
+			userPrompt += `## ${review.lens.toUpperCase()} REVIEWER\n\n[This reviewer encountered an error and produced no findings.]\n\n---\n\n`;
+		} else {
+			userPrompt += `## ${review.lens.toUpperCase()} REVIEWER\n\n${review.rawOutput}\n\n---\n\n`;
+		}
 	}
-	userPrompt += "\nSynthesize these findings into the final JSON report.";
+	userPrompt +=
+		'\nSynthesize these findings into the final JSON report. If there are no findings, output {"summary": "No issues found", "verdict": "Approve", "findings": []}. Output ONLY valid JSON — no markdown fences, no commentary.';
 
 	return { systemPrompt, userPrompt };
 }

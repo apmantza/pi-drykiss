@@ -277,6 +277,7 @@ export default function (pi: ExtensionAPI): void {
 					{ ...state, session: undefined },
 				]),
 			),
+			synthesisSession: undefined,
 		};
 
 		piRef.sendMessage<ReviewJob>(

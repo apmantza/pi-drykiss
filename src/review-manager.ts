@@ -536,7 +536,14 @@ export class ReviewManager {
 							`Synthesis failed: ${retryResult.errorMessage}`,
 						);
 					} else {
-						job.synthesisResult = parseSynthesis(retryResult.text || "{}");
+						const rawText = retryResult.text || "{}";
+						job.synthesisResult = parseSynthesis(rawText);
+						if (job.synthesisResult.summary.includes("non-JSON")) {
+							console.error(
+								"[DRYKISS] Synthesis raw output (non-JSON):",
+								rawText.slice(0, 2000),
+							);
+						}
 					}
 				} else {
 					job.synthesisResult = createFallbackSynthesis(
@@ -548,7 +555,14 @@ export class ReviewManager {
 					`Synthesis failed: ${result.errorMessage}`,
 				);
 			} else {
-				job.synthesisResult = parseSynthesis(result.text || "{}");
+				const rawText = result.text || "{}";
+				job.synthesisResult = parseSynthesis(rawText);
+				if (job.synthesisResult.summary.includes("non-JSON")) {
+					console.error(
+						"[DRYKISS] Synthesis raw output (non-JSON):",
+						rawText.slice(0, 2000),
+					);
+				}
 			}
 			job.synthesisStatus = result.errorMessage ? "error" : "done";
 		} catch (err: any) {
