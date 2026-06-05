@@ -34,10 +34,12 @@ Output findings as a single JSON array. Each finding is an object with these exa
 Rules:
 - Output ONLY the JSON array. No markdown code fences, no extra commentary.
 - If no issues found, output: []
-- Use actual file paths from the diff context
-- Line numbers are optional but strongly preferred when known
-- severity must be one of: critical, high, medium, low, nit
-- Every finding must have a non-empty category and summary
+- Use actual file paths from the supplied review context.
+- Line numbers are optional but strongly preferred when known.
+- severity must be one of: critical, high, medium, low, nit.
+- Every finding must have a non-empty category, summary, detail, and suggestion.
+- Every finding must name the concrete code evidence in detail: what is present, why it matters, and the smallest practical fix.
+- Do not report vague findings like "needs more tests", "god module", "consider refactoring", or "could be cleaner" unless you identify a specific behavior, boundary, duplicated rule, or code path and a minimal fix.
 `;
 
 const SYNTHESIS_JSON_INSTRUCTIONS = `
@@ -66,6 +68,44 @@ Rules:
 - Findings must be sorted by severity (critical first, then high, medium, low, nit)
 - confidence must be one of: confirmed, likely, suspect
 - verdict must be one of: Approve, Request changes, Needs security review
+- Deduplicate overlapping findings from multiple lenses into one finding with the most accurate severity.
+- Down-rank broad maintainability, test coverage, and file-size concerns unless they identify a concrete broken behavior, security risk, or high-probability maintenance failure.
+- Never synthesize a critical finding from maintainability concerns alone. Critical requires exploitable security risk, data loss, or currently broken core functionality.
+`;
+
+const REVIEW_GROUNDING_RULES = `
+## Grounding & Severity Rules — Cheap-Model Safe
+Follow these rules strictly, especially during full-codebase reviews:
+
+### Scope & Evidence
+- Review only the supplied files/context. Do not infer missing callers, hidden config, or unshown runtime behavior.
+- A finding must point to a concrete code location and observable behavior. If the issue is only a preference, omit it.
+- Prefer fewer high-signal findings over many broad suggestions.
+- Do not duplicate the same issue across lenses or files unless each location needs a separate fix.
+- If a finding depends on uncertainty, either mark it low/nit or omit it.
+
+### Severity Calibration
+- **Critical** only for exploitable security vulnerabilities, data loss, credential/privacy leak, or currently broken core functionality. Never mark missing tests, file size, god modules, or refactor opportunities as critical by themselves.
+- **High** only for likely production bugs, concrete security risks, severe reliability failures, or maintenance issues that will predictably cause defects soon.
+- **Medium** for actionable maintainability/test/refactor issues with clear evidence and a small fix.
+- **Low/Nit** for optional cleanup, naming, organization, or style.
+
+### Anti-Noise Rules
+- Do not flag "missing tests" unless you name the exact untested behavior, branch, or failure path.
+- Do not flag "god module" or "SRP" unless you name the specific responsibilities to split and why the current coupling causes risk.
+- Do not flag duplicated code unless it repeats the same knowledge/rule and you name the repeated locations.
+- Do not recommend broad rewrites, new frameworks, or speculative abstractions.
+`;
+
+const SYNTHESIS_GROUNDING_RULES = `
+## Synthesis Calibration
+You are the final filter. Cheap model reviewers may over-report; remove or down-rank noisy findings.
+
+- Keep only findings with concrete evidence and a minimal actionable fix.
+- Merge duplicates across lenses.
+- Reject findings that are purely stylistic, speculative, or unsupported by the supplied context.
+- Downgrade any maintainability/test/architecture finding labeled critical unless it demonstrates exploitable security risk, data loss, or currently broken core functionality.
+- For full-codebase reviews, broad module-size concerns should usually be medium unless paired with a concrete bug-prone responsibility split.
 `;
 
 // KISS/DRY checklist items to include in all lens prompts
@@ -338,16 +378,18 @@ Don't just identify local cleanup opportunities. Look for moves that make the co
 - **Low:** Nice-to-have — style consistency in type design, optional refactors
 - **Nit:** Very minor, author may ignore`,
 
-	tests: `You are a Test Coverage Auditor. Your ONLY job is to identify missing test cases for changed code.
+	tests: `You are a Test Coverage & Test Quality Auditor. Your ONLY job is to find concrete gaps that make the test suite less trustworthy. Review both missing tests and weak/brittle tests.
 
 ## Principles
 - Untested code is broken code waiting to happen
+- Weak tests are false confidence: a test that passes when the code is wrong is nearly as bad as no test
 - Every behavior deserves a test: success paths, failure paths, edge cases, boundaries
 - Test public APIs, not private methods — if a private method matters, test it through the public surface
 - One scenario per test: keep tests focused and readable
 - No logic in tests: KISS > DRY in test code. Avoid loops, conditionals, and complex assertions
 - Test behaviors, not methods: a single method may need multiple behavioral tests
 - Keep cause and effect clear: setup, action, and assertion should be immediately visible
+- Prefer semantic assertions over snapshot size, call-count trivia, or implementation details
 
 ## What to Flag
 ### Missing Test Coverage
@@ -370,13 +412,20 @@ Don't just identify local cleanup opportunities. Look for moves that make the co
 - Error path tested but success path ignored
 - Side effects (state mutation, I/O, event emission) not verified
 - Return values not asserted (function called but result unchecked)
-- Mock interactions not verified (dependency called with wrong args, wrong number of times)
+- Mock interactions are the only assertion when externally visible behavior should be asserted instead
+- Mock interactions not verified when the dependency call is the behavior being promised
 
 ### Test Quality Issues
 - Tests that don't actually verify the changed behavior (test passes even if code is wrong)
 - Fragile tests that depend on implementation details rather than behavior
 - Tests with overly broad assertions that could pass for multiple wrong implementations
 - Tests that share mutable state between runs
+- Async tests that can pass before the async work completes (missing await/return, fake timers not advanced, unhandled rejections ignored)
+- Over-mocking: mocks replace the behavior under test or assert implementation plumbing instead of user-visible outcome
+- Snapshot/golden tests with no semantic assertion for the behavior that matters
+- Tests with conditionals/loops that duplicate production logic or hide which scenario failed
+- Tests that only assert "does not throw" when a concrete result, state change, or error message should be verified
+- Nondeterministic tests: real time, random values, network, filesystem, or shared global state without isolation
 
 ## Test Case Naming Convention
 Suggest test names in this format:
@@ -388,17 +437,18 @@ Examples:
 - getUser_unauthorized_returns401
 
 ## Output Format for Findings
-For each missing test, suggest:
-- What to test (behavior, not method)
-- Given-When-Then description
-- Suggested test name
-- Which code line/branch is uncovered
+For each finding, suggest:
+- What behavior or test-quality property is missing/weak (behavior, not private method)
+- Given-When-Then description for the improved test
+- Suggested test name when adding or replacing a test
+- Which code line/branch/test assertion is uncovered, brittle, or too weak
+- Why the current tests could pass while the implementation is wrong
 
 ## Severity Labels
-- **Critical:** Blocks merge — new security-critical logic completely untested, new auth/validation paths with no tests
-- **High:** Significant gap — new business logic with no test coverage, changed error handling without updated tests
-- **Medium:** Clear improvement — missing edge cases, missing boundary tests, untested async paths
-- **Low:** Nice-to-have — additional boundary values, defensive tests for impossible scenarios
+- **Critical:** Blocks merge — new security-critical logic completely untested, new auth/validation paths with no tests, or a test suite that falsely passes for an exploitable/security-critical regression
+- **High:** Significant gap — new business logic with no test coverage, changed error handling without updated tests, or brittle/async/over-mocked tests that can plausibly hide a production bug
+- **Medium:** Clear improvement — missing edge cases, missing boundary tests, untested async paths, weak assertions, implementation-detail tests that should assert behavior
+- **Low:** Nice-to-have — additional boundary values, defensive tests for impossible scenarios, minor fixture readability or naming improvements
 - **Nit:** Very minor, author may ignore`,
 
 	security: `You are a Security Auditor. Your ONLY job is to find security vulnerabilities, credential exposure, and attack surface issues. You do a quick scan — not a full audit. For deep security work, recommend tools like piolium.
@@ -524,12 +574,18 @@ export async function loadLensSystemPrompt(
 	lens: Exclude<ReviewLens, "all">,
 ): Promise<string> {
 	const body = await loadPromptBody(lens);
-	return body + "\n" + JSON_OUTPUT_INSTRUCTIONS + KISS_DRY_CHECKLIST;
+	return (
+		body +
+		"\n" +
+		JSON_OUTPUT_INSTRUCTIONS +
+		REVIEW_GROUNDING_RULES +
+		KISS_DRY_CHECKLIST
+	);
 }
 
 export async function loadSynthesisSystemPrompt(): Promise<string> {
 	const body = await loadPromptBody("synthesis");
-	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS;
+	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS + SYNTHESIS_GROUNDING_RULES;
 }
 
 export async function ensureDefaultPrompts(_cwd: string): Promise<void> {

@@ -16,8 +16,14 @@ import { saveReview, saveSessionLog } from "./persist.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
+import {
+	buildReviewResult,
+	type ReviewResult,
+	type ReviewResultTarget,
+} from "./review-result.js";
 
 const CONCURRENCY = 3;
+const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
 
 export type LensStatus = "queued" | "running" | "done" | "error";
 
@@ -49,6 +55,8 @@ export interface ReviewJob {
 	synthesisStartedAt?: number;
 	/** Session for the synthesis subagent, disposed on job cleanup. */
 	synthesisSession?: AgentSession;
+	/** Absolute path to the persisted synthesized review JSON, when saved. */
+	reviewPath?: string;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
 	completedAt?: number;
@@ -56,6 +64,17 @@ export interface ReviewJob {
 
 export type OnReviewUpdate = (job: ReviewJob) => void;
 export type OnReviewComplete = (job: ReviewJob) => void;
+
+function safeProgress(
+	onProgress: ((job: ReviewJob) => void) | undefined,
+	job: ReviewJob,
+): void {
+	try {
+		onProgress?.(job);
+	} catch {
+		/* progress callbacks must not affect review execution */
+	}
+}
 
 export class ReviewManager {
 	private jobs = new Map<string, ReviewJob>();
@@ -550,7 +569,7 @@ export class ReviewManager {
 		this.synthesisLocks.delete(job.id);
 		if (job.synthesisResult) {
 			try {
-				await saveReview(job.files, job.synthesisResult);
+				job.reviewPath = await saveReview(job.files, job.synthesisResult);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				console.error(`[DRYKISS] Failed to persist review ${job.id}:`, msg);
@@ -562,6 +581,102 @@ export class ReviewManager {
 
 	getJob(id: string): ReviewJob | undefined {
 		return this.jobs.get(id);
+	}
+
+	async runReview(
+		ctx: ExtensionContext,
+		pi: ExtensionAPI,
+		cwd: string,
+		files: ChangedFile[],
+		diffs: Map<string, string>,
+		contents:
+			| Map<string, { content: string; lineCount: number; truncated: boolean }>
+			| undefined,
+		projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined,
+		options: {
+			model?: string;
+			lenses?: ReviewLens[];
+			target?: ReviewResultTarget;
+			onProgress?: (job: ReviewJob) => void;
+			progressIntervalMs?: number;
+		},
+		signal?: AbortSignal,
+	): Promise<ReviewResult> {
+		const jobId = await this.startReview(
+			ctx,
+			pi,
+			cwd,
+			files,
+			diffs,
+			contents,
+			projectIndex,
+			{ model: options.model, lenses: options.lenses },
+		);
+		const started = this.getJob(jobId);
+		if (started) safeProgress(options.onProgress, started);
+		const job = await this.waitForReview(
+			jobId,
+			signal,
+			options.onProgress,
+			options.progressIntervalMs,
+		);
+		return buildReviewResult(job, { target: options.target });
+	}
+
+	waitForReview(
+		id: string,
+		signal?: AbortSignal,
+		onProgress?: (job: ReviewJob) => void,
+		progressIntervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
+	): Promise<ReviewJob> {
+		const existing = this.jobs.get(id);
+		if (!existing)
+			return Promise.reject(new Error(`Unknown review job: ${id}`));
+		if (
+			existing.overallStatus === "done" ||
+			existing.overallStatus === "error"
+		) {
+			return Promise.resolve(existing);
+		}
+
+		return new Promise((resolve, reject) => {
+			let lastProgressAt = 0;
+			const interval = setInterval(() => {
+				const job = this.jobs.get(id);
+				if (!job) {
+					cleanup();
+					reject(new Error(`Review job disappeared: ${id}`));
+					return;
+				}
+				const now = Date.now();
+				if (
+					onProgress &&
+					progressIntervalMs >= 0 &&
+					now - lastProgressAt >= progressIntervalMs
+				) {
+					lastProgressAt = now;
+					safeProgress(onProgress, job);
+				}
+				if (job.overallStatus === "done" || job.overallStatus === "error") {
+					cleanup();
+					safeProgress(onProgress, job);
+					resolve(job);
+				}
+			}, 100);
+			interval.unref?.();
+
+			const onAbort = () => {
+				cleanup();
+				reject(new Error(`Review job wait aborted: ${id}`));
+			};
+			const cleanup = () => {
+				clearInterval(interval);
+				signal?.removeEventListener("abort", onAbort);
+			};
+
+			if (signal?.aborted) onAbort();
+			else signal?.addEventListener("abort", onAbort, { once: true });
+		});
 	}
 
 	listJobs(): ReviewJob[] {

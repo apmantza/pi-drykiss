@@ -49,7 +49,8 @@ vi.mock("./persist.js", () => ({
 }));
 
 // Import after mocks
-const { parseArgs, handleDrykissCommand } = await import("./review-command.js");
+const { parseArgs, handleDrykissCommand, executeDrykissAutoreviewTool } =
+	await import("./review-command.js");
 
 // We need to test parseFindingsJson which is not exported.
 // Let's test it indirectly through the module or create a wrapper.
@@ -78,6 +79,84 @@ describe("parseArgs", () => {
 		expect(opts.ref).toBe("develop");
 		expect(opts.model).toBe("sonnet");
 		expect(opts.files).toEqual(["src/a.ts", "src/b.ts"]);
+	});
+});
+
+describe("drykiss_autoreview tool", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("resolves a scope and returns the stable ReviewResult from the manager", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const ctx = {
+			cwd: "/tmp/test",
+			modelRegistry: { getAvailable: vi.fn().mockReturnValue([]) },
+		} as any;
+		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
+		const manager = {
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clean: true,
+				status: "done",
+				verdict: "Approve",
+				target: { mode: "local", label: "local changes" },
+				files: ["src/a.ts"],
+				counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+				findings: [],
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+			}),
+		} as any;
+
+		const result = await executeDrykissAutoreviewTool(
+			{ mode: "local", lenses: ["security"], maxFiles: 5 },
+			ctx,
+			pi,
+			manager,
+			undefined,
+			vi.fn(),
+		);
+
+		expect(manager.runReview).toHaveBeenCalledWith(
+			ctx,
+			pi,
+			"/tmp/test",
+			expect.arrayContaining([expect.objectContaining({ path: "src/a.ts" })]),
+			expect.any(Map),
+			expect.any(Map),
+			undefined,
+			expect.objectContaining({
+				lenses: ["security"],
+				target: expect.objectContaining({ label: "local changes" }),
+			}),
+			undefined,
+		);
+		expect(result.details.result.clean).toBe(true);
+		expect(result.content[0].text).toContain("DRYKISS autoreview clean");
+	});
+
+	it("enforces maxFiles before running the manager", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+			{ path: "src/b.ts", status: "modified", language: "TypeScript" },
+		]);
+		const manager = { runReview: vi.fn() } as any;
+
+		await expect(
+			executeDrykissAutoreviewTool(
+				{ mode: "local", maxFiles: 1 },
+				{ cwd: "/tmp/test" } as any,
+				{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
+				manager,
+			),
+		).rejects.toThrow("over the maxFiles limit");
+		expect(manager.runReview).not.toHaveBeenCalled();
 	});
 });
 

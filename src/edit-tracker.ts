@@ -3,16 +3,25 @@ import type { EditedFile, TurnEdits } from "./types.js";
 
 const FILE_PATH_RE = /(?:File|file|path)[:\s]+(\S+)/;
 
-type TrackedTool = "Write" | "Edit";
-const TRACKED_TOOLS = new Set<TrackedTool>(["Write", "Edit"]);
+const TRACKED_TOOLS = new Set(["write", "edit"]);
 
-function extractFilePath(result: unknown): string | null {
+function extractFilePath(...values: unknown[]): string | null {
+	for (const value of values) {
+		const path = extractFilePathFromValue(value);
+		if (path) return path;
+	}
+	return null;
+}
+
+function extractFilePathFromValue(result: unknown): string | null {
 	if (!result) return null;
 
 	if (typeof result === "object") {
 		const obj = result as Record<string, unknown>;
 		if (typeof obj["file_path"] === "string") return obj["file_path"];
 		if (typeof obj["path"] === "string") return obj["path"];
+		if (typeof obj["filePath"] === "string") return obj["filePath"];
+		if (obj["details"]) return extractFilePathFromValue(obj["details"]);
 	}
 
 	if (typeof result === "string") {
@@ -24,7 +33,11 @@ function extractFilePath(result: unknown): string | null {
 }
 
 export interface EditTracker {
-	trackEdit(toolName: string, result: unknown): void;
+	trackEdit(
+		toolName: string,
+		result: unknown,
+		input?: unknown,
+	): EditedFile | null;
 	onTurnEnd(turnIndex: number): void;
 	getLastTurnEdits(): TurnEdits | null;
 	clearLastTurnEdits(): void;
@@ -35,16 +48,20 @@ export function createEditTracker(): EditTracker {
 	let lastTurn: TurnEdits | null = null;
 
 	return {
-		trackEdit(toolName: string, result: unknown): void {
-			if (!TRACKED_TOOLS.has(toolName as TrackedTool)) return;
+		trackEdit(
+			toolName: string,
+			result: unknown,
+			input?: unknown,
+		): EditedFile | null {
+			if (!TRACKED_TOOLS.has(toolName.toLowerCase())) return null;
 
-			const path = extractFilePath(result);
-			if (!path) return;
+			const path = extractFilePath(input, result);
+			if (!path) return null;
 
 			const language = detectLanguage(path);
-			if (current.has(path)) return;
-
-			current.set(path, { path, language });
+			const edited = { path, language };
+			if (!current.has(path)) current.set(path, edited);
+			return edited;
 		},
 
 		onTurnEnd(turnIndex: number): void {

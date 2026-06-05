@@ -20,17 +20,12 @@ import type {
 	ChangedFile,
 	Finding,
 } from "./types.js";
-import { parseFindingsArray } from "./types.js";
+import { LENS_NAMES, parseFindingsArray } from "./types.js";
 import { lenientJsonParse, sanitizeJsonString } from "./json-utils.js";
-import {
-	isPrReference,
-	isGhAvailable,
-	getGitRemote,
-	fetchPrDiff,
-	fetchPrFileContents,
-	parsePrUrl,
-	type PrInfo,
-} from "./github-pr.js";
+import { isPrReference, type PrInfo } from "./github-pr.js";
+import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
+import type { ReviewJob } from "./review-manager.js";
+import type { ReviewResult } from "./review-result.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -138,19 +133,26 @@ async function prepareReview(
 	config: Awaited<ReturnType<typeof loadConfig>>;
 } | null> {
 	const options = parseArgs(args);
-
-	// Check if this is a PR review
+	await ensureDefaultPrompts(ctx.cwd);
+	const config = await loadConfig();
 	const rawPr = options.pr as (PrInfo & { _raw: string }) | undefined;
-	if (rawPr?._raw) {
-		return preparePrReview(rawPr._raw, ctx, pi, needsProjectIndex);
-	}
+	const contextMode = options.all ? "full" : (config.contextMode ?? "full");
 
-	const files = await getChangedFiles(pi, ctx.cwd, options);
+	const scope = await resolveReviewScope(
+		pi,
+		ctx.cwd,
+		{
+			...options,
+			pr: rawPr?._raw,
+		},
+		{ contextMode, needsProjectIndex },
+	);
+	const { files, diffs, contents, projectIndex } = scope;
 
 	if (files.length === 0) {
 		const msg = options.all
 			? "No source files found. Ensure your project has files in src/, lib/, app/, or packages/."
-			: "No changed files found. Specify file paths, use --all, or make some changes first.";
+			: "No changed files found. Specify file paths, use --all, pass a PR reference, or make some changes first.";
 		ctx.ui.notify(msg, "info");
 		return null;
 	}
@@ -163,135 +165,7 @@ async function prepareReview(
 		return null;
 	}
 
-	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig();
-
-	// --all implies full context (diffs are empty for unchanged files)
-	const contextMode = options.all ? "full" : config.contextMode;
-
-	const { diffs, failedFiles } = await gatherDiffs(pi, ctx.cwd, files, options);
-	if (failedFiles.length > 0) {
-		ctx.ui.notify(
-			`[DRYKISS] Could not retrieve diffs for: ${failedFiles.join(", ")}. Review will use available diffs.`,
-			"warning",
-		);
-	}
-	const contents =
-		contextMode !== "diff" ? await gatherContents(ctx.cwd, files) : undefined;
-	const projectIndex =
-		needsProjectIndex && contextMode !== "diff"
-			? await getProjectIndex(ctx.cwd)
-			: undefined;
-
 	return { options, files, diffs, contents, projectIndex, config };
-}
-
-/**
- * Prepare a review for a GitHub PR.
- */
-async function preparePrReview(
-	prInput: string,
-	ctx: ExtensionCommandContext,
-	_pi: ExtensionAPI,
-	needsProjectIndex: boolean,
-): Promise<{
-	options: ParsedArgs;
-	files: ChangedFile[];
-	diffs: Map<string, string>;
-	contents:
-		| Map<string, { content: string; lineCount: number; truncated: boolean }>
-		| undefined;
-	projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined;
-	config: Awaited<ReturnType<typeof loadConfig>>;
-} | null> {
-	// Check if gh CLI is available
-	if (!(await isGhAvailable())) {
-		ctx.ui.notify(
-			"GitHub CLI (gh) is required for PR reviews. Install it from https://cli.github.com/",
-			"error",
-		);
-		return null;
-	}
-
-	// Resolve PR URL using git remote if needed
-	let prInfo = parsePrUrl(prInput);
-	if (!prInfo || !prInfo.owner) {
-		const remote = await getGitRemote(ctx.cwd);
-		if (remote) {
-			prInfo = parsePrUrl(prInput, remote);
-		}
-	}
-
-	if (!prInfo || !prInfo.owner) {
-		ctx.ui.notify(
-			"Could not parse PR reference. Use: /drykiss https://github.com/owner/repo/pull/123 or /drykiss owner/repo#123",
-			"error",
-		);
-		return null;
-	}
-
-	// Fetch PR diff
-	ctx.ui.notify(
-		`[DRYKISS] Fetching PR #${prInfo.number} from ${prInfo.owner}/${prInfo.repo}...`,
-		"info",
-	);
-
-	let prDiff;
-	try {
-		prDiff = await fetchPrDiff(
-			ctx.cwd,
-			prInfo.owner,
-			prInfo.repo,
-			prInfo.number,
-		);
-	} catch (err: any) {
-		ctx.ui.notify(`Failed to fetch PR: ${err.message}`, "error");
-		return null;
-	}
-
-	if (prDiff.files.length === 0) {
-		ctx.ui.notify("PR has no changed files.", "info");
-		return null;
-	}
-
-	if (prDiff.files.length > MAX_FILES) {
-		ctx.ui.notify(
-			`PR has ${prDiff.files.length} changed files. DRYKISS reviews max ${MAX_FILES} files at a time.`,
-			"warning",
-		);
-		return null;
-	}
-
-	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig();
-
-	// Fetch full file contents for context (PR reviews always use full context)
-	ctx.ui.notify(
-		`[DRYKISS] Fetching full file contents for ${prDiff.files.length} files...`,
-		"info",
-	);
-
-	const filePaths = prDiff.files.map((f) => f.path);
-	const contents = await fetchPrFileContents(
-		ctx.cwd,
-		prInfo.owner,
-		prInfo.repo,
-		prDiff.headSha,
-		filePaths,
-	);
-
-	const projectIndex = needsProjectIndex
-		? await getProjectIndex(ctx.cwd)
-		: undefined;
-
-	return {
-		options: { files: [], ref: "HEAD", staged: false, all: false },
-		files: prDiff.files,
-		diffs: prDiff.diffs,
-		contents,
-		projectIndex,
-		config,
-	};
 }
 
 export interface ParseFindingsResult {
@@ -678,21 +552,23 @@ export async function handleJobsCommand(
 
 // ── Tool parameter schema ─────────────────────────────────
 
+const LensParam = Type.Union(
+	[
+		Type.Literal("simplicity"),
+		Type.Literal("deduplication"),
+		Type.Literal("clarity"),
+		Type.Literal("resilience"),
+		Type.Literal("architecture"),
+		Type.Literal("tests"),
+		Type.Literal("security"),
+	],
+	{
+		description: "Which review lens to apply",
+	},
+);
+
 export const DrykissReviewParams = Type.Object({
-	lens: Type.Union(
-		[
-			Type.Literal("simplicity"),
-			Type.Literal("deduplication"),
-			Type.Literal("clarity"),
-			Type.Literal("resilience"),
-			Type.Literal("architecture"),
-			Type.Literal("tests"),
-			Type.Literal("security"),
-		],
-		{
-			description: "Which review lens to apply",
-		},
-	),
+	lens: LensParam,
 	files: Type.Array(Type.String(), {
 		description: "File paths to review (relative to cwd)",
 	}),
@@ -703,6 +579,206 @@ export const DrykissReviewParams = Type.Object({
 		}),
 	),
 });
+
+export const DrykissAutoreviewParams = Type.Object({
+	mode: Type.Optional(
+		Type.Union([
+			Type.Literal("auto"),
+			Type.Literal("local"),
+			Type.Literal("staged"),
+			Type.Literal("branch"),
+			Type.Literal("commit"),
+			Type.Literal("pr"),
+			Type.Literal("full"),
+			Type.Literal("files"),
+		]),
+	),
+	files: Type.Optional(
+		Type.Array(Type.String(), {
+			description: "Specific file paths to review (relative to cwd)",
+		}),
+	),
+	base: Type.Optional(
+		Type.String({
+			description: "Base ref for branch reviews, e.g. origin/main",
+		}),
+	),
+	commit: Type.Optional(
+		Type.String({ description: "Commit ref for commit reviews" }),
+	),
+	pr: Type.Optional(
+		Type.String({ description: "GitHub PR URL, owner/repo#123, or PR number" }),
+	),
+	lenses: Type.Optional(
+		Type.Union([
+			Type.Literal("all"),
+			Type.Array(LensParam, { description: "Subset of DRYKISS lenses to run" }),
+		]),
+	),
+	model: Type.Optional(
+		Type.String({
+			description:
+				"Model hint, e.g. 'haiku', 'sonnet', 'anthropic/claude-sonnet-4-5'",
+		}),
+	),
+	contextMode: Type.Optional(
+		Type.Union([Type.Literal("diff"), Type.Literal("full")]),
+	),
+	maxFiles: Type.Optional(
+		Type.Number({
+			description: "Maximum files to review. Defaults to 20.",
+			minimum: 1,
+			maximum: 100,
+		}),
+	),
+});
+
+export async function executeDrykissAutoreviewTool(
+	params: {
+		mode?: ReviewMode;
+		files?: string[];
+		base?: string;
+		commit?: string;
+		pr?: string;
+		lenses?: "all" | Exclude<ReviewLens, "all">[];
+		model?: string;
+		contextMode?: "diff" | "full";
+		maxFiles?: number;
+	},
+	ctx: ExtensionContext,
+	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
+	signal?: AbortSignal,
+	onUpdate?: (result: {
+		content: Array<{ type: "text"; text: string }>;
+	}) => void,
+): Promise<{
+	content: Array<{ type: "text"; text: string }>;
+	details: { result: ReviewResult };
+}> {
+	await ensureDefaultPrompts(ctx.cwd);
+	const config = await loadConfig();
+	const contextMode = params.contextMode ?? config.contextMode ?? "full";
+	const lenses = normalizeAutoreviewLenses(params.lenses);
+	const scope = await resolveReviewScope(
+		pi,
+		ctx.cwd,
+		{
+			mode: params.mode,
+			files: params.files,
+			base: params.base,
+			commit: params.commit,
+			pr: params.pr,
+		},
+		{
+			contextMode,
+			needsProjectIndex:
+				lenses.includes("deduplication") || lenses.includes("architecture"),
+		},
+	);
+
+	const maxFiles = params.maxFiles ?? MAX_FILES;
+	if (scope.files.length === 0) {
+		throw new Error("No files found for DRYKISS autoreview.");
+	}
+	if (scope.files.length > maxFiles) {
+		throw new Error(
+			`DRYKISS autoreview scope has ${scope.files.length} files, over the maxFiles limit (${maxFiles}). Narrow the scope or raise maxFiles.`,
+		);
+	}
+
+	onUpdate?.({
+		content: [
+			{
+				type: "text",
+				text: `Starting DRYKISS autoreview for ${scope.label} (${scope.files.length} file(s), ${lenses.length} lens(es))...`,
+			},
+		],
+	});
+
+	const result = await manager.runReview(
+		ctx,
+		pi,
+		ctx.cwd,
+		scope.files,
+		scope.diffs,
+		scope.contents,
+		scope.projectIndex,
+		{
+			model: params.model,
+			lenses,
+			target: {
+				mode: scope.mode,
+				label: scope.label,
+				metadata: scope.metadata,
+			},
+			onProgress: onUpdate
+				? (job) =>
+						onUpdate({
+							content: [{ type: "text", text: formatReviewProgress(job) }],
+						})
+				: undefined,
+		},
+		signal,
+	);
+
+	return {
+		content: [{ type: "text", text: formatReviewResultForTool(result) }],
+		details: { result },
+	};
+}
+
+function normalizeAutoreviewLenses(
+	value: "all" | Exclude<ReviewLens, "all">[] | undefined,
+): Exclude<ReviewLens, "all">[] {
+	if (!value || value === "all") return [...LENS_NAMES];
+	return value.length > 0 ? value : [...LENS_NAMES];
+}
+
+function formatReviewProgress(job: ReviewJob): string {
+	const done = job.lenses.filter((lens) => {
+		const state = job.states.get(lens);
+		return state?.status === "done" || state?.status === "error";
+	}).length;
+	const running = job.lenses.filter(
+		(lens) => job.states.get(lens)?.status === "running",
+	);
+	const errored = job.lenses.filter(
+		(lens) => job.states.get(lens)?.status === "error",
+	).length;
+	const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+	const synthesis =
+		job.synthesisStatus === "running"
+			? " · synthesis running"
+			: job.synthesisStatus === "done"
+				? " · synthesis done"
+				: job.synthesisStatus === "error"
+					? " · synthesis error"
+					: "";
+	const runningText = running.length ? ` · running: ${running.join(", ")}` : "";
+	const errorText = errored ? ` · ${errored} error(s)` : "";
+	return `DRYKISS autoreview progress: ${done}/${job.lenses.length} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
+}
+
+function formatReviewResultForTool(result: ReviewResult): string {
+	const lines = [
+		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,
+		`target: ${result.target?.label ?? "unknown"}`,
+		`verdict: ${result.verdict}`,
+		`findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit)`,
+	];
+	if (result.reportPath) lines.push(`report: ${result.reportPath}`);
+	if (result.errors.length > 0)
+		lines.push(`errors: ${result.errors.join("; ")}`);
+	if (result.validationIssues.length > 0) {
+		lines.push(`validation issues: ${result.validationIssues.length}`);
+	}
+	lines.push("", result.summary);
+	if (result.findings.length > 0) {
+		lines.push("", JSON.stringify(result.findings, null, 2));
+	}
+	return lines.join("\n");
+}
 
 export async function executeDrykissReviewTool(
 	params: {

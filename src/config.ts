@@ -2,6 +2,35 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getGlobalBaseDir, CONFIG_FILE } from "./constants.js";
 
+export interface DrykissAutoreviewConfig {
+	/** Opt-in automatic review at agent_end after code edits. Disabled by default. */
+	enabled?: boolean;
+	/** Scope mode to review when agent_end fires. Defaults to local dirty diff. */
+	mode?: "local" | "staged" | "branch" | "full" | "files";
+	/** Base ref for branch-mode autoreviews. */
+	base?: string;
+	/** Lens subset to run. Defaults to all lenses. */
+	lenses?: Array<
+		| "simplicity"
+		| "deduplication"
+		| "clarity"
+		| "resilience"
+		| "architecture"
+		| "tests"
+		| "security"
+	>;
+	/** Maximum files allowed for automatic review. Defaults to 20. */
+	maxFiles?: number;
+	/** Override context mode for automatic reviews. */
+	contextMode?: "diff" | "full";
+	/** Optional model hint for automatic reviews. */
+	model?: string;
+	/** Ask for confirmation before running automatic reviews in UI sessions. Defaults to true. */
+	confirmBeforeRun?: boolean;
+	/** Cooldown for identical automatic review scopes. Defaults to 60000ms. */
+	cooldownMs?: number;
+}
+
 export interface DrykissConfig {
 	/** Default model for all lenses when not specified */
 	defaultModel?: string;
@@ -51,6 +80,8 @@ export interface DrykissConfig {
 	 * If unset (or no scoped match is found), any free model is used.
 	 */
 	modelScope?: string | string[];
+	/** Automatic closeout review configuration. */
+	autoreview?: DrykissAutoreviewConfig;
 }
 
 export function getConfigPath(): string {

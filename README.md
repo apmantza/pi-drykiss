@@ -64,6 +64,9 @@ Each lens focuses on one thing:
 /drykiss-config context-mode diff         # review diffs only (faster)
 /drykiss-config autoroute on              # auto-pick free models
 /drykiss-config model-scope haiku         # prefer free models matching "haiku"
+/drykiss-config autoreview on             # opt in to automatic agent_end reviews after edits
+/drykiss-config autoreview-mode local     # local|staged|branch|full|files
+/drykiss-config autoreview-confirm off    # skip confirmation for automatic reviews
 /drykiss-config reset-prompts             # regenerate default prompts
 ```
 

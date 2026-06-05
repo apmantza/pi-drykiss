@@ -256,6 +256,42 @@ describe("handleConfigCommand", () => {
 		expect(saveConfig).not.toHaveBeenCalled();
 	});
 
+	it("enables agent_end autoreview", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({ autoreview: { enabled: false } });
+		const ctx = mockCtx();
+		await handleConfigCommand("autoreview on", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				autoreview: expect.objectContaining({ enabled: true }),
+			}),
+		);
+	});
+
+	it("sets autoreview mode and base", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({});
+		const ctx = mockCtx();
+		await handleConfigCommand("autoreview-mode branch origin/main", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				autoreview: expect.objectContaining({
+					mode: "branch",
+					base: "origin/main",
+				}),
+			}),
+		);
+	});
+
+	it("disables autoreview confirmation", async () => {
+		vi.mocked(loadConfig).mockResolvedValue({});
+		const ctx = mockCtx();
+		await handleConfigCommand("autoreview-confirm off", ctx);
+		expect(saveConfig).toHaveBeenCalledWith(
+			expect.objectContaining({
+				autoreview: expect.objectContaining({ confirmBeforeRun: false }),
+			}),
+		);
+	});
+
 	it("shows autoroute and model-scope in the show output", async () => {
 		vi.mocked(loadConfig).mockResolvedValue({
 			autoroute: true,

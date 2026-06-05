@@ -277,10 +277,10 @@ describe("getFileDiff", () => {
 });
 
 describe("getFileContent", () => {
-beforeEach(() => {
-vi.resetAllMocks();
-vi.mocked(lstat).mockResolvedValue({ isFile: () => true } as any);
-});
+	beforeEach(() => {
+		vi.resetAllMocks();
+		vi.mocked(lstat).mockResolvedValue({ isFile: () => true } as any);
+	});
 
 	it("returns full content for small files", async () => {
 		vi.mocked(readFile).mockResolvedValue("line1\nline2\nline3");

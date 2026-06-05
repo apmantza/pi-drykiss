@@ -13,6 +13,19 @@ import { LENS_NAMES } from "./types.js";
  * Format a `modelScope` value for display. Handles the legacy single-hint
  * form, the new list form, and an unset value.
  */
+function formatAutoreview(
+	config: Awaited<ReturnType<typeof loadConfig>>,
+): string[] {
+	const auto = config.autoreview;
+	return [
+		`**Autoreview at agent_end:** ${auto?.enabled === true ? "enabled" : "disabled"}`,
+		`**Autoreview mode:** ${auto?.mode ?? "local"}${auto?.base ? ` (base: ${auto.base})` : ""}`,
+		`**Autoreview confirm:** ${auto?.confirmBeforeRun === false ? "disabled" : "enabled"}`,
+		`**Autoreview max files:** ${auto?.maxFiles ?? 20}`,
+		`**Autoreview cooldown:** ${auto?.cooldownMs ?? 60000}ms`,
+	];
+}
+
 function formatModelScope(scope: string | string[] | undefined): string {
 	if (scope === undefined) return "(any free model)";
 	if (Array.isArray(scope)) {
@@ -82,6 +95,7 @@ export async function handleConfigCommand(
 			`**Context mode:** ${config.contextMode ?? "full"}`,
 			`**Autoroute (free models):** ${config.autoroute === true ? "enabled" : "disabled"}`,
 			`**Model scope:** ${formatModelScope(config.modelScope)}`,
+			...formatAutoreview(config),
 			"",
 			"Config file: `~/.pi/drykiss/config.json`",
 			"Prompts dir: `~/.pi/drykiss/prompts/`",
@@ -94,6 +108,9 @@ export async function handleConfigCommand(
 			"  /drykiss-config context-mode <diff|full>",
 			"  /drykiss-config autoroute <on|off>",
 			"  /drykiss-config model-scope <scope|clear>",
+			"  /drykiss-config autoreview <on|off>",
+			"  /drykiss-config autoreview-mode <local|staged|branch|full|files> [base]",
+			"  /drykiss-config autoreview-confirm <on|off>",
 			"  /drykiss-config reset-prompts",
 		];
 		ctx.ui.notify(lines.join("\n"), "info");
@@ -234,6 +251,90 @@ export async function handleConfigCommand(
 			"Auto-routing to free models enabled",
 			"Auto-routing to free models disabled",
 		);
+		return;
+	}
+
+	if (subcommand === "autoreview") {
+		const val = tokens[1]?.toLowerCase();
+		try {
+			const config = await loadConfig();
+			config.autoreview = { ...config.autoreview };
+			if (val === "on" || val === "true") {
+				config.autoreview.enabled = true;
+			} else if (val === "off" || val === "false") {
+				config.autoreview.enabled = false;
+			} else {
+				ctx.ui.notify("Usage: /drykiss-config autoreview <on|off>", "warning");
+				return;
+			}
+			await saveConfig(config);
+			ctx.ui.notify(
+				`Autoreview at agent_end ${config.autoreview.enabled ? "enabled" : "disabled"}.`,
+				"info",
+			);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to update autoreview: ${msg}`, "error");
+		}
+		return;
+	}
+
+	if (subcommand === "autoreview-confirm") {
+		const val = tokens[1]?.toLowerCase();
+		try {
+			const config = await loadConfig();
+			config.autoreview = { ...config.autoreview };
+			if (val === "on" || val === "true") {
+				config.autoreview.confirmBeforeRun = true;
+			} else if (val === "off" || val === "false") {
+				config.autoreview.confirmBeforeRun = false;
+			} else {
+				ctx.ui.notify(
+					"Usage: /drykiss-config autoreview-confirm <on|off>",
+					"warning",
+				);
+				return;
+			}
+			await saveConfig(config);
+			ctx.ui.notify(
+				`Autoreview confirmation ${config.autoreview.confirmBeforeRun === false ? "disabled" : "enabled"}.`,
+				"info",
+			);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(
+				`Failed to update autoreview confirmation: ${msg}`,
+				"error",
+			);
+		}
+		return;
+	}
+
+	if (subcommand === "autoreview-mode") {
+		try {
+			const mode = tokens[1]?.toLowerCase();
+			if (!["local", "staged", "branch", "full", "files"].includes(mode)) {
+				ctx.ui.notify(
+					"Usage: /drykiss-config autoreview-mode <local|staged|branch|full|files> [base]",
+					"warning",
+				);
+				return;
+			}
+			const config = await loadConfig();
+			config.autoreview = {
+				...config.autoreview,
+				mode: mode as "local" | "staged" | "branch" | "full" | "files",
+			};
+			if (tokens[2]) config.autoreview.base = tokens[2];
+			await saveConfig(config);
+			ctx.ui.notify(
+				`Autoreview mode set to ${config.autoreview.mode}${config.autoreview.base ? ` (base: ${config.autoreview.base})` : ""}.`,
+				"info",
+			);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set autoreview mode: ${msg}`, "error");
+		}
 		return;
 	}
 

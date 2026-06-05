@@ -107,8 +107,14 @@ describe("buildReviewPrompts", () => {
 		);
 		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("tests");
-		expect(prompts[0].systemPrompt).toContain("Test Coverage Auditor");
+		expect(prompts[0].systemPrompt).toContain(
+			"Test Coverage & Test Quality Auditor",
+		);
 		expect(prompts[0].systemPrompt).toContain("Given-When-Then");
+		expect(prompts[0].systemPrompt).toContain(
+			"Weak tests are false confidence",
+		);
+		expect(prompts[0].systemPrompt).toContain("Over-mocking");
 	});
 
 	it("returns single prompt for security lens", async () => {

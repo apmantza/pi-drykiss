@@ -157,6 +157,80 @@ describe("ReviewManager", () => {
 		expect(manager.getJob("nonexistent")).toBeUndefined();
 	});
 
+	it("runReview returns a stable ReviewResult", async () => {
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		vi.mocked(runLensSubagent).mockImplementation(
+			async (...args: unknown[]) => {
+				const lens = args[5] as string;
+				return {
+					lens,
+					text:
+						lens === "synthesis"
+							? '{"summary":"Clean.","verdict":"Approve","findings":[]}'
+							: "[]",
+					modelName: "mock-model",
+					durationMs: 1,
+					session: { dispose: vi.fn() },
+				} as any;
+			},
+		);
+		const ctx = makeMinimalCtx();
+		const pi = makeMinimalPi();
+		const files = [
+			{ path: "test.ts", status: "modified" as const, language: "TypeScript" },
+		];
+		const diffs = new Map([["test.ts", "diff"]]);
+
+		const onProgress = vi.fn();
+		const result = await manager.runReview(
+			ctx,
+			pi,
+			"/tmp/test",
+			files,
+			diffs,
+			undefined,
+			undefined,
+			{
+				lenses: ["simplicity"],
+				target: { mode: "local", label: "local changes" },
+				onProgress,
+				progressIntervalMs: 0,
+			},
+		);
+
+		expect(result.clean).toBe(true);
+		expect(onProgress).toHaveBeenCalled();
+		expect(result.target?.label).toBe("local changes");
+		expect(result.counts.total).toBe(0);
+	});
+
+	it("waitForReview resolves after a job completes", async () => {
+		const ctx = makeMinimalCtx();
+		const pi = makeMinimalPi();
+		const files = [
+			{ path: "test.ts", status: "modified" as const, language: "TypeScript" },
+		];
+		const diffs = new Map([["test.ts", "diff"]]);
+
+		const jobId = await manager.startReview(
+			ctx,
+			pi,
+			"/tmp/test",
+			files,
+			diffs,
+			undefined,
+			undefined,
+			{
+				lenses: ["simplicity"],
+			},
+		);
+
+		const job = await manager.waitForReview(jobId);
+		expect(job.id).toBe(jobId);
+		expect(["done", "error"]).toContain(job.overallStatus);
+		expect(job.completedAt).toBeDefined();
+	});
+
 	it("abort sets overallStatus to error and returns true", async () => {
 		const ctx = makeMinimalCtx();
 		const pi = makeMinimalPi();

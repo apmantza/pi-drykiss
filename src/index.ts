@@ -13,7 +13,9 @@ import {
 	handleSecurityCommand,
 	handleJobsCommand,
 	executeDrykissReviewTool,
+	executeDrykissAutoreviewTool,
 	DrykissReviewParams,
+	DrykissAutoreviewParams,
 	COMMAND_NAME,
 	KISS_COMMAND_NAME,
 	DRY_COMMAND_NAME,
@@ -23,7 +25,10 @@ import {
 	SECURITY_COMMAND_NAME,
 } from "./review-command.js";
 import { handleConfigCommand } from "./config-command.js";
+import { loadConfig } from "./config.js";
+import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
+import { buildAutoInjectBlock } from "./prompt-builder.js";
 import { ReviewManager } from "./review-manager.js";
 import { ReviewProgressWidget } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
@@ -39,12 +44,123 @@ export default function (pi: ExtensionAPI): void {
 		},
 	);
 	manager.startCleanup();
+	const editTracker = createEditTracker();
+	const autoreviewEditedFiles = new Map<
+		string,
+		{ path: string; language: string | null }
+	>();
+	let autoreviewRunning = false;
+	let lastAutoreviewSignature = "";
+	let lastAutoreviewAt = 0;
 
 	// Grab UI context from tool executions so widget renders even when no
 	// command is active (matches pi-subagents pattern).
 	pi.on("tool_execution_start", (_event: any, ctx: any) => {
 		widget.attach(ctx.ui);
 		widget.setJobs(manager.listJobs());
+	});
+
+	pi.on("agent_start", () => {
+		autoreviewEditedFiles.clear();
+	});
+
+	pi.on("tool_execution_end", (event: any) => {
+		if (event.isError) return;
+		const edited = editTracker.trackEdit(
+			event.toolName,
+			event.result,
+			event.args ?? event.input,
+		);
+		if (edited) autoreviewEditedFiles.set(edited.path, edited);
+	});
+
+	pi.on("turn_end", (event: any) => {
+		editTracker.onTurnEnd(event.turnIndex ?? 0);
+	});
+
+	pi.on("before_agent_start", (event: any) => {
+		const edits = editTracker.getLastTurnEdits();
+		if (!edits) return undefined;
+		editTracker.clearLastTurnEdits();
+		return { systemPrompt: event.systemPrompt + buildAutoInjectBlock(edits) };
+	});
+
+	pi.on("agent_end", async (_event: any, ctx: any) => {
+		if (autoreviewRunning || autoreviewEditedFiles.size === 0) return;
+
+		try {
+			const config = await loadConfig();
+			const auto = config.autoreview;
+			if (auto?.enabled !== true) return;
+
+			const editedFiles = [...autoreviewEditedFiles.values()];
+			const signature = [
+				auto.mode ?? "local",
+				auto.base ?? "",
+				...editedFiles.map((f) => f.path).sort(),
+			].join("|");
+			const cooldownMs = auto.cooldownMs ?? 60_000;
+			const now = Date.now();
+			autoreviewEditedFiles.clear();
+			if (
+				cooldownMs > 0 &&
+				signature === lastAutoreviewSignature &&
+				now - lastAutoreviewAt < cooldownMs
+			) {
+				ctx.ui.notify(
+					"Skipping duplicate DRYKISS autoreview within cooldown.",
+					"info",
+				);
+				return;
+			}
+			if (auto.confirmBeforeRun !== false && ctx.hasUI) {
+				const ok = await ctx.ui.confirm(
+					"DRYKISS Autoreview",
+					`Run automatic DRYKISS review after edits?\n\nEdited files: ${editedFiles.map((f) => f.path).join(", ")}`,
+				);
+				if (!ok) return;
+			}
+
+			autoreviewRunning = true;
+			lastAutoreviewSignature = signature;
+			lastAutoreviewAt = now;
+			const result = await executeDrykissAutoreviewTool(
+				{
+					mode: auto.mode ?? "local",
+					files:
+						auto.mode === "files" ? editedFiles.map((f) => f.path) : undefined,
+					base: auto.base,
+					lenses: auto.lenses,
+					model: auto.model,
+					contextMode: auto.contextMode,
+					maxFiles: auto.maxFiles,
+				},
+				ctx,
+				pi,
+				manager,
+				undefined,
+				(update) =>
+					ctx.ui.notify(
+						update.content[0]?.text ?? "Running DRYKISS autoreview...",
+						"info",
+					),
+			);
+			const review = result.details.result;
+			pi.sendMessage(
+				{
+					customType: "drykiss-autoreview-complete",
+					content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
+					display: true,
+					details: review,
+				},
+				{ deliverAs: "followUp", triggerTurn: !review.clean },
+			);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`DRYKISS autoreview failed: ${msg}`, "error");
+		} finally {
+			autoreviewRunning = false;
+		}
 	});
 
 	// Also grab UI context on session start so commands can show the widget
@@ -278,16 +394,78 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
+	// ── drykiss_autoreview tool — Programmatic multi-lens review ─────
+	pi.registerTool({
+		name: "drykiss_autoreview",
+		label: "DRYKISS Autoreview",
+		description:
+			"Run a blocking multi-lens DRYKISS review over a git/PR/codebase target. Supports local, staged, branch, commit, PR, full, and explicit-file scopes. Returns a stable structured ReviewResult.",
+		promptSnippet:
+			"Run a multi-lens DRYKISS autoreview over a git/PR/codebase target",
+		promptGuidelines: [
+			"Use drykiss_autoreview for closeout code reviews, git diff reviews, PR reviews, full-codebase scans, or when the user asks for autoreview.",
+			"Prefer mode 'local' for uncommitted changes, 'staged' for staged changes, 'branch' with base for branch reviews, 'commit' with commit for single commits, 'pr' with pr for GitHub PRs, and 'files' with files for explicit paths.",
+			"Treat drykiss_autoreview findings as advisory: verify real code before fixing, reject speculative findings, and rerun focused tests after any review-triggered fix.",
+		],
+		parameters: DrykissAutoreviewParams,
+
+		async execute(
+			_toolCallId: string,
+			params: Record<string, unknown>,
+			signal: AbortSignal,
+			onUpdate: any,
+			ctx: any,
+		) {
+			return executeDrykissAutoreviewTool(
+				params as any,
+				ctx,
+				pi,
+				manager,
+				signal,
+				onUpdate,
+			);
+		},
+
+		renderCall(args: any, theme: any) {
+			const mode =
+				args.mode ?? (args.pr ? "pr" : args.files ? "files" : "local");
+			const target = args.pr ?? args.base ?? args.commit ?? "";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("drykiss_autoreview ")) +
+					theme.fg("accent", mode) +
+					theme.fg("dim", target ? ` ${target}` : ""),
+				0,
+				0,
+			);
+		},
+
+		renderResult(result: any, _options: any, theme: any) {
+			const review = (result.details as any)?.result;
+			const clean = review?.clean === true;
+			const counts = review?.counts ?? {};
+			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
+			return new Text(
+				`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
+					theme.fg(
+						"dim",
+						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}`,
+					),
+				0,
+				0,
+			);
+		},
+	});
+
 	// ── drykiss_review tool — Programmatic lens review ─────
 	pi.registerTool({
 		name: "drykiss_review",
 		label: "DRYKISS Review",
 		description:
-			"Review code changes through a specific lens (simplicity, deduplication, or clarity). Returns structured JSON findings. Use when the user asks for a focused code review on specific files.",
-		promptSnippet: "Run a KISS, DRY, or clarity lens review on code changes",
+			"Review code changes through a specific DRYKISS lens. Returns structured JSON findings. Use for focused reviews on specific files.",
+		promptSnippet: "Run a focused DRYKISS lens review on code changes",
 		promptGuidelines: [
-			"Use drykiss_review when the user asks for a code quality review, simplicity audit, or duplication check.",
-			"Pass the lens ('simplicity', 'deduplication', 'clarity') and file paths to review.",
+			"Use drykiss_review when the user asks for a focused code quality, simplicity, duplication, resilience, architecture, tests, or security review on specific files.",
+			"Pass one lens ('simplicity', 'deduplication', 'clarity', 'resilience', 'architecture', 'tests', or 'security') and the file paths to review.",
 			"Optionally pass a model hint like 'haiku' for faster/cheaper reviews or 'sonnet' for deeper analysis.",
 		],
 		parameters: DrykissReviewParams,
