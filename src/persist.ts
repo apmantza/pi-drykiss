@@ -22,6 +22,7 @@ export interface PersistedReview {
 	readonly mediumCount: number;
 	readonly lowCount: number;
 	readonly nitCount: number;
+	readonly suppressedCount: number;
 	readonly verdict: string;
 }
 
@@ -33,6 +34,10 @@ export async function saveReview(
 	await mkdir(dir, { recursive: true });
 
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const suppressedCount = synthesis.findings.filter(
+		(f: any) => f._suppressed === true,
+	).length;
+
 	const review: PersistedReview = {
 		timestamp,
 		files,
@@ -43,6 +48,7 @@ export async function saveReview(
 		mediumCount: synthesis.mediumCount,
 		lowCount: synthesis.lowCount,
 		nitCount: synthesis.nitCount,
+		suppressedCount,
 		verdict: synthesis.verdict,
 	};
 
@@ -131,7 +137,10 @@ export function formatReviewForDisplay(review: PersistedReview): string {
 	md += `**Files:** ${review.files.join(", ")}\n\n`;
 	md += `## Summary\n`;
 	md += `- Total findings: ${review.findings.length}`;
-	md += ` (${review.criticalCount} critical, ${review.highCount} high, ${review.mediumCount} medium, ${review.lowCount} low, ${review.nitCount} nit)\n`;
+	md += ` (${review.criticalCount} critical, ${review.highCount} high, ${review.mediumCount} medium, ${review.lowCount} low, ${review.nitCount} nit`;
+	if (review.suppressedCount > 0) md += `, ${review.suppressedCount} suppressed`;
+	md += `)
+`;
 	md += `- ${review.summary}\n`;
 	md += `- **Verdict:** ${review.verdict}\n\n`;
 

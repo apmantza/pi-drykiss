@@ -805,11 +805,15 @@ function formatReviewProgress(job: ReviewJob): string {
 }
 
 function formatReviewResultForTool(result: ReviewResult): string {
+	const suppressedStr = result.counts.suppressed > 0
+		? `, ${result.counts.suppressed} suppressed`
+		: "";
+	const findingsLine = `findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit${suppressedStr})`;
 	const lines = [
 		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,
 		`target: ${result.target?.label ?? "unknown"}`,
 		`verdict: ${result.verdict}`,
-		`findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit)`,
+		findingsLine,
 	];
 	if (result.reportPath) lines.push(`report: ${result.reportPath}`);
 	if (result.errors.length > 0)

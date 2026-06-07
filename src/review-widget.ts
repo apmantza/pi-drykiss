@@ -96,8 +96,11 @@ export function formatFinding(
 		? ` (${finding.file}:${finding.line})`
 		: ` (${finding.file})`;
 	const heading = `${icon} ${tag} ${category} — ${source}${location}`;
+	const suppressedTag = finding._suppressed
+		? ` ${theme.fg("dim", "[suppressed]")}`
+		: "";
 
-	const lines: string[] = [heading];
+	const lines: string[] = [`${heading}${suppressedTag}`];
 	const indent = "   ";
 	if (finding.detail) {
 		lines.push(`${indent}Symptom: ${finding.detail}`);

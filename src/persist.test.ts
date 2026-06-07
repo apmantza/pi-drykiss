@@ -246,6 +246,7 @@ describe("formatReviewForDisplay", () => {
 			mediumCount: 1,
 			lowCount: 1,
 			nitCount: 1,
+			suppressedCount: 0,
 		};
 
 		const md = formatReviewForDisplay(review);
@@ -276,6 +277,7 @@ describe("formatReviewForDisplay", () => {
 			mediumCount: 0,
 			lowCount: 0,
 			nitCount: 0,
+			suppressedCount: 0,
 		};
 
 		const md = formatReviewForDisplay(review);

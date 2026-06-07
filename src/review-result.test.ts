@@ -4,6 +4,9 @@ import {
 	validateFindings,
 	applySeverityOverrides,
 	filterIgnored,
+	applySuppressions,
+	isSuppressionExpired,
+	getExpiredSuppressionIds,
 } from "./review-result.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding } from "./types.js";
@@ -329,5 +332,106 @@ describe("filterIgnored — Phase 2", () => {
 		const result = filterIgnored([f], ["**/legacy/**"]);
 		expect(result.findings).toHaveLength(1);
 		expect(result.dropped).toBe(0);
+	});
+
+	describe("applySuppressions", () => {
+		it("returns all active when no suppressions", () => {
+			const f = finding({ file: "src/a.ts", riskCode: "K1" });
+			const result = applySuppressions([f], []);
+			expect(result.active).toHaveLength(1);
+			expect(result.suppressed).toHaveLength(0);
+			expect(result.active[0]._suppressed).toBeUndefined();
+		});
+
+		it("suppresses finding matching riskCode and glob", () => {
+			const findings = [
+				finding({ file: "src/legacy/foo.ts", severity: "high", riskCode: "K1" }),
+				finding({ file: "src/modern/bar.ts", severity: "high", riskCode: "K1" }),
+			];
+			const result = applySuppressions(findings, [
+				{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
+			]);
+			expect(result.active).toHaveLength(1);
+			expect(result.active[0].file).toBe("src/modern/bar.ts");
+			expect(result.suppressed).toHaveLength(1);
+			expect(result.suppressed[0].file).toBe("src/legacy/foo.ts");
+			expect(result.suppressed[0].severity).toBe("nit");
+			expect(result.suppressed[0]._suppressed).toBe(true);
+			expect(result.suppressed[0]._suppressionRef).toBe("s1");
+		});
+
+		it("suppresses any risk code with wildcard", () => {
+			const findings = [
+				finding({ file: "src/foo.ts", severity: "high", riskCode: "K1" }),
+				finding({ file: "src/bar.ts", severity: "high", riskCode: "D1" }),
+			];
+			const result = applySuppressions(findings, [
+				{ id: "s1", riskCode: "*", pattern: "src/*.ts" },
+			]);
+			expect(result.active).toHaveLength(0);
+			expect(result.suppressed).toHaveLength(2);
+		});
+
+		it("does not suppress non-matching riskCode", () => {
+			const f = finding({ file: "src/foo.ts", riskCode: "D1" });
+			const result = applySuppressions([f], [
+				{ id: "s1", riskCode: "K1", pattern: "src/foo.ts" },
+			]);
+			expect(result.active).toHaveLength(1);
+			expect(result.suppressed).toHaveLength(0);
+		});
+
+		it("does not suppress non-matching file pattern", () => {
+			const f = finding({ file: "src/other.ts", riskCode: "K1" });
+			const result = applySuppressions([f], [
+				{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
+			]);
+			expect(result.active).toHaveLength(1);
+			expect(result.suppressed).toHaveLength(0);
+		});
+	});
+
+	describe("isSuppressionExpired", () => {
+		it("returns false when no expiresAt", () => {
+			expect(isSuppressionExpired({})).toBe(false);
+		});
+
+		it("returns false when expiry is in the future", () => {
+			const future = new Date();
+			future.setFullYear(future.getFullYear() + 1);
+			expect(isSuppressionExpired({ expiresAt: future.toISOString() })).toBe(
+				false,
+			);
+		});
+
+		it("returns true when expiry is in the past", () => {
+			const past = new Date("2000-01-01");
+			expect(isSuppressionExpired({ expiresAt: past.toISOString() })).toBe(
+				true,
+			);
+		});
+
+		it("handles invalid date gracefully", () => {
+			expect(isSuppressionExpired({ expiresAt: "not-a-date" })).toBe(false);
+		});
+	});
+
+	describe("getExpiredSuppressionIds", () => {
+		it("returns empty when no suppressions expired", () => {
+			const result = getExpiredSuppressionIds([
+				{ id: "s1" },
+				{ id: "s2", expiresAt: "2099-01-01" },
+			]);
+			expect(result).toEqual([]);
+		});
+
+		it("returns ids of expired suppressions", () => {
+			const result = getExpiredSuppressionIds([
+				{ id: "s1", expiresAt: "2000-01-01" },
+				{ id: "s2" },
+				{ id: "s3", expiresAt: "2099-01-01" },
+			]);
+			expect(result).toEqual(["s1"]);
+		});
 	});
 });
