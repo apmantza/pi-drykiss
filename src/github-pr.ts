@@ -15,8 +15,6 @@ function safeRepoRef(owner: string, repo: string): string {
 	return `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 }
 
-
-
 const execFileAsync = promisify(execFile);
 
 export interface PrInfo {
@@ -66,7 +64,9 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 	}
 
 	// Shorthand: owner/repo#123
-	const shorthandMatch = trimmed.match(/^([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)#(\d+)$/);
+	const shorthandMatch = trimmed.match(
+		/^([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)#(\d+)$/,
+	);
 	if (shorthandMatch) {
 		return {
 			owner: shorthandMatch[1],

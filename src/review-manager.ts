@@ -13,6 +13,7 @@ import {
 } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import { saveReview, saveSessionLog } from "./persist.js";
+import type { SubagentResult } from "./subagent-runner.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
@@ -100,6 +101,43 @@ export class ReviewManager {
 
 	/** Locks to prevent concurrent synthesis runs for the same job. */
 	private synthesisLocks = new Set<string>();
+	/**
+	 * When a subagent fails with a model error (quota/auth/5xx), prompt the user to
+	 * select a different model and retry. If autorouting is configured, skip the prompt
+	 * and auto-select a free model instead.
+	 *
+	 * Returns the retry result on success (or on second failure), or null if the user
+	 * cancelled model selection (caller should record the original error).
+	 */
+	private async retryOnModelError(
+		ctx: ExtensionContext,
+		failedModel: Model<Api>,
+		failedSession: AgentSession | undefined,
+		taskLabel: string,
+		runFn: (model: Model<Api>) => Promise<SubagentResult>,
+	): Promise<SubagentResult | null> {
+		const selected = await selectModelOnError(
+			ctx,
+			{ provider: failedModel.provider, id: failedModel.id },
+			"Model Error",
+			`Model "${failedModel.name}" failed.\n\nChoose a different model for ${taskLabel}:`,
+		);
+		if (!selected) return null; // user cancelled
+
+		ctx.ui.notify(`Switching to ${selected.name} for ${taskLabel}...`, "info");
+		const retryResult = await runFn(selected);
+
+		// Dispose the failed session (caller updates its own session ref)
+		if (failedSession && failedSession !== retryResult.session) {
+			try {
+				failedSession.dispose();
+			} catch {
+				/* ignore */
+			}
+		}
+
+		return retryResult;
+	}
 
 	constructor(onUpdate?: OnReviewUpdate, onComplete?: OnReviewComplete) {
 		this.onUpdate = onUpdate;
@@ -305,46 +343,27 @@ export class ReviewManager {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.
-				const selected = await selectModelOnError(
+				const retryResult = await this.retryOnModelError(
 					ctx,
-					{ provider: task.model.provider, id: task.model.id },
-					"Model Error",
-					`Model "${task.model.name}" failed: ${result.errorMessage}\n\nChoose a different model to retry:`,
+					task.model,
+					state.session,
+					task.lens,
+					async (m) =>
+						runLensSubagent(
+							ctx,
+							cwd,
+							m,
+							task.systemPrompt,
+							task.userPrompt,
+							task.lens,
+							task.signal,
+							() => {
+								state.streamingText = "streaming...";
+								task.onStreamUpdate();
+							},
+						),
 				);
-				if (selected) {
-					// Retry with the selected model
-					state.status = "running";
-					state.streamingText = "Retrying...";
-					try {
-						this.onUpdate?.(job);
-					} catch {
-						/* ignore */
-					}
-					ctx.ui.notify(
-						`Switching to ${selected.name} and retrying ${task.lens}...`,
-						"info",
-					);
-					const retryResult = await runLensSubagent(
-						ctx,
-						cwd,
-						selected,
-						task.systemPrompt,
-						task.userPrompt,
-						task.lens,
-						task.signal,
-						() => {
-							state.streamingText = "streaming...";
-							task.onStreamUpdate();
-						},
-					);
-					// Dispose the failed session and update with retry session
-					if (state.session && state.session !== retryResult.session) {
-						try {
-							state.session.dispose();
-						} catch {
-							/* ignore */
-						}
-					}
+				if (retryResult) {
 					state.session = retryResult.session;
 					state.logPath = await saveSessionLog(
 						job.id,
@@ -352,12 +371,10 @@ export class ReviewManager {
 						retryResult.session,
 					);
 					if (retryResult.errorMessage) {
-						// Second failure - record the error
 						state.status = "error";
 						state.errorMessage = retryResult.errorMessage;
 						state.rawOutput = `ERROR: ${retryResult.errorMessage}`;
 					} else {
-						// Retry succeeded
 						state.status = "done";
 						state.rawOutput = retryResult.text || "[]";
 						try {
@@ -372,7 +389,6 @@ export class ReviewManager {
 						}
 					}
 				} else {
-					// User cancelled model selection - record the original error
 					state.status = "error";
 					state.errorMessage = result.errorMessage;
 					state.rawOutput = `ERROR: ${result.errorMessage}`;
@@ -466,7 +482,7 @@ export class ReviewManager {
 			lensReviews,
 		);
 
-		let model = await resolveModel(ctx, "synthesis");
+		const model = await resolveModel(ctx, "synthesis");
 
 		try {
 			const result = await runLensSubagent(
@@ -496,31 +512,22 @@ export class ReviewManager {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
 				// that just failed so autorouting can't loop on it.
-				const selected = await selectModelOnError(
+				const retryResult = await this.retryOnModelError(
 					ctx,
-					{ provider: model.provider, id: model.id },
-					"Model Error",
-					`Model "${model.name}" failed: ${result.errorMessage}\n\nChoose a different model for synthesis:`,
+					model,
+					job.synthesisSession,
+					"synthesis",
+					async (m) =>
+						runLensSubagent(
+							ctx,
+							cwd,
+							m,
+							systemPrompt,
+							userPrompt,
+							"synthesis",
+						),
 				);
-				if (selected) {
-					model = selected;
-					ctx.ui.notify(`Switching to ${model.name} for synthesis...`, "info");
-					const retryResult = await runLensSubagent(
-						ctx,
-						cwd,
-						model,
-						systemPrompt,
-						userPrompt,
-						"synthesis",
-					);
-					// Dispose the failed session and store the retry session
-					if (result.session) {
-						try {
-							result.session.dispose();
-						} catch {
-							/* ignore */
-						}
-					}
+				if (retryResult) {
 					if (retryResult.session) {
 						job.synthesisSession = retryResult.session;
 					}
@@ -531,8 +538,6 @@ export class ReviewManager {
 					} else {
 						const rawText = retryResult.text || "{}";
 						job.synthesisResult = parseSynthesis(rawText);
-						if (job.synthesisResult.summary.includes("non-JSON")) {
-						}
 					}
 				} else {
 					job.synthesisResult = createFallbackSynthesis(
