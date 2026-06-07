@@ -64,7 +64,7 @@ describe("loadConfig", () => {
 describe("saveConfig", () => {
 	it("writes config to .pi/drykiss/config.json", async () => {
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await saveConfig( { defaultModel: "haiku", interactive: false });
+		await saveConfig({ defaultModel: "haiku", interactive: false });
 		expect(mkdir).toHaveBeenCalled();
 		const mkdirPath = vi.mocked(mkdir).mock.calls[0][0] as string;
 		expect(mkdirPath).toMatch(/\.pi[/\\]drykiss$/);
@@ -111,7 +111,7 @@ describe("setLensModel", () => {
 			}),
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await setLensModel( "clarity", "sonnet");
+		await setLensModel("clarity", "sonnet");
 		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
 		expect(written.lensModels).toEqual({
 			simplicity: "haiku",
@@ -127,7 +127,7 @@ describe("setDefaultModel", () => {
 			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
-		await setDefaultModel( "sonnet");
+		await setDefaultModel("sonnet");
 		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
 		expect(written.defaultModel).toBe("sonnet");
 	});
@@ -135,9 +135,7 @@ describe("setDefaultModel", () => {
 	it("propagates writeFile errors", async () => {
 		vi.mocked(readFile).mockResolvedValue(JSON.stringify({}));
 		vi.mocked(writeFile).mockRejectedValue(new Error("Write failed"));
-		await expect(setDefaultModel( "haiku")).rejects.toThrow(
-			"Write failed",
-		);
+		await expect(setDefaultModel("haiku")).rejects.toThrow("Write failed");
 	});
 });
 
@@ -202,9 +200,7 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify({
 				riskTargeting: {
-					severity: [
-						{ riskCode: "K1", to: "godlike" },
-					],
+					severity: [{ riskCode: "K1", to: "godlike" }],
 				},
 			}),
 		);

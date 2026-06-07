@@ -90,7 +90,6 @@ async function gatherDiffs(
 			diffs.set(file.path, diff);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`[DRYKISS] Failed to get diff for ${file.path}:`, msg);
 			diffs.set(file.path, "(diff unavailable)");
 			failedFiles.push(file.path);
 		}
@@ -169,7 +168,15 @@ async function prepareReview(
 		return null;
 	}
 
-	return { options, files, diffs, contents, projectIndex, config, activeConstraints };
+	return {
+		options,
+		files,
+		diffs,
+		contents,
+		projectIndex,
+		config,
+		activeConstraints,
+	};
 }
 
 export interface ParseFindingsResult {
@@ -186,10 +193,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 	try {
 		const parsed = JSON.parse(jsonStr);
 		if (!Array.isArray(parsed)) {
-			console.warn(
-				`[DRYKISS] ${lens} lens returned non-array JSON:`,
-				raw.slice(0, 500),
-			);
 			return {
 				findings: [],
 				parseError: `Expected array, got ${typeof parsed}`,
@@ -210,12 +213,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 			}
 		} catch (sanitizationErr) {
 			// Sanitization didn't help, fall through to error
-			console.error(
-				`[DRYKISS] JSON sanitization failed for ${lens}:`,
-				sanitizationErr instanceof Error
-					? sanitizationErr.message
-					: String(sanitizationErr),
-			);
 		}
 
 		// Both attempts failed — try lenient parse as last resort before giving up
@@ -231,7 +228,6 @@ function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 		}
 
 		const msg = `Failed to parse JSON for ${lens} lens. The LLM output may contain unescaped characters.`;
-		console.error(`[DRYKISS] ${msg}`);
 		return { findings: [], parseError: msg };
 	}
 }
@@ -316,7 +312,15 @@ export async function handleDrykissCommand(
 	}
 	if (!prepared) return;
 
-	const { options, files, diffs, contents, projectIndex, config, activeConstraints } = prepared;
+	const {
+		options,
+		files,
+		diffs,
+		contents,
+		projectIndex,
+		config,
+		activeConstraints,
+	} = prepared;
 	const fileList = files.map((f) => f.path).join(", ");
 
 	// Confirmation (respect config)
@@ -376,7 +380,8 @@ async function handleSingleLensCommand(
 	}
 	if (!prepared) return;
 
-	const { options, files, diffs, contents, projectIndex, activeConstraints } = prepared;
+	const { options, files, diffs, contents, projectIndex, activeConstraints } =
+		prepared;
 
 	try {
 		const jobId = await manager.startReview(
@@ -747,7 +752,8 @@ export async function executeDrykissAutoreviewTool(
 					summary: finalSummary,
 					counts: {
 						total: finalFindings.length,
-						critical: finalFindings.filter((f) => f.severity === "critical").length,
+						critical: finalFindings.filter((f) => f.severity === "critical")
+							.length,
 						high: finalFindings.filter((f) => f.severity === "high").length,
 						medium: finalFindings.filter((f) => f.severity === "medium").length,
 						low: finalFindings.filter((f) => f.severity === "low").length,
@@ -757,9 +763,7 @@ export async function executeDrykissAutoreviewTool(
 			: result;
 
 	return {
-		content: [
-			{ type: "text", text: formatReviewResultForTool(finalResult) },
-		],
+		content: [{ type: "text", text: formatReviewResultForTool(finalResult) }],
 		details: { result: finalResult },
 	};
 }
@@ -860,9 +864,7 @@ export async function executeDrykissReviewTool(
 		options,
 	);
 	if (failedFiles.length > 0) {
-		console.warn(
-			`[DRYKISS] Could not retrieve diffs for: ${failedFiles.join(", ")}`,
-		);
+		/* Diffs unavailable — continuing with placeholders */
 	}
 	const config = await loadConfig();
 	const contents =

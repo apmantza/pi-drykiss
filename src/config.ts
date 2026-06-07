@@ -176,14 +176,11 @@ export async function loadEffectiveConfig(): Promise<{
 			};
 		}
 		if (err instanceof SyntaxError) {
-			console.warn("[DRYKISS] Config file is corrupt, using defaults");
 			return {
 				config: { interactive: true, confirmBeforeRun: true },
 				warnings: ["Config file is corrupt; defaults applied."],
 			};
 		}
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error("[DRYKISS] Failed to load config:", msg);
 		throw err;
 	}
 
@@ -226,7 +223,7 @@ export async function loadEffectiveConfig(): Promise<{
 	if (rt.severity !== undefined) {
 		const validRules: SeverityOverrideRule[] = [];
 		for (const rule of rt.severity) {
-			if (!isValidRiskCode(rule.riskCode)) {
+			if (!VALID_RISK_CODES.has(rule.riskCode)) {
 				warnings.push(
 					`Unknown risk code in severity override: ${rule.riskCode}`,
 				);
@@ -262,11 +259,6 @@ export async function loadEffectiveConfig(): Promise<{
 		warnings,
 	};
 }
-
-function isValidRiskCode(code: string): boolean {
-	return VALID_RISK_CODES.has(code);
-}
-
 function isValidSeverity(s: unknown): s is SeverityOverride {
 	return (
 		s === "critical" ||
@@ -284,7 +276,7 @@ function partitionByRiskCode(codes: readonly string[]): {
 	const valid: string[] = [];
 	const dropped: string[] = [];
 	for (const code of codes) {
-		if (isValidRiskCode(code)) valid.push(code);
+		if (VALID_RISK_CODES.has(code)) valid.push(code);
 		else dropped.push(code);
 	}
 	return { valid, dropped };

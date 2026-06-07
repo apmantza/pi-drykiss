@@ -221,7 +221,7 @@ describe("buildReviewResult", () => {
 		expect(result.findings).toHaveLength(2);
 	});
 
-it("collects lens and synthesis errors", () => {
+	it("collects lens and synthesis errors", () => {
 		const base = job({
 			overallStatus: "error",
 			synthesisStatus: "error",
@@ -256,7 +256,6 @@ it("collects lens and synthesis errors", () => {
 });
 
 describe("applySeverityOverrides — Phase 2", () => {
-
 	it("downgrades severity for matching riskCode", () => {
 		const f = finding({ riskCode: "K1", severity: "critical" });
 		const result = applySeverityOverrides([f], [{ riskCode: "K1", to: "low" }]);
@@ -271,10 +270,7 @@ describe("applySeverityOverrides — Phase 2", () => {
 
 	it("leaves findings without riskCode unchanged", () => {
 		const f = finding({ riskCode: undefined, severity: "high" });
-		const result = applySeverityOverrides(
-			[f],
-			[{ riskCode: "K1", to: "low" }],
-		);
+		const result = applySeverityOverrides([f], [{ riskCode: "K1", to: "low" }]);
 		expect(result[0].severity).toBe("high");
 	});
 
@@ -286,7 +282,6 @@ describe("applySeverityOverrides — Phase 2", () => {
 });
 
 describe("filterIgnored — Phase 2", () => {
-
 	it("drops findings matching an ignore glob pattern", () => {
 		const findings = [
 			finding({ file: "src/a.ts" }),
@@ -307,10 +302,7 @@ describe("filterIgnored — Phase 2", () => {
 			finding({ file: "src/legacy/old.ts" }),
 			finding({ file: "tests/e2e/suite.ts" }),
 		];
-		const result = filterIgnored(findings, [
-			"src/legacy/**",
-			"tests/e2e/**",
-		]);
+		const result = filterIgnored(findings, ["src/legacy/**", "tests/e2e/**"]);
 		expect(result.findings).toHaveLength(1);
 		expect(result.dropped).toBe(2);
 	});
@@ -339,5 +331,3 @@ describe("filterIgnored — Phase 2", () => {
 		expect(result.dropped).toBe(0);
 	});
 });
-
-

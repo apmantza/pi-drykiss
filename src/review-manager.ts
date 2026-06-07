@@ -209,7 +209,6 @@ export class ReviewManager {
 		} catch (err) {
 			// If anything fails after adding the job, clean up so no stale
 			// job is left with lens states stuck at "queued".
-			console.error(`[DRYKISS] startReview failed:`, err);
 			this.jobs.delete(id);
 			this.abortControllers.delete(id);
 			throw err;
@@ -240,7 +239,6 @@ export class ReviewManager {
 					} catch {
 						/* don't let callback errors crash the loop */
 					}
-					console.error(`[DRYKISS] runLens crashed for ${task.lens}:`, err);
 				})
 				.finally(() => {
 					/* Always decrement and re-drain, regardless of success or
@@ -249,8 +247,7 @@ export class ReviewManager {
 					 * the queue would stall as soon as any task rejected. */
 					this.runningCount--;
 					this.drain(ctx, pi, cwd).catch((err) => {
-						console.error(`[DRYKISS] drain failed:`, err);
-					});
+						});
 				});
 		}
 	}
@@ -394,13 +391,7 @@ export class ReviewManager {
 						"[]",
 				);
 				state.findingsCount = Array.isArray(arr) ? arr.length : 0;
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				console.error(
-					`[DRYKISS] Failed to parse findings JSON for ${task.lens}:`,
-					msg,
-				);
-				// Note: Raw output not logged to avoid sensitive data exposure
+			} catch {
 				state.findingsCount = 0;
 			}
 		}
@@ -435,8 +426,7 @@ export class ReviewManager {
 				await this.runSynthesis(ctx, cwd, job);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				console.error(`[DRYKISS] Synthesis threw unexpectedly: ${msg}`);
-				job.synthesisStatus = "error";
+					job.synthesisStatus = "error";
 				job.synthesisResult = createFallbackSynthesis(
 					`Synthesis crashed: ${msg}`,
 				);
@@ -452,8 +442,8 @@ export class ReviewManager {
 		}
 
 		// Keep draining - catch errors to prevent unhandled rejections
-		this.drain(ctx, pi, cwd).catch((err) => {
-			console.error(`[DRYKISS] drain failed:`, err);
+		this.drain(ctx, pi, cwd).catch(() => {
+			/* Don't let drain errors crash the loop */
 		});
 	}
 
@@ -541,10 +531,6 @@ export class ReviewManager {
 						const rawText = retryResult.text || "{}";
 						job.synthesisResult = parseSynthesis(rawText);
 						if (job.synthesisResult.summary.includes("non-JSON")) {
-							console.error(
-								"[DRYKISS] Synthesis raw output (non-JSON):",
-								rawText.slice(0, 2000),
-							);
 						}
 					}
 				} else {
@@ -559,12 +545,7 @@ export class ReviewManager {
 			} else {
 				const rawText = result.text || "{}";
 				job.synthesisResult = parseSynthesis(rawText);
-				if (job.synthesisResult.summary.includes("non-JSON")) {
-					console.error(
-						"[DRYKISS] Synthesis raw output (non-JSON):",
-						rawText.slice(0, 2000),
-					);
-				}
+
 			}
 			job.synthesisStatus = result.errorMessage ? "error" : "done";
 		} catch (err: any) {
@@ -588,15 +569,10 @@ export class ReviewManager {
 				job.reviewPath = await saveReview(job.files, job.synthesisResult);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				console.error(`[DRYKISS] Failed to persist review ${job.id}:`, msg);
 			}
 		}
 
 		this.onComplete?.(job);
-	}
-
-	getJob(id: string): ReviewJob | undefined {
-		return this.jobs.get(id);
 	}
 
 	async runReview(
@@ -629,7 +605,7 @@ export class ReviewManager {
 			projectIndex,
 			{ model: options.model, lenses: options.lenses },
 		);
-		const started = this.getJob(jobId);
+		const started = this.jobs.get(jobId);
 		if (started) safeProgress(options.onProgress, started);
 		const job = await this.waitForReview(
 			jobId,

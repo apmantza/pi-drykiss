@@ -279,6 +279,9 @@ function globToRegex(pattern: string): RegExp {
 			regex += "[^/]";
 		} else if (ch === ".") {
 			regex += "\\.";
+		} else if (/[.\\+^${}()|[\]\\/]/.test(ch)) {
+			// Escape any regex-special characters that aren't glob wildcards
+			regex += "\\" + ch;
 		} else {
 			regex += ch;
 		}

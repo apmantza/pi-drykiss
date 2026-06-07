@@ -105,7 +105,7 @@ describe("ReviewManager", () => {
 		);
 
 		expect(jobId).toBeTruthy();
-		const job = manager.getJob(jobId);
+		const job = manager['jobs'].get(jobId);
 		expect(job).toBeDefined();
 		expect(job!.overallStatus).toBe("running");
 		expect(job!.lenses).toEqual(["simplicity"]);
@@ -154,7 +154,7 @@ describe("ReviewManager", () => {
 	});
 
 	it("returns undefined for unknown job id", () => {
-		expect(manager.getJob("nonexistent")).toBeUndefined();
+		expect(manager['jobs'].get("nonexistent")).toBeUndefined();
 	});
 
 	it("runReview returns a stable ReviewResult", async () => {
@@ -255,7 +255,7 @@ describe("ReviewManager", () => {
 		const result = manager.abort(jobId);
 		expect(result).toBe(true);
 
-		const job = manager.getJob(jobId);
+		const job = manager['jobs'].get(jobId);
 		expect(job!.overallStatus).toBe("error");
 		expect(job!.completedAt).toBeDefined();
 	});
@@ -286,7 +286,7 @@ describe("ReviewManager", () => {
 		);
 
 		// Simulate a session being attached
-		const job = manager.getJob(jobId)!;
+		const job = manager['jobs'].get(jobId)!;
 		const mockDispose = vi.fn();
 		job.states.get("simplicity")!.session = { dispose: mockDispose } as any;
 
@@ -315,7 +315,7 @@ describe("ReviewManager", () => {
 			},
 		);
 
-		const job = manager.getJob(jobId)!;
+		const job = manager['jobs'].get(jobId)!;
 
 		// Initially synthesis is idle
 		expect(job.synthesisStatus).toBe("idle");
@@ -370,7 +370,7 @@ describe("ReviewManager", () => {
 		);
 
 		// Wait for all 4 lenses to finish (each rejects once or resolves).
-		const job = manager.getJob(jobId)!;
+		const job = manager['jobs'].get(jobId)!;
 		await vi.waitFor(
 			() => {
 				const allDone = job.lenses.every(

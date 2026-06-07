@@ -184,7 +184,6 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 					await copyBundledFile(src, dest);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					console.error(`[DRYKISS] Failed to seed prompt ${dest}:`, msg);
 				}
 			}),
 		);
@@ -199,10 +198,6 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 					await copyBundledFile(src, dest);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					console.error(
-						`[DRYKISS] Failed to seed shared fragment ${dest}:`,
-						msg,
-					);
 				}
 			}),
 		);
@@ -212,7 +207,6 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 		await writeSentinel(userDir);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		console.error(`[DRYKISS] ensureDefaultPrompts failed:`, msg);
 		throw err;
 	}
 }
