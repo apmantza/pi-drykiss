@@ -13,6 +13,7 @@ import {
 import { buildReviewPrompts, ensureDefaultPrompts } from "./prompt-builder.js";
 
 import { loadConfig } from "./config.js";
+import { buildActiveConstraints } from "./active-constraints.js";
 import { findModelByHint } from "./llm.js";
 import type {
 	ReviewLens,
@@ -26,6 +27,7 @@ import { isPrReference, type PrInfo } from "./github-pr.js";
 import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
+import { filterIgnored } from "./review-result.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -131,10 +133,12 @@ async function prepareReview(
 		| undefined;
 	projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined;
 	config: Awaited<ReturnType<typeof loadConfig>>;
+	activeConstraints: string;
 } | null> {
 	const options = parseArgs(args);
 	await ensureDefaultPrompts(ctx.cwd);
 	const config = await loadConfig();
+	const activeConstraints = buildActiveConstraints(config.riskTargeting);
 	const rawPr = options.pr as (PrInfo & { _raw: string }) | undefined;
 	const contextMode = options.all ? "full" : (config.contextMode ?? "full");
 
@@ -165,7 +169,7 @@ async function prepareReview(
 		return null;
 	}
 
-	return { options, files, diffs, contents, projectIndex, config };
+	return { options, files, diffs, contents, projectIndex, config, activeConstraints };
 }
 
 export interface ParseFindingsResult {
@@ -312,7 +316,7 @@ export async function handleDrykissCommand(
 	}
 	if (!prepared) return;
 
-	const { options, files, diffs, contents, projectIndex, config } = prepared;
+	const { options, files, diffs, contents, projectIndex, config, activeConstraints } = prepared;
 	const fileList = files.map((f) => f.path).join(", ");
 
 	// Confirmation (respect config)
@@ -340,7 +344,7 @@ export async function handleDrykissCommand(
 			diffs,
 			contents,
 			projectIndex,
-			options,
+			{ ...options, activeConstraints },
 		);
 		ctx.ui.notify(
 			`DRYKISS review **${jobId}** started in background. Watch the widget above the editor for live progress. Results will appear here when complete.`,
@@ -372,7 +376,7 @@ async function handleSingleLensCommand(
 	}
 	if (!prepared) return;
 
-	const { options, files, diffs, contents, projectIndex } = prepared;
+	const { options, files, diffs, contents, projectIndex, activeConstraints } = prepared;
 
 	try {
 		const jobId = await manager.startReview(
@@ -383,7 +387,7 @@ async function handleSingleLensCommand(
 			diffs,
 			contents,
 			projectIndex,
-			{ model: options.model, lenses: [lens] },
+			{ model: options.model, lenses: [lens], activeConstraints },
 		);
 		ctx.ui.notify(
 			`${label} **${jobId}** started in background. Watch the widget for live progress.`,
@@ -712,6 +716,7 @@ export async function executeDrykissAutoreviewTool(
 				label: scope.label,
 				metadata: scope.metadata,
 			},
+			severityOverrides: config.riskTargeting?.severity,
 			onProgress: onUpdate
 				? (job) =>
 						onUpdate({
@@ -722,9 +727,40 @@ export async function executeDrykissAutoreviewTool(
 		signal,
 	);
 
+	// Apply ignore filter (Phase 2)
+	const ignorePatterns = config.riskTargeting?.ignore;
+	const filtered = ignorePatterns
+		? filterIgnored(result.findings, ignorePatterns)
+		: undefined;
+	const finalFindings = filtered?.findings ?? result.findings;
+	const droppedCount = filtered?.dropped ?? 0;
+	const finalSummary =
+		droppedCount > 0
+			? `${result.summary}\n(DRYKISS dropped ${droppedCount} finding(s) matching ignore patterns.)`
+			: result.summary;
+
+	const finalResult: ReviewResult =
+		droppedCount > 0
+			? {
+					...result,
+					findings: finalFindings,
+					summary: finalSummary,
+					counts: {
+						total: finalFindings.length,
+						critical: finalFindings.filter((f) => f.severity === "critical").length,
+						high: finalFindings.filter((f) => f.severity === "high").length,
+						medium: finalFindings.filter((f) => f.severity === "medium").length,
+						low: finalFindings.filter((f) => f.severity === "low").length,
+						nit: finalFindings.filter((f) => f.severity === "nit").length,
+					},
+				}
+			: result;
+
 	return {
-		content: [{ type: "text", text: formatReviewResultForTool(result) }],
-		details: { result },
+		content: [
+			{ type: "text", text: formatReviewResultForTool(finalResult) },
+		],
+		details: { result: finalResult },
 	};
 }
 

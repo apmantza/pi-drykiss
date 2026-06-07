@@ -1,5 +1,6 @@
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
+import type { SeverityOverrideRule } from "./config.js";
 
 export interface ReviewResultTarget {
 	readonly mode?: string;
@@ -39,6 +40,12 @@ export interface ReviewResult {
 
 export interface BuildReviewResultOptions {
 	readonly target?: ReviewResultTarget;
+	/**
+	 * Severity overrides to apply after validation (Phase 2).
+	 * When a finding's riskCode matches a rule, its severity is changed.
+	 * This runs after `validateFindings` but before `countFindings`.
+	 */
+	readonly severityOverrides?: readonly SeverityOverrideRule[];
 }
 
 const SEVERITIES: readonly Severity[] = [
@@ -57,14 +64,17 @@ export function buildReviewResult(
 	const synthesis = job.synthesisResult;
 	const scope = new Set(job.files.map(normalizePath));
 	const validation = validateFindings(synthesis?.findings ?? [], scope);
-	const counts = countFindings(validation.findings);
+	const overridden = options.severityOverrides
+		? applySeverityOverrides(validation.findings, options.severityOverrides)
+		: validation.findings;
+	const counts = countFindings(overridden);
 	const errors = collectErrors(job);
 	const verdict = synthesis?.verdict ?? "Request changes";
 	const status = job.overallStatus;
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&
-		validation.findings.length === 0 &&
+		overridden.length === 0 &&
 		verdict === "Approve";
 
 	return {
@@ -76,7 +86,7 @@ export function buildReviewResult(
 		...(job.reviewPath ? { reportPath: job.reviewPath } : {}),
 		files: [...job.files],
 		counts,
-		findings: validation.findings,
+		findings: overridden,
 		summary: synthesis?.summary ?? "Review did not produce a synthesis result.",
 		errors,
 		validationIssues: validation.issues,
@@ -199,4 +209,80 @@ function isSafeRelativePath(file: string): boolean {
 
 function isPositiveInteger(value: number): boolean {
 	return Number.isInteger(value) && value > 0;
+}
+
+// ── Phase 2: severity overrides and ignore filtering ────────────────────
+
+/**
+ * Apply severity overrides to a list of findings.
+ * For each finding with a matching `riskCode`, override the severity
+ * to the configured value. Findings without a riskCode are left unchanged.
+ */
+export function applySeverityOverrides(
+	findings: readonly Finding[],
+	overrides: readonly SeverityOverrideRule[],
+): Finding[] {
+	if (overrides.length === 0) return [...findings];
+	const overrideMap = new Map<string, SeverityOverrideRule["to"]>();
+	for (const rule of overrides) {
+		overrideMap.set(rule.riskCode, rule.to);
+	}
+	return findings.map((f) => {
+		const newSeverity = f.riskCode ? overrideMap.get(f.riskCode) : undefined;
+		if (!newSeverity) return f;
+		return { ...f, severity: newSeverity };
+	});
+}
+
+/**
+ * Filter findings by ignore patterns.
+ * Returns only findings whose `file` does NOT match any of the glob patterns.
+ * Also returns a count of dropped findings for visibility.
+ */
+export function filterIgnored(
+	findings: readonly Finding[],
+	patterns: readonly string[],
+): { findings: Finding[]; dropped: number } {
+	if (patterns.length === 0) {
+		return { findings: [...findings], dropped: 0 };
+	}
+	// Simple glob matching (supports * and **)
+	const matchers = patterns.map((p) => globToRegex(p));
+	const passed: Finding[] = [];
+	let dropped = 0;
+	for (const f of findings) {
+		const file = f.file.replace(/\\/g, "/");
+		const match = matchers.some((r) => r.test(file));
+		if (match) {
+			dropped++;
+		} else {
+			passed.push(f);
+		}
+	}
+	return { findings: passed, dropped };
+}
+
+/** Convert a simple glob pattern to a regex (supports **, *, ?). */
+function globToRegex(pattern: string): RegExp {
+	let regex = "^";
+	for (let i = 0; i < pattern.length; i++) {
+		const ch = pattern[i];
+		if (ch === "*") {
+			// ** matches any number of path segments
+			if (pattern[i + 1] === "*") {
+				regex += ".*";
+				i++; // skip second *
+			} else {
+				regex += "[^/]*";
+			}
+		} else if (ch === "?") {
+			regex += "[^/]";
+		} else if (ch === ".") {
+			regex += "\\.";
+		} else {
+			regex += ch;
+		}
+	}
+	regex += "$";
+	return new RegExp(regex);
 }

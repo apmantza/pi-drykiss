@@ -49,6 +49,30 @@ export async function loadSynthesisSystemPrompt(
 	return composeSynthesisPrompt({ activeConstraints });
 }
 
+/**
+ * Variant that derives the active-constraints string from a RiskTargeting
+ * config. Phase 2: lets the caller pass the config (e.g. from `loadEffectiveConfig`)
+ * instead of a pre-formatted string.
+ */
+export async function loadLensSystemPromptWithConfig(
+	lens: Exclude<ReviewLens, "all">,
+	rt: import("./config.js").RiskTargeting | undefined,
+): Promise<string> {
+	const { buildActiveConstraints } = await import("./active-constraints.js");
+	return composeLensPrompt(lens, {
+		activeConstraints: buildActiveConstraints(rt),
+	});
+}
+
+export async function loadSynthesisSystemPromptWithConfig(
+	rt: import("./config.js").RiskTargeting | undefined,
+): Promise<string> {
+	const { buildActiveConstraints } = await import("./active-constraints.js");
+	return composeSynthesisPrompt({
+		activeConstraints: buildActiveConstraints(rt),
+	});
+}
+
 /** Returns the path to a lens or synthesis prompt file in the user dir. */
 export function getPromptPath(lens: ReviewLens | "synthesis"): string {
 	return join(_userPromptsDir(), `${lens}.md`);

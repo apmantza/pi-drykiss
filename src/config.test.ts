@@ -6,6 +6,7 @@ import {
 	getModelForLens,
 	setLensModel,
 	setDefaultModel,
+	loadEffectiveConfig,
 } from "./config.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -137,5 +138,95 @@ describe("setDefaultModel", () => {
 		await expect(setDefaultModel( "haiku")).rejects.toThrow(
 			"Write failed",
 		);
+	});
+});
+
+describe("loadEffectiveConfig — Phase 2 validation", () => {
+	it("returns config without warnings when riskTargeting is absent", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({ defaultModel: "sonnet" }),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toEqual([]);
+		expect(result.config.defaultModel).toBe("sonnet");
+	});
+
+	it("warns on unknown risk codes in disable", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				riskTargeting: {
+					disable: ["K1", "NO_SUCH_CODE", "R1"],
+				},
+			}),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("NO_SUCH_CODE");
+		expect(result.config.riskTargeting?.disable).toEqual(["K1", "R1"]);
+	});
+
+	it("warns when both disable and focus are set", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				riskTargeting: {
+					disable: ["K1"],
+					focus: ["R1"],
+				},
+			}),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("Both disable and focus");
+		expect(result.config.riskTargeting?.disable).toBeUndefined();
+		expect(result.config.riskTargeting?.focus).toBeUndefined();
+	});
+
+	it("warns on unknown risk codes in severity override", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				riskTargeting: {
+					severity: [
+						{ riskCode: "K1", to: "low" },
+						{ riskCode: "BOGUS", to: "high" },
+					],
+				},
+			}),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("BOGUS");
+		expect(result.config.riskTargeting?.severity).toHaveLength(1);
+	});
+
+	it("warns on invalid severity values in severity override", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				riskTargeting: {
+					severity: [
+						{ riskCode: "K1", to: "godlike" },
+					],
+				},
+			}),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]).toContain("godlike");
+		expect(result.config.riskTargeting?.severity).toHaveLength(0);
+	});
+
+	it("passes through valid ignore patterns unchanged", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				riskTargeting: {
+					ignore: ["src/legacy/**", "tests/e2e/*.spec.ts"],
+				},
+			}),
+		);
+		const result = await loadEffectiveConfig();
+		expect(result.warnings).toEqual([]);
+		expect(result.config.riskTargeting?.ignore).toEqual([
+			"src/legacy/**",
+			"tests/e2e/*.spec.ts",
+		]);
 	});
 });

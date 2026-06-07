@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewResult, validateFindings } from "./review-result.js";
+import {
+	buildReviewResult,
+	validateFindings,
+	applySeverityOverrides,
+	filterIgnored,
+} from "./review-result.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding } from "./types.js";
 
@@ -216,7 +221,7 @@ describe("buildReviewResult", () => {
 		expect(result.findings).toHaveLength(2);
 	});
 
-	it("collects lens and synthesis errors", () => {
+it("collects lens and synthesis errors", () => {
 		const base = job({
 			overallStatus: "error",
 			synthesisStatus: "error",
@@ -249,3 +254,90 @@ describe("buildReviewResult", () => {
 		]);
 	});
 });
+
+describe("applySeverityOverrides — Phase 2", () => {
+
+	it("downgrades severity for matching riskCode", () => {
+		const f = finding({ riskCode: "K1", severity: "critical" });
+		const result = applySeverityOverrides([f], [{ riskCode: "K1", to: "low" }]);
+		expect(result[0].severity).toBe("low");
+	});
+
+	it("leaves non-matching findings unchanged", () => {
+		const f = finding({ riskCode: "K1", severity: "high" });
+		const result = applySeverityOverrides([f], [{ riskCode: "R1", to: "low" }]);
+		expect(result[0].severity).toBe("high");
+	});
+
+	it("leaves findings without riskCode unchanged", () => {
+		const f = finding({ riskCode: undefined, severity: "high" });
+		const result = applySeverityOverrides(
+			[f],
+			[{ riskCode: "K1", to: "low" }],
+		);
+		expect(result[0].severity).toBe("high");
+	});
+
+	it("handles empty overrides array", () => {
+		const f = finding({ riskCode: "K1", severity: "critical" });
+		const result = applySeverityOverrides([f], []);
+		expect(result[0].severity).toBe("critical");
+	});
+});
+
+describe("filterIgnored — Phase 2", () => {
+
+	it("drops findings matching an ignore glob pattern", () => {
+		const findings = [
+			finding({ file: "src/a.ts" }),
+			finding({ file: "src/legacy/old.ts" }),
+			finding({ file: "tests/e2e/suite.ts" }),
+		];
+		const result = filterIgnored(findings, ["src/legacy/**"]);
+		expect(result.findings).toHaveLength(2);
+		expect(result.dropped).toBe(1);
+		expect(result.findings.map((f: Finding) => f.file)).not.toContain(
+			"src/legacy/old.ts",
+		);
+	});
+
+	it("drops findings matching multiple glob patterns", () => {
+		const findings = [
+			finding({ file: "src/a.ts" }),
+			finding({ file: "src/legacy/old.ts" }),
+			finding({ file: "tests/e2e/suite.ts" }),
+		];
+		const result = filterIgnored(findings, [
+			"src/legacy/**",
+			"tests/e2e/**",
+		]);
+		expect(result.findings).toHaveLength(1);
+		expect(result.dropped).toBe(2);
+	});
+
+	it("returns all findings when no patterns are given", () => {
+		const findings = [finding({ file: "src/a.ts" })];
+		const result = filterIgnored(findings, []);
+		expect(result.findings).toHaveLength(1);
+		expect(result.dropped).toBe(0);
+	});
+
+	it("handles * pattern (single segment)", () => {
+		const findings = [
+			finding({ file: "src/util.ts" }),
+			finding({ file: "src/util/sub.ts" }),
+		];
+		const result = filterIgnored(findings, ["src/*.ts"]);
+		expect(result.findings).toHaveLength(1);
+		expect(result.findings[0].file).toBe("src/util/sub.ts");
+	});
+
+	it("accepts findings gracefully with non-matching glob", () => {
+		const f = finding({ file: "src/a.ts" });
+		const result = filterIgnored([f], ["**/legacy/**"]);
+		expect(result.findings).toHaveLength(1);
+		expect(result.dropped).toBe(0);
+	});
+});
+
+

@@ -1,6 +1,53 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getGlobalBaseDir, CONFIG_FILE } from "./constants.js";
+import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
+
+// ── Risk-code targeting types (Phase 2) ─────────────────────────────────
+
+/** A risk code as used in config: one of the codes from RISK_CODES. */
+export type RiskCode =
+	keyof typeof import("./prompts/risk-codes.js").RISK_CODES;
+
+/** A severity value, accepting all five DRYKISS levels. */
+export type SeverityOverride = "critical" | "high" | "medium" | "low" | "nit";
+
+/** Severity override rule: when a finding's riskCode matches, override its severity. */
+export interface SeverityOverrideRule {
+	readonly riskCode: string;
+	readonly to: SeverityOverride;
+}
+
+/** Glob pattern for `ignore` — same syntax as gitignore. */
+export type IgnorePattern = string;
+
+/** Per-project config (Phase 2) for risk-code targeting. */
+export interface RiskTargeting {
+	/**
+	 * Disable specific risk codes — findings with these riskCodes are
+	 * stripped from the result entirely. Cannot be combined with `focus`.
+	 */
+	readonly disable?: readonly string[];
+	/**
+	 * Override the severity of findings matching specific risk codes.
+	 * Use to downgrade a known-acceptable code (e.g. legacy duplication)
+	 * or upgrade a default-nip to a blocker (e.g. clarity on a public API).
+	 */
+	readonly severity?: readonly SeverityOverrideRule[];
+	/**
+	 * Ignore findings in files matching these glob patterns. File match
+	 * is done against the normalized repo-relative path. Same syntax as
+	 * gitignore (`**`, `*`, `?`).
+	 */
+	readonly ignore?: readonly IgnorePattern[];
+	/**
+	 * Focus on specific risk codes — only findings with these riskCodes
+	 * pass through. The other codes' findings are stripped. Cannot be
+	 * combined with `disable` (when both are set, both are ignored and a
+	 * warning is emitted).
+	 */
+	readonly focus?: readonly string[];
+}
 
 export interface DrykissAutoreviewConfig {
 	/** Opt-in automatic review at agent_end after code edits. Disabled by default. */
@@ -80,6 +127,8 @@ export interface DrykissConfig {
 	 * If unset (or no scoped match is found), any free model is used.
 	 */
 	modelScope?: string | string[];
+	/** Risk-code targeting (Phase 2). */
+	riskTargeting?: RiskTargeting;
 	/** Automatic closeout review configuration. */
 	autoreview?: DrykissAutoreviewConfig;
 }
@@ -89,27 +138,156 @@ export function getConfigPath(): string {
 }
 
 export async function loadConfig(): Promise<DrykissConfig> {
+	const { config } = await loadEffectiveConfig();
+	return config;
+}
+
+/**
+ * Load and validate the config. Returns the cleaned config plus a list
+ * of validation warnings. The caller can display warnings (e.g. in the
+ * TUI widget) without having to re-implement validation.
+ *
+ * Validation rules (Phase 2):
+ *   - Unknown risk code in `disable`/`focus` → warn, drop the unknown code
+ *   - Unknown risk code in `severity[*].riskCode` → warn, drop the rule
+ *   - Both `disable` and `focus` non-empty → ignore both, warn
+ *   - Invalid severity value → warn, drop the rule
+ *
+ * Defaults are returned when the file is missing or corrupt (matching
+ * the original loadConfig behaviour).
+ */
+export async function loadEffectiveConfig(): Promise<{
+	config: DrykissConfig;
+	warnings: string[];
+}> {
+	const warnings: string[] = [];
+	let raw: DrykissConfig;
 	try {
-		const raw = await readFile(getConfigPath(), "utf8");
-		return JSON.parse(raw) as DrykissConfig;
+		const text = await readFile(getConfigPath(), "utf8");
+		raw = JSON.parse(text) as DrykissConfig;
 	} catch (err) {
-		// ENOENT: file missing — return defaults silently (new project)
 		if (
 			err instanceof Error &&
 			(err as NodeJS.ErrnoException).code === "ENOENT"
 		) {
-			return { interactive: true, confirmBeforeRun: true };
+			return {
+				config: { interactive: true, confirmBeforeRun: true },
+				warnings: [],
+			};
 		}
-		// JSON parse error: corrupt file — warn and fall back to defaults
-		// Note: Don't log err.message as it may contain the malformed JSON content
 		if (err instanceof SyntaxError) {
 			console.warn("[DRYKISS] Config file is corrupt, using defaults");
-			return { interactive: true, confirmBeforeRun: true };
+			return {
+				config: { interactive: true, confirmBeforeRun: true },
+				warnings: ["Config file is corrupt; defaults applied."],
+			};
 		}
 		const msg = err instanceof Error ? err.message : String(err);
 		console.error("[DRYKISS] Failed to load config:", msg);
 		throw err;
 	}
+
+	if (!raw.riskTargeting) {
+		return { config: raw, warnings };
+	}
+
+	const rt = raw.riskTargeting;
+	const cleaned: {
+		disable?: string[];
+		severity?: SeverityOverrideRule[];
+		ignore?: string[];
+		focus?: string[];
+	} = {};
+
+	if (rt.disable !== undefined) {
+		const { valid, dropped } = partitionByRiskCode(rt.disable);
+		cleaned.disable = valid;
+		for (const code of dropped) {
+			warnings.push(`Unknown risk code in disable: ${code}`);
+		}
+	}
+
+	if (rt.focus !== undefined) {
+		const { valid, dropped } = partitionByRiskCode(rt.focus);
+		cleaned.focus = valid;
+		for (const code of dropped) {
+			warnings.push(`Unknown risk code in focus: ${code}`);
+		}
+	}
+
+	if (cleaned.disable && cleaned.focus) {
+		warnings.push(
+			"Both disable and focus are set; ignoring both. Use one or the other.",
+		);
+		cleaned.disable = undefined;
+		cleaned.focus = undefined;
+	}
+
+	if (rt.severity !== undefined) {
+		const validRules: SeverityOverrideRule[] = [];
+		for (const rule of rt.severity) {
+			if (!isValidRiskCode(rule.riskCode)) {
+				warnings.push(
+					`Unknown risk code in severity override: ${rule.riskCode}`,
+				);
+				continue;
+			}
+			if (!isValidSeverity(rule.to)) {
+				warnings.push(
+					`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`,
+				);
+				continue;
+			}
+			validRules.push({ riskCode: rule.riskCode, to: rule.to });
+		}
+		cleaned.severity = validRules;
+	}
+
+	if (rt.ignore !== undefined) {
+		cleaned.ignore = rt.ignore.filter(
+			(p) => typeof p === "string" && p.length > 0,
+		);
+	}
+
+	return {
+		config: {
+			...raw,
+			riskTargeting: {
+				...(cleaned.disable ? { disable: cleaned.disable } : {}),
+				...(cleaned.severity ? { severity: cleaned.severity } : {}),
+				...(cleaned.ignore ? { ignore: cleaned.ignore } : {}),
+				...(cleaned.focus ? { focus: cleaned.focus } : {}),
+			},
+		},
+		warnings,
+	};
+}
+
+function isValidRiskCode(code: string): boolean {
+	return VALID_RISK_CODES.has(code);
+}
+
+function isValidSeverity(s: unknown): s is SeverityOverride {
+	return (
+		s === "critical" ||
+		s === "high" ||
+		s === "medium" ||
+		s === "low" ||
+		s === "nit"
+	);
+}
+
+function partitionByRiskCode(codes: readonly string[]): {
+	valid: string[];
+	dropped: string[];
+} {
+	const valid: string[] = [];
+	const dropped: string[] = [];
+	for (const code of codes) {
+		if (isValidRiskCode(code)) valid.push(code);
+		else dropped.push(code);
+	}
+	return { valid, dropped };
 }
 
 export async function saveConfig(config: DrykissConfig): Promise<void> {

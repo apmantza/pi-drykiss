@@ -119,6 +119,7 @@ export class ReviewManager {
 		options: {
 			model?: string;
 			lenses?: ReviewLens[];
+			activeConstraints?: string;
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
@@ -140,6 +141,7 @@ export class ReviewManager {
 		const allPrompts = await buildReviewPrompts(cwd, files, diffs, "all", {
 			contents,
 			projectIndex,
+			activeConstraints: options.activeConstraints,
 		});
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
 
@@ -613,6 +615,7 @@ export class ReviewManager {
 			target?: ReviewResultTarget;
 			onProgress?: (job: ReviewJob) => void;
 			progressIntervalMs?: number;
+			severityOverrides?: readonly import("./config.js").SeverityOverrideRule[];
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -634,7 +637,10 @@ export class ReviewManager {
 			options.onProgress,
 			options.progressIntervalMs,
 		);
-		return buildReviewResult(job, { target: options.target });
+		return buildReviewResult(job, {
+			target: options.target,
+			severityOverrides: options.severityOverrides,
+		});
 	}
 
 	waitForReview(

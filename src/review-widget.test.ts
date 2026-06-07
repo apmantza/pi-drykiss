@@ -250,17 +250,23 @@ describe("formatFinding", () => {
 
 	it("includes the Symptom line with detail", () => {
 		const out = formatFinding(buildFinding());
-		expect(out).toContain("Symptom: update_profile and update_admin both fork on the same field.");
+		expect(out).toContain(
+			"Symptom: update_profile and update_admin both fork on the same field.",
+		);
 	});
 
 	it("includes the Consequence line when consequence is set", () => {
 		const out = formatFinding(buildFinding());
-		expect(out).toContain("→ Consequence: Future changes will be missed in one branch.");
+		expect(out).toContain(
+			"→ Consequence: Future changes will be missed in one branch.",
+		);
 	});
 
 	it("includes the Fix line with fixability label and suggestion", () => {
 		const out = formatFinding(buildFinding());
-		expect(out).toContain("→ Fix: guided (~10 lines) — Extract a shared helper.");
+		expect(out).toContain(
+			"→ Fix: guided (~10 lines) — Extract a shared helper.",
+		);
 	});
 
 	it("includes the riskCode annotation when set", () => {
@@ -287,10 +293,18 @@ describe("formatFinding", () => {
 	});
 
 	it("uses different severity icons", () => {
-		expect(formatFinding(buildFinding({ severity: "critical" })).split("\n")[0]).toMatch(/^🔴/);
-		expect(formatFinding(buildFinding({ severity: "medium" })).split("\n")[0]).toMatch(/^🟡/);
-		expect(formatFinding(buildFinding({ severity: "low" })).split("\n")[0]).toMatch(/^🔵/);
-		expect(formatFinding(buildFinding({ severity: "nit" })).split("\n")[0]).toMatch(/^⚪/);
+		expect(
+			formatFinding(buildFinding({ severity: "critical" })).split("\n")[0],
+		).toMatch(/^🔴/);
+		expect(
+			formatFinding(buildFinding({ severity: "medium" })).split("\n")[0],
+		).toMatch(/^🟡/);
+		expect(
+			formatFinding(buildFinding({ severity: "low" })).split("\n")[0],
+		).toMatch(/^🔵/);
+		expect(
+			formatFinding(buildFinding({ severity: "nit" })).split("\n")[0],
+		).toMatch(/^⚪/);
 	});
 
 	it("omits line number from location when line is undefined", () => {
