@@ -12,7 +12,7 @@ import {
 } from "./git-diff.js";
 import { buildReviewPrompts, ensureDefaultPrompts } from "./prompt-builder.js";
 
-import { loadConfig } from "./config.js";
+import { loadConfig, loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
 import { findModelByHint } from "./llm.js";
 import type {
@@ -89,8 +89,7 @@ async function gatherDiffs(
 		try {
 			const diff = await getFileDiff(pi, cwd, file.path, options);
 			diffs.set(file.path, diff);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch {
 			diffs.set(file.path, "(diff unavailable)");
 			failedFiles.push(file.path);
 		}
@@ -668,6 +667,8 @@ export async function executeDrykissAutoreviewTool(
 }> {
 	await ensureDefaultPrompts(ctx.cwd);
 	const config = await loadConfig();
+	const { config: effectiveConfig } = await loadEffectiveConfig(ctx.cwd);
+	const suppressions = effectiveConfig.suppressions ?? [];
 	const contextMode = params.contextMode ?? config.contextMode ?? "full";
 	const lenses = normalizeAutoreviewLenses(params.lenses);
 	const scope = await resolveReviewScope(
@@ -723,6 +724,7 @@ export async function executeDrykissAutoreviewTool(
 				metadata: scope.metadata,
 			},
 			severityOverrides: config.riskTargeting?.severity,
+			suppressions,
 			onProgress: onUpdate
 				? (job) =>
 						onUpdate({
@@ -759,6 +761,7 @@ export async function executeDrykissAutoreviewTool(
 						medium: finalFindings.filter((f) => f.severity === "medium").length,
 						low: finalFindings.filter((f) => f.severity === "low").length,
 						nit: finalFindings.filter((f) => f.severity === "nit").length,
+						suppressed: result.counts.suppressed ?? 0,
 					},
 				}
 			: result;

@@ -25,6 +25,10 @@ vi.mock("./config.js", () => ({
 		confirmBeforeRun: false,
 		contextMode: "full",
 	}),
+	loadEffectiveConfig: vi.fn().mockResolvedValue({
+		config: {},
+		warnings: [],
+	}),
 }));
 
 vi.mock("./subagent-runner.js", () => ({

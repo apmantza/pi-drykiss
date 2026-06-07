@@ -1,9 +1,42 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getGlobalBaseDir, CONFIG_FILE } from "./constants.js";
+import { getGlobalBaseDir, getProjectBaseDir, getProjectConfigPath, CONFIG_FILE } from "./constants.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
+import type { Finding } from "./types.js";
 
-// ── Risk-code targeting types (Phase 2) ─────────────────────────────────
+// ── Suppression types (Phase 3) ─────────────────────────────────────────
+
+/** A single suppression entry stored in the per-project config. */
+export interface Suppression {
+	/** Unique ID for this suppression (auto-generated). */
+	readonly id: string;
+	/**
+	 * Risk code to suppress (e.g. "K1", "D1", or "*" for all codes).
+	 * When "*", any finding matching the `pattern` glob is suppressed.
+	 */
+	readonly riskCode: string;
+	/**
+	 * Glob pattern matching files to suppress.
+	 * Same syntax as gitignore (`**`, `*`, `?`).
+	 */
+	readonly pattern: string;
+	/** Human-readable reason for the suppression. */
+	readonly reason: string;
+	/** ISO 8601 timestamp when this suppression was added. */
+	readonly addedAt: string;
+	/**
+	 * Optional ISO 8601 expiry date. After this date, the suppression
+	 * is ignored and the finding resurfaces. When undefined, the
+	 * suppression never expires.
+	 */
+	readonly expiresAt?: string;
+}
+
+/** Marker attached to a suppressed finding (not persisted). */
+export interface SuppressedFinding extends Finding {
+	_suppressed: true;
+	_suppressionRef: string;
+}
 
 /** A risk code as used in config: one of the codes from RISK_CODES. */
 export type RiskCode =
@@ -129,6 +162,8 @@ export interface DrykissConfig {
 	modelScope?: string | string[];
 	/** Risk-code targeting (Phase 2). */
 	riskTargeting?: RiskTargeting;
+	/** Suppressions (Phase 3) — stored in per-project config. */
+	suppressions?: Suppression[];
 	/** Automatic closeout review configuration. */
 	autoreview?: DrykissAutoreviewConfig;
 }
@@ -156,109 +191,7 @@ export async function loadConfig(): Promise<DrykissConfig> {
  * Defaults are returned when the file is missing or corrupt (matching
  * the original loadConfig behaviour).
  */
-export async function loadEffectiveConfig(): Promise<{
-	config: DrykissConfig;
-	warnings: string[];
-}> {
-	const warnings: string[] = [];
-	let raw: DrykissConfig;
-	try {
-		const text = await readFile(getConfigPath(), "utf8");
-		raw = JSON.parse(text) as DrykissConfig;
-	} catch (err) {
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
-			return {
-				config: { interactive: true, confirmBeforeRun: true },
-				warnings: [],
-			};
-		}
-		if (err instanceof SyntaxError) {
-			return {
-				config: { interactive: true, confirmBeforeRun: true },
-				warnings: ["Config file is corrupt; defaults applied."],
-			};
-		}
-		throw err;
-	}
-
-	if (!raw.riskTargeting) {
-		return { config: raw, warnings };
-	}
-
-	const rt = raw.riskTargeting;
-	const cleaned: {
-		disable?: string[];
-		severity?: SeverityOverrideRule[];
-		ignore?: string[];
-		focus?: string[];
-	} = {};
-
-	if (rt.disable !== undefined) {
-		const { valid, dropped } = partitionByRiskCode(rt.disable);
-		cleaned.disable = valid;
-		for (const code of dropped) {
-			warnings.push(`Unknown risk code in disable: ${code}`);
-		}
-	}
-
-	if (rt.focus !== undefined) {
-		const { valid, dropped } = partitionByRiskCode(rt.focus);
-		cleaned.focus = valid;
-		for (const code of dropped) {
-			warnings.push(`Unknown risk code in focus: ${code}`);
-		}
-	}
-
-	if (cleaned.disable && cleaned.focus) {
-		warnings.push(
-			"Both disable and focus are set; ignoring both. Use one or the other.",
-		);
-		cleaned.disable = undefined;
-		cleaned.focus = undefined;
-	}
-
-	if (rt.severity !== undefined) {
-		const validRules: SeverityOverrideRule[] = [];
-		for (const rule of rt.severity) {
-			if (!VALID_RISK_CODES.has(rule.riskCode)) {
-				warnings.push(
-					`Unknown risk code in severity override: ${rule.riskCode}`,
-				);
-				continue;
-			}
-			if (!isValidSeverity(rule.to)) {
-				warnings.push(
-					`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`,
-				);
-				continue;
-			}
-			validRules.push({ riskCode: rule.riskCode, to: rule.to });
-		}
-		cleaned.severity = validRules;
-	}
-
-	if (rt.ignore !== undefined) {
-		cleaned.ignore = rt.ignore.filter(
-			(p) => typeof p === "string" && p.length > 0,
-		);
-	}
-
-	return {
-		config: {
-			...raw,
-			riskTargeting: {
-				...(cleaned.disable ? { disable: cleaned.disable } : {}),
-				...(cleaned.severity ? { severity: cleaned.severity } : {}),
-				...(cleaned.ignore ? { ignore: cleaned.ignore } : {}),
-				...(cleaned.focus ? { focus: cleaned.focus } : {}),
-			},
-		},
-		warnings,
-	};
-}
+export async function loadEffectiveConfig(cwd?: string): Promise<{ config: DrykissConfig; warnings: string[]; }> { const warnings: string[] = []; const globalConfig = await loadConfigFile(getConfigPath(), warnings); let config: DrykissConfig = globalConfig ?? { interactive: true, confirmBeforeRun: true }; if (cwd && globalConfig) { const projectPath = getProjectConfigPath(cwd); const projectConfig = await loadConfigFile(projectPath, warnings); if (projectConfig) { config = { ...globalConfig, ...projectConfig, suppressions: [ ...(globalConfig.suppressions ?? []), ...(projectConfig.suppressions ?? []), ], }; } } if (!config.riskTargeting) { return { config, warnings }; } const rt = config.riskTargeting; const cleaned: { disable?: string[]; severity?: SeverityOverrideRule[]; ignore?: string[]; focus?: string[]; } = {}; if (rt.disable !== undefined) { const { valid, dropped } = partitionByRiskCode(rt.disable); cleaned.disable = valid; for (const code of dropped) { warnings.push(`Unknown risk code in disable: ${code}`); } } if (rt.focus !== undefined) { const { valid, dropped } = partitionByRiskCode(rt.focus); cleaned.focus = valid; for (const code of dropped) { warnings.push(`Unknown risk code in focus: ${code}`); } } if (cleaned.disable && cleaned.focus) { warnings.push("Both disable and focus are set; ignoring both. Use one or the other."); cleaned.disable = undefined; cleaned.focus = undefined; } if (rt.severity !== undefined) { const validRules: SeverityOverrideRule[] = []; for (const rule of rt.severity) { if (!VALID_RISK_CODES.has(rule.riskCode)) { warnings.push(`Unknown risk code in severity override: ${rule.riskCode}`); continue; } if (!isValidSeverity(rule.to)) { warnings.push(`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`); continue; } validRules.push({ riskCode: rule.riskCode, to: rule.to }); } cleaned.severity = validRules; } if (rt.ignore !== undefined) { cleaned.ignore = rt.ignore.filter((p) => typeof p === "string" && p.length > 0,); } return { config: { ...config, riskTargeting: { ...(cleaned.disable ? { disable: cleaned.disable } : {}), ...(cleaned.severity ? { severity: cleaned.severity } : {}), ...(cleaned.ignore ? { ignore: cleaned.ignore } : {}), ...(cleaned.focus ? { focus: cleaned.focus } : {}), }, }, warnings, }; } async function loadConfigFile(path: string, warnings: string[]): Promise<DrykissConfig | undefined> { try { const text = await readFile(path, "utf8"); return JSON.parse(text) as DrykissConfig; } catch (err) { if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") { return undefined; } if (err instanceof SyntaxError) { warnings.push(`Config file ${path} is corrupt; ignoring.`); return undefined; } throw err; } }
 function isValidSeverity(s: unknown): s is SeverityOverride {
 	return (
 		s === "critical" ||
@@ -286,6 +219,34 @@ export async function saveConfig(config: DrykissConfig): Promise<void> {
 	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
 	await writeFile(getConfigPath(), JSON.stringify(config, null, 2), "utf8");
+}
+
+/**
+ * Save a project-local config. Only writes the fields relevant to the
+ * project config (suppressions). The project config is a partial
+ * DrykissConfig that gets merged on top of the global config.
+ */
+export async function saveProjectConfig(
+	cwd: string,
+	projectConfig: Pick<DrykissConfig, "suppressions">,
+): Promise<void> {
+	const path = getProjectConfigPath(cwd);
+	const dir = getProjectBaseDir(cwd);
+	await mkdir(dir, { recursive: true });
+	// Read existing project config first to preserve other fields
+	let existing: DrykissConfig = {};
+	const warnings: string[] = [];
+	const loaded = await loadConfigFile(path, warnings);
+	if (loaded) existing = loaded;
+	await writeFile(
+		path,
+		JSON.stringify(
+			{ ...existing, suppressions: projectConfig.suppressions },
+			null,
+			2,
+		),
+		"utf8",
+	);
 }
 
 export async function setLensModel(lens: string, model: string): Promise<void> {

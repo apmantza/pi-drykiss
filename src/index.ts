@@ -24,7 +24,7 @@ import {
 	TESTS_COMMAND_NAME,
 	SECURITY_COMMAND_NAME,
 } from "./review-command.js";
-import { handleConfigCommand } from "./config-command.js";
+import { handleConfigCommand, handleSuppressCommand, handleListSuppressionsCommand, handleUnsuppressCommand } from "./config-command.js";
 import { loadConfig } from "./config.js";
 import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
@@ -353,6 +353,30 @@ export default function (pi: ExtensionAPI): void {
 			"Configure DRYKISS defaults: set models per lens, toggle interactive mode, disable confirmations. Run without args to see current config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
 			handleConfigCommand(args, ctx),
+	});
+
+	// ── /drykiss-suppress — Suppress a finding pattern ─────
+	pi.registerCommand("drykiss-suppress", {
+		description:
+			"Suppress findings matching a risk code and file pattern. Usage: /drykiss-suppress <riskCode> <pattern> <reason> [--expires=90d|YYYY-MM-DD]",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleSuppressCommand(args, ctx, ctx.cwd ?? ""),
+	});
+
+	// ── /drykiss-suppressions — List active suppressions ────
+	pi.registerCommand("drykiss-suppressions", {
+		description:
+			"List all active suppressions for this project. Run /drykiss-unsuppress <id> to remove one.",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleListSuppressionsCommand(args, ctx, ctx.cwd ?? ""),
+	});
+
+	// ── /drykiss-unsuppress — Remove a suppression ──────────
+	pi.registerCommand("drykiss-unsuppress", {
+		description:
+			"Remove a suppression by its ID. Usage: /drykiss-unsuppress <suppression-id>",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleUnsuppressCommand(args, ctx, ctx.cwd ?? ""),
 	});
 
 	// ── /drykiss-jobs — Inspect running/completed reviews ──

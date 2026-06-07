@@ -2,12 +2,17 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
 	loadConfig,
 	saveConfig,
+	saveProjectConfig,
 	setLensModel,
 	setDefaultModel,
+	loadEffectiveConfig,
+	type Suppression,
 } from "./config.js";
 import { selectModel, extractScopeHints } from "./model-selector.js";
 import { resetPrompts } from "./prompt-builder.js";
 import { LENS_NAMES } from "./types.js";
+import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
+import { getExpiredSuppressionIds } from "./review-result.js";
 
 /**
  * Format a `modelScope` value for display. Handles the legacy single-hint
@@ -387,4 +392,212 @@ export async function handleConfigCommand(
 		`Unknown subcommand: ${subcommand}. Try /drykiss-config show.`,
 		"error",
 	);
+}
+
+
+// ── Phase 3: Suppression commands ──────────────────────────────────────
+
+/**
+ * Generate a unique suppression ID.
+ */
+function generateSuppressionId(): string {
+	const timestamp = Date.now().toString(36);
+	const random = Math.random().toString(36).substring(2, 8);
+	return `sup-${timestamp}-${random}`;
+}
+
+/**
+ * Handle the /drykiss-suppress command.
+ *
+ * Usage: /drykiss-suppress <riskCode> <pattern> <reason> [expiry]
+ *
+ * Tokens:
+ *   1. riskCode — e.g. K1, D1, or "*" for all codes
+ *   2. pattern — glob pattern like "src/legacy/**"
+ *   3+ reason — all remaining tokens joined
+ *   Optional expiry suffix: --expires=YYYY-MM-DD or --expires=90d
+ */
+export async function handleSuppressCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	cwd: string,
+): Promise<void> {
+	const tokens = args.trim().split(/\s+/).filter(Boolean);
+	if (tokens.length < 3) {
+		ctx.ui.notify(
+			"Usage: /drykiss-suppress <riskCode> <pattern> <reason> [--expires=90d|YYYY-MM-DD]",
+			"warning",
+		);
+		return;
+	}
+
+	const riskCode = tokens[0];
+	const pattern = tokens[1];
+
+	// Validate risk code
+	if (riskCode !== "*" && !VALID_RISK_CODES.has(riskCode)) {
+		ctx.ui.notify(
+			`Invalid risk code: ${riskCode}. Valid codes: ${[...VALID_RISK_CODES].sort().join(", ")} or "*" for all.`,
+			"error",
+		);
+		return;
+	}
+
+	// Parse expiry from trailing tokens
+	let expiresAt: string | undefined;
+	const reasonTokens: string[] = [];
+	for (const t of tokens.slice(2)) {
+		if (t.startsWith("--expires=")) {
+			const val = t.slice("--expires=".length);
+			if (val.length > 0) {
+				// Support "90d" shorthand
+				const daysMatch = val.match(/^(\d+)d$/);
+				if (daysMatch) {
+					const days = parseInt(daysMatch[1], 10);
+					const expiryDate = new Date();
+					expiryDate.setDate(expiryDate.getDate() + days);
+					expiresAt = expiryDate.toISOString().split("T")[0];
+				} else {
+					// Try parsing as date
+					const d = new Date(val);
+					if (!isNaN(d.getTime())) {
+						expiresAt = val;
+					} else {
+						ctx.ui.notify(
+							`Invalid expiry format: ${val}. Use YYYY-MM-DD or Nd (e.g. --expires=90d).`,
+							"warning",
+						);
+						return;
+					}
+				}
+			}
+		} else {
+			reasonTokens.push(t);
+		}
+	}
+	const reason = reasonTokens.join(" ");
+	if (!reason) {
+		ctx.ui.notify("Please provide a reason for the suppression.", "warning");
+		return;
+	}
+
+	try {
+		const { config } = await loadEffectiveConfig(cwd);
+		const suppressions: Suppression[] = [...(config.suppressions ?? [])];
+
+		const suppression: Suppression = {
+			id: generateSuppressionId(),
+			riskCode,
+			pattern,
+			reason,
+			addedAt: new Date().toISOString(),
+			...(expiresAt ? { expiresAt } : {}),
+		};
+		suppressions.push(suppression);
+
+		await saveProjectConfig(cwd, { suppressions });
+
+		// Check for expired suppressions
+		const expiredIds = getExpiredSuppressionIds(suppressions);
+		const expiredMsg = expiredIds.length > 0
+			? ` (${expiredIds.length} expired suppression(s) present)`
+			: "";
+
+		ctx.ui.notify(
+			`Suppression added: ${riskCode} on ${pattern} — "${reason}"${expiresAt ? ` (expires ${expiresAt})` : ""}${expiredMsg}`,
+			"info",
+		);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`Failed to add suppression: ${msg}`, "error");
+	}
+}
+
+/**
+ * Handle the /drykiss-suppressions command — list all active suppressions.
+ */
+export async function handleListSuppressionsCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	cwd: string,
+): Promise<void> {
+	const tokens = args.trim().split(/\s+/).filter(Boolean);
+	try {
+		const { config } = await loadEffectiveConfig(cwd);
+		const suppressions = config.suppressions ?? [];
+
+		if (suppressions.length === 0) {
+			ctx.ui.notify("No suppressions configured for this project.", "info");
+			return;
+		}
+
+		// Filter expired
+		const active = suppressions.filter((s) => {
+			if (!s.expiresAt) return true;
+			try {
+				return new Date(s.expiresAt).getTime() > Date.now();
+			} catch {
+				return true;
+			}
+		});
+		const expiredCount = suppressions.length - active.length;
+
+		const lines: string[] = [
+			`## Suppressions (${active.length} active${expiredCount > 0 ? `, ${expiredCount} expired` : ""})`,
+			"",
+		];
+		for (const s of suppressions) {
+			const isExpired = !active.includes(s);
+			const prefix = isExpired ? "❌ (EXPIRED) " : "✓ ";
+			const expiresStr = s.expiresAt ? ` — expires ${s.expiresAt}` : " — no expiry";
+			lines.push(
+				`${prefix}\`${s.riskCode}\` on \`${s.pattern}\` — ${s.reason}${expiresStr}`,
+			);
+		}
+		lines.push("", "Run /drykiss-unsuppress <id> to remove a suppression.");
+		ctx.ui.notify(lines.join("\n"), "info");
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`Failed to list suppressions: ${msg}`, "error");
+	}
+}
+
+/**
+ * Handle the /drykiss-unsuppress command — remove a suppression by ID.
+ */
+export async function handleUnsuppressCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	cwd: string,
+): Promise<void> {
+	const suppressionId = args.trim();
+	if (!suppressionId) {
+		ctx.ui.notify("Usage: /drykiss-unsuppress <suppression-id>", "warning");
+		return;
+	}
+
+	try {
+		const { config } = await loadEffectiveConfig(cwd);
+		const suppressions = config.suppressions ?? [];
+		const index = suppressions.findIndex((s) => s.id === suppressionId);
+
+		if (index === -1) {
+			ctx.ui.notify(
+				`No suppression found with id: ${suppressionId}. Run /drykiss-suppressions to see all suppressions.`,
+				"error",
+			);
+			return;
+		}
+
+		const removed = suppressions[index];
+		const updated = suppressions.filter((s) => s.id !== suppressionId);
+		await saveProjectConfig(cwd, { suppressions: updated });
+		ctx.ui.notify(
+			`Removed suppression: ${removed.riskCode} on ${removed.pattern} — "${removed.reason}".`,
+			"info",
+		);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`Failed to remove suppression: ${msg}`, "error");
+	}
 }

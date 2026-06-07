@@ -71,6 +71,16 @@ export interface Finding {
 	 * ships the per-lens risk code catalogue.
 	 */
 	readonly riskCode?: string;
+	/**
+	 * Internal marker set by `applySuppressions` (Phase 3). Not part of
+	 * the LLM output contract — added post-hoc by the suppression engine.
+	 */
+	readonly _suppressed?: true;
+	/**
+	 * Reference to the suppression entry that suppressed this finding.
+	 * Populated alongside `_suppressed`.
+	 */
+	readonly _suppressionRef?: string;
 }
 
 export interface SynthesisResult {

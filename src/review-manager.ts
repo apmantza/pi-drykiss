@@ -590,6 +590,11 @@ export class ReviewManager {
 			onProgress?: (job: ReviewJob) => void;
 			progressIntervalMs?: number;
 			severityOverrides?: readonly import("./config.js").SeverityOverrideRule[];
+			suppressions?: ReadonlyArray<{
+				riskCode: string;
+				pattern: string;
+				id: string;
+			}>;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -614,6 +619,7 @@ export class ReviewManager {
 		return buildReviewResult(job, {
 			target: options.target,
 			severityOverrides: options.severityOverrides,
+			suppressions: options.suppressions,
 		});
 	}
 

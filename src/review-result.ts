@@ -15,6 +15,7 @@ export interface ReviewResultCounts {
 	readonly medium: number;
 	readonly low: number;
 	readonly nit: number;
+	readonly suppressed: number;
 }
 
 export interface ReviewValidationIssue {
@@ -46,6 +47,16 @@ export interface BuildReviewResultOptions {
 	 * This runs after `validateFindings` but before `countFindings`.
 	 */
 	readonly severityOverrides?: readonly SeverityOverrideRule[];
+	/**
+	 * Suppressions to apply (Phase 3). Suppressed findings get
+	 * `severity: "nit"` and `_suppressed: true`. They are excluded
+	 * from the main count and rendered separately in the widget.
+	 */
+	readonly suppressions?: ReadonlyArray<{
+		riskCode: string;
+		pattern: string;
+		id: string;
+	}>;
 }
 
 const SEVERITIES: readonly Severity[] = [
@@ -67,14 +78,17 @@ export function buildReviewResult(
 	const overridden = options.severityOverrides
 		? applySeverityOverrides(validation.findings, options.severityOverrides)
 		: validation.findings;
-	const counts = countFindings(overridden);
+	const { suppressed, active } = options.suppressions
+		? applySuppressions(overridden, options.suppressions)
+		: { suppressed: [], active: overridden };
+	const counts = countFindings(active);
 	const errors = collectErrors(job);
 	const verdict = synthesis?.verdict ?? "Request changes";
 	const status = job.overallStatus;
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&
-		overridden.length === 0 &&
+		active.length === 0 &&
 		verdict === "Approve";
 
 	return {
@@ -85,8 +99,11 @@ export function buildReviewResult(
 		...(options.target ? { target: options.target } : {}),
 		...(job.reviewPath ? { reportPath: job.reviewPath } : {}),
 		files: [...job.files],
-		counts,
-		findings: overridden,
+		counts: {
+			...counts,
+			suppressed: suppressed.length,
+		},
+		findings: [...active, ...suppressed],
 		summary: synthesis?.summary ?? "Review did not produce a synthesis result.",
 		errors,
 		validationIssues: validation.issues,
@@ -175,6 +192,7 @@ function countFindings(findings: readonly Finding[]): ReviewResultCounts {
 		medium: findings.filter((f) => f.severity === "medium").length,
 		low: findings.filter((f) => f.severity === "low").length,
 		nit: findings.filter((f) => f.severity === "nit").length,
+		suppressed: 0,
 	};
 }
 
@@ -288,4 +306,94 @@ function globToRegex(pattern: string): RegExp {
 	}
 	regex += "$";
 	return new RegExp(regex);
+}
+
+// ── Phase 3: Suppressions ───────────────────────────────────────────────
+
+/**
+ * Apply suppressions to a list of findings.
+ *
+ * A finding is suppressed when:
+ *   1. Its `riskCode` matches the suppression's `riskCode` (or suppression
+ *      uses wildcard "*" to match any code), AND
+ *   2. Its `file` matches the suppression's `pattern` glob.
+ *
+ * Suppressed findings get `severity: "nit"` and a `_suppressed: true`
+ * marker. They are rendered under a collapsed section in the widget but
+ * do not contribute to the Health Score.
+ *
+ * @returns A tuple of [suppressed findings, active findings].
+ */
+export function applySuppressions(
+	findings: readonly Finding[],
+	suppressions: ReadonlyArray<{
+		riskCode: string;
+		pattern: string;
+		id: string;
+	}>,
+): { suppressed: Finding[]; active: Finding[] } {
+	if (suppressions.length === 0) {
+		return { suppressed: [], active: [...findings] };
+	}
+
+	// Pre-compile glob patterns
+	const compiled = suppressions.map((s) => ({
+		...s,
+		regex: globToRegex(s.pattern),
+	}));
+
+	const suppressed: Finding[] = [];
+	const active: Finding[] = [];
+
+	for (const f of findings) {
+		const file = f.file.replace(/\\/g, "/");
+		let isSuppressed = false;
+		for (const s of compiled) {
+			if (s.riskCode !== "*" && s.riskCode !== f.riskCode) continue;
+			if (!s.regex.test(file)) continue;
+			suppressed.push({
+				...f,
+				severity: "nit" as Severity,
+				_suppressed: true,
+				_suppressionRef: s.id,
+			});
+			isSuppressed = true;
+			break;
+		}
+		if (!isSuppressed) {
+			active.push(f);
+		}
+	}
+
+	return { suppressed, active };
+}
+
+/**
+ * Check if a suppression has expired.
+ * Returns true if the suppression has passed its `expiresAt` date.
+ * When `expiresAt` is undefined, the suppression never expires.
+ */
+export function isSuppressionExpired(
+	suppression: { expiresAt?: string },
+): boolean {
+	if (!suppression.expiresAt) return false;
+	try {
+		const expiry = new Date(suppression.expiresAt);
+		return expiry.getTime() <= Date.now();
+	} catch {
+		// Invalid date — treat as never-expiring
+		return false;
+	}
+}
+
+/**
+ * Find which suppressions are expired from a list.
+ * Returns the ids of expired suppressions.
+ */
+export function getExpiredSuppressionIds(
+	suppressions: ReadonlyArray<{ id: string; expiresAt?: string }>,
+): string[] {
+	return suppressions
+		.filter((s) => isSuppressionExpired(s))
+		.map((s) => s.id);
 }
