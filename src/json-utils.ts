@@ -98,7 +98,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		fixed = fixed.replace(/'/g, '"');
 	}
 
-	// 7. Try to fix unterminated strings by finding last complete object/array
+	// 3. Try to fix unterminated strings by finding last complete object/array
 	// Find the last } or ] and truncate there
 	const lastObjBrace = fixed.lastIndexOf("}");
 	const lastArrBracket = fixed.lastIndexOf("]");

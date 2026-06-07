@@ -6,7 +6,7 @@ import {
 	getFileContent,
 	getFileDiff,
 	getProjectIndex,
-	detectLanguage,
+	parseDiffOutput,
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
@@ -285,31 +285,7 @@ async function getCommitChangedFiles(
 		"--format=",
 		commit,
 	]);
-	return parseNameStatus(result.stdout);
-}
-
-function parseNameStatus(stdout: string): ChangedFile[] {
-	const files: ChangedFile[] = [];
-	for (const line of stdout.split("\n")) {
-		if (!line.trim()) continue;
-		const parts = line.split("\t");
-		const code = parts[0]?.[0];
-		const path = code === "R" || code === "C" ? parts[2] : parts[1];
-		if (!code || !path) continue;
-		const status = statusFromCode(code);
-		if (!status) continue;
-		files.push({ path, status, language: detectLanguage(path) });
-	}
-	return files;
-}
-
-function statusFromCode(code: string): ChangedFile["status"] | null {
-	if (code === "M") return "modified";
-	if (code === "A") return "added";
-	if (code === "D") return "deleted";
-	if (code === "R") return "renamed";
-	if (code === "C") return "copied";
-	return null;
+	return parseDiffOutput(result.stdout);
 }
 
 function scopeLabel(mode: Exclude<ReviewMode, "auto">, ref: string): string {

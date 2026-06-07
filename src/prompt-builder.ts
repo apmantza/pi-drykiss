@@ -368,26 +368,6 @@ export async function buildSynthesisPrompt(
 
 /**
  * Builds the KISS/DRY quick-check block for the auto-injector.
- * This is a TUI-side message (printed into the conversation after an edit),
- * NOT an LLM system prompt. Exempt from the `.md`-only constraint.
+ * MOVED to src/auto-inject.ts. This export is a thin re-export for backward compat.
  */
-export function buildAutoInjectBlock(edits: {
-	files: ReadonlyArray<{ path: string; language: string | null }>;
-}): string {
-	const fileList = edits.files.map((f) => f.path).join(", ");
-	return `\n\n## KISS/DRY Quick Check
-
-You edited: ${fileList}. Before proceeding, briefly verify:
-
-- [ ] **KISS**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners? No speculative features?
-- [ ] **DRY**: Is knowledge represented once? No copy-pasted logic or scattered conditionals?
-- [ ] **Names**: Do variables/functions reveal intent, not mechanism? (No 'temp', 'data', 'result' without context)
-- [ ] **Size**: Are functions focused on one thing? Any function worth splitting?
-- [ ] **Comments**: Do they explain WHY, not WHAT?
-- [ ] **Edge cases**: Are null, empty, and boundary values handled?
-- [ ] **Security**: Is user input validated at boundaries? No raw SQL concatenation?
-- [ ] **Resilience**: Are errors handled specifically, not swallowed? Are async failures caught?
-- [ ] **Architecture**: Does the change follow existing patterns? Is the interface small and the behavior rich (deep module)?
-
-Fix any quick wins, then continue.`;
-}
+export { buildAutoInjectBlock } from "./auto-inject.js";

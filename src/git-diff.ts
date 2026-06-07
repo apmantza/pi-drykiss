@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
 
-const STATUS_MAP: Record<string, ChangedFile["status"]> = {
+export const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	M: "modified",
 	A: "added",
 	R: "renamed",
@@ -47,7 +47,16 @@ export function detectLanguage(p: string): string | null {
 	return map[ext ?? ""] ?? null;
 }
 
-function parseDiffOutput(stdout: string): ChangedFile[] {
+/**
+ * Parse `git diff --name-status` output.
+ *
+ * Git rename format: `R<score>\t<old>\t<new>`
+ * Copy format:       `C<score>\t<old>\t<new>`
+ * For R/C status, `parts[2]` is the current (new) path. For all other
+ * statuses, `parts[1]` is the path.
+ * The status code may or may not have a similarity score suffix (R vs R100).
+ */
+export function parseDiffOutput(stdout: string): ChangedFile[] {
 	const files: ChangedFile[] = [];
 	for (const line of stdout.split("\n")) {
 		if (!line.trim()) continue;
@@ -56,7 +65,9 @@ function parseDiffOutput(stdout: string): ChangedFile[] {
 		if (!statusCode) continue;
 		const status = STATUS_MAP[statusCode];
 		if (!status) continue;
-		const filePath = parts[1];
+		// R/C status has old\tnew; the current path is parts[2]
+		const filePath =
+			statusCode === "R" || statusCode === "C" ? parts[2] : parts[1];
 		if (!filePath) continue;
 		files.push({ path: filePath, status, language: detectLanguage(filePath) });
 	}
@@ -386,8 +397,15 @@ export async function getProjectIndex(
 				if (exports.length > 0) {
 					entries.push({ path: filePath.replace(/\\/g, "/"), exports });
 				}
-			} catch {
-				// skip unreadable
+				} catch (err) {
+					// skip unreadable files with a warning so the index is not silently incomplete
+					const code =
+						err instanceof Error
+							? (err as NodeJS.ErrnoException).code
+							: undefined;
+					if (code === "EACCES" || code === "EPERM") {
+						console.warn(`[DRYKISS] Skipping ${filePath}: permission denied`);
+					}
 			}
 		}
 		if (entries.length >= maxFiles) break;

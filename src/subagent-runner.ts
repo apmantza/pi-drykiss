@@ -178,6 +178,18 @@ export async function runLensSubagent(
 		if (!errorMessage) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 		}
+		// If a session was created before the error, dispose it to avoid
+		// resource leaks (partially initialized sessions with open file
+		// handles or subscriptions). The caller should not receive a broken
+		// session object.
+		if (session) {
+			try {
+				session.dispose();
+			} catch {
+				/* dispose is best-effort */
+			}
+			session = undefined;
+		}
 	}
 
 	return {

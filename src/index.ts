@@ -28,7 +28,7 @@ import { handleConfigCommand } from "./config-command.js";
 import { loadConfig } from "./config.js";
 import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
-import { buildAutoInjectBlock } from "./prompt-builder.js";
+import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
 import { ReviewProgressWidget } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";

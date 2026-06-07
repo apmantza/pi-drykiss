@@ -73,7 +73,7 @@ describe("getChangedFiles", () => {
 			language: "JavaScript",
 		});
 		expect(files[3]).toMatchObject({
-			path: "src/old.ts",
+			path: "src/new.ts",
 			status: "renamed",
 			language: "TypeScript",
 		});
