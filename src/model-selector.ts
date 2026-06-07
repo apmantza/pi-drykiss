@@ -234,19 +234,32 @@ export function isServerError(err: unknown): boolean {
 }
 
 /**
+ * Extract valid scope hint strings from a `modelScope` config value.
+ * Handles single-string, array-of-strings, and undefined forms.
+ * Shared between selectModelWithAutoroute (toast note) and
+ * config-command.ts (show output).
+ */
+export function extractScopeHints(
+	scope: string | string[] | undefined,
+): string[] {
+	if (scope === undefined) return [];
+	if (Array.isArray(scope)) {
+		return scope.filter((s) => typeof s === "string" && s.trim());
+	}
+	const trimmed = scope.trim();
+	if (trimmed.length === 0) return [];
+	return [trimmed];
+}
+
+/**
  * Build the trailing scope note shown in the "Auto-routing to <model>" toast.
  * Handles both the single-hint and list forms of `config.modelScope`.
  */
 function formatScopeNote(scope: string | string[] | undefined): string {
-	if (scope === undefined) return "";
-	if (Array.isArray(scope)) {
-		const hints = scope.filter((s) => typeof s === "string" && s.trim());
-		if (hints.length === 0) return "";
-		return `, scope: [${hints.join(", ")}]`;
-	}
-	const trimmed = scope.trim();
-	if (trimmed.length === 0) return "";
-	return `, scope: ${trimmed}`;
+	const hints = extractScopeHints(scope);
+	if (hints.length === 0) return "";
+	if (hints.length === 1) return `, scope: ${hints[0]}`;
+	return `, scope: [${hints.join(", ")}]`;
 }
 
 /** Check if an error is a model-level error (quota, auth, or server-side) that warrants model switching. */

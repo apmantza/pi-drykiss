@@ -5,7 +5,7 @@ import {
 	setLensModel,
 	setDefaultModel,
 } from "./config.js";
-import { selectModel } from "./model-selector.js";
+import { selectModel, extractScopeHints } from "./model-selector.js";
 import { resetPrompts } from "./prompt-builder.js";
 import { LENS_NAMES } from "./types.js";
 
@@ -26,16 +26,14 @@ function formatAutoreview(
 	];
 }
 
+/**
+ * Format a `modelScope` value for the config show output.
+ * Wraps each hint in backticks for readability.
+ */
 function formatModelScope(scope: string | string[] | undefined): string {
-	if (scope === undefined) return "(any free model)";
-	if (Array.isArray(scope)) {
-		const hints = scope.filter((s) => typeof s === "string" && s.trim());
-		if (hints.length === 0) return "(any free model)";
-		return hints.map((h) => `\`${h}\``).join(", ");
-	}
-	const trimmed = scope.trim();
-	if (trimmed.length === 0) return "(any free model)";
-	return `\`${trimmed}\``;
+	const hints = extractScopeHints(scope);
+	if (hints.length === 0) return "(any free model)";
+	return hints.map((h) => `\`${h}\``).join(", ");
 }
 
 /**

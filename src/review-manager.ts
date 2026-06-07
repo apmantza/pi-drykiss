@@ -518,14 +518,7 @@ export class ReviewManager {
 					job.synthesisSession,
 					"synthesis",
 					async (m) =>
-						runLensSubagent(
-							ctx,
-							cwd,
-							m,
-							systemPrompt,
-							userPrompt,
-							"synthesis",
-						),
+						runLensSubagent(ctx, cwd, m, systemPrompt, userPrompt, "synthesis"),
 				);
 				if (retryResult) {
 					if (retryResult.session) {
