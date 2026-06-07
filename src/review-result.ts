@@ -137,6 +137,15 @@ function validateFinding(
 			return issue(index, `missing ${field}`, finding);
 		}
 	}
+	// consequence and source: undefined is allowed (backward compat with
+	// legacy persisted findings). When present, must be a non-empty string.
+	for (const field of ["consequence", "source"] as const) {
+		const value = finding[field];
+		if (value === undefined) continue;
+		if (typeof value !== "string" || value.trim().length === 0) {
+			return issue(index, `empty ${field}`, finding);
+		}
+	}
 	return null;
 }
 

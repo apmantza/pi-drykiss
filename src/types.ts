@@ -50,11 +50,27 @@ export interface Finding {
 	readonly summary: string;
 	readonly detail: string;
 	readonly suggestion: string;
+	/**
+	 * What goes wrong downstream if the issue is left in place. Optional for
+	 * backward compat with persisted reviews; new findings produced by lens
+	 * runs should always populate this with a non-empty string.
+	 */
 	readonly consequence?: string;
+	/**
+	 * Where in the codebase the smell lives — typically the function,
+	 * class, or module name. Optional for backward compat; new findings
+	 * should populate it.
+	 */
 	readonly source?: string;
 	readonly fixability?: "quick-fix" | "guided" | "manual";
 	readonly confidence?: "confirmed" | "likely" | "suspect";
 	readonly lens?: ReviewLens;
+	/**
+	 * Risk code from the project's RISK_CODES list. Used by config
+	 * (Phase 2: disable/severity/ignore/focus). Optional until Phase 2
+	 * ships the per-lens risk code catalogue.
+	 */
+	readonly riskCode?: string;
 }
 
 export interface SynthesisResult {
@@ -81,6 +97,14 @@ export interface EditedFile {
 /**
  * Map a raw JSON object from LLM output to a Finding.
  * Handles missing/undefined fields with sensible defaults.
+ *
+ * `consequence` and `source` always coerce to a string (empty string
+ * when missing). This is what the validator expects: undefined means
+ * "legacy persisted finding", empty string means "LLM said nothing",
+ * non-empty means a real field. Pushing toward empty-string default
+ * (rather than undefined) makes new lens output visibly different from
+ * legacy data and makes the validator's "must be non-empty" rule
+ * meaningful.
  */
 export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 	if (raw == null || typeof raw !== "object") {
@@ -96,6 +120,7 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			fixability: undefined,
 			confidence: undefined,
 			lens,
+			riskCode: undefined,
 		};
 	}
 	return {
@@ -106,8 +131,8 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 		summary: String(raw.summary ?? ""),
 		detail: String(raw.detail ?? raw.summary ?? ""),
 		suggestion: String(raw.suggestion ?? ""),
-		consequence: raw.consequence ? String(raw.consequence) : undefined,
-		source: raw.source ? String(raw.source) : undefined,
+		consequence: raw.consequence ? String(raw.consequence) : "",
+		source: raw.source ? String(raw.source) : "",
 		fixability: raw.fixability
 			? (String(raw.fixability) as "quick-fix" | "guided" | "manual")
 			: undefined,
@@ -115,6 +140,7 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			? (String(raw.confidence) as "confirmed" | "likely" | "suspect")
 			: undefined,
 		lens,
+		riskCode: raw.riskCode ? String(raw.riskCode) : undefined,
 	};
 }
 

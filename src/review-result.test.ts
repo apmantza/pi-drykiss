@@ -94,6 +94,89 @@ describe("validateFindings", () => {
 	});
 });
 
+describe("validateFinding — consequence/source (Phase 1)", () => {
+	it("rejects a finding with empty-string consequence", () => {
+		const result = validateFindings(
+			[finding({ consequence: "" })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(0);
+		expect(result.issues[0].reason).toBe("empty consequence");
+	});
+
+	it("rejects a finding with empty-string source", () => {
+		const result = validateFindings(
+			[finding({ source: "" })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(0);
+		expect(result.issues[0].reason).toBe("empty source");
+	});
+
+	it("rejects a finding with non-string consequence", () => {
+		const result = validateFindings(
+			[finding({ consequence: 42 as unknown as string })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(0);
+		expect(result.issues[0].reason).toBe("empty consequence");
+	});
+
+	it("accepts a finding with non-empty consequence and source", () => {
+		const result = validateFindings(
+			[
+				finding({
+					consequence: "Subsequent calls will fail.",
+					source: "UserService.updateProfile",
+				}),
+			],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(1);
+		expect(result.issues).toEqual([]);
+	});
+
+	it("accepts a legacy persisted finding with undefined consequence/source", () => {
+		// Backward compat: persisted findings from before the contract landed
+		// may have these fields absent. Validator must not reject them.
+		const result = validateFindings(
+			[finding({ consequence: undefined, source: undefined })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(1);
+		expect(result.issues).toEqual([]);
+	});
+
+	it("trims whitespace before checking emptiness", () => {
+		const result = validateFindings(
+			[finding({ consequence: "   " })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(0);
+		expect(result.issues[0].reason).toBe("empty consequence");
+	});
+});
+
+describe("validateFinding — riskCode (Phase 1)", () => {
+	it("accepts a finding with a riskCode", () => {
+		const result = validateFindings(
+			[finding({ riskCode: "R1" })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(1);
+	});
+
+	it("accepts a finding without a riskCode (Phase 2 will require it)", () => {
+		// For now riskCode is optional. Phase 2 introduces the per-lens
+		// risk code catalogue and can tighten this if needed.
+		const result = validateFindings(
+			[finding({ riskCode: undefined })],
+			new Set(["src/a.ts"]),
+		);
+		expect(result.findings).toHaveLength(1);
+	});
+});
+
 describe("buildReviewResult", () => {
 	it("marks approve-with-no-findings as clean", () => {
 		const result = buildReviewResult(job({ reviewPath: "/tmp/review.json" }), {

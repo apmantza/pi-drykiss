@@ -217,3 +217,97 @@ describe("renderLensLine — session log link", () => {
 		expect(line).not.toContain("\x1b]8;;");
 	});
 });
+
+import { formatFinding } from "./review-widget.js";
+import type { Finding } from "./types.js";
+
+describe("formatFinding", () => {
+	function buildFinding(overrides: Partial<Finding> = {}): Finding {
+		return {
+			file: "src/user.ts",
+			line: 42,
+			severity: "high",
+			category: "Divergent Change",
+			summary: "Two call sites diverge",
+			detail: "update_profile and update_admin both fork on the same field.",
+			suggestion: "Extract a shared helper.",
+			consequence: "Future changes will be missed in one branch.",
+			source: "UserService.update_profile",
+			fixability: "guided",
+			riskCode: "R1",
+			lens: "simplicity",
+			...overrides,
+		};
+	}
+
+	it("renders the heading with severity icon, lens tag, category, source, and location", () => {
+		const out = formatFinding(buildFinding());
+		const firstLine = out.split("\n")[0];
+		expect(firstLine).toBe(
+			"🟠 [KISS] Divergent Change — UserService.update_profile (src/user.ts:42)",
+		);
+	});
+
+	it("includes the Symptom line with detail", () => {
+		const out = formatFinding(buildFinding());
+		expect(out).toContain("Symptom: update_profile and update_admin both fork on the same field.");
+	});
+
+	it("includes the Consequence line when consequence is set", () => {
+		const out = formatFinding(buildFinding());
+		expect(out).toContain("→ Consequence: Future changes will be missed in one branch.");
+	});
+
+	it("includes the Fix line with fixability label and suggestion", () => {
+		const out = formatFinding(buildFinding());
+		expect(out).toContain("→ Fix: guided (~10 lines) — Extract a shared helper.");
+	});
+
+	it("includes the riskCode annotation when set", () => {
+		const out = formatFinding(buildFinding());
+		expect(out).toContain("[riskCode: R1]");
+	});
+
+	it("omits the Consequence line for legacy findings without one", () => {
+		const out = formatFinding(
+			buildFinding({ consequence: undefined, source: undefined }),
+		);
+		expect(out).not.toContain("Consequence");
+	});
+
+	it("omits the Fix line when suggestion is empty", () => {
+		const out = formatFinding(buildFinding({ suggestion: "" }));
+		expect(out).not.toContain("→ Fix:");
+	});
+
+	it("falls back to plain '→ Fix: <suggestion>' when fixability is missing", () => {
+		const out = formatFinding(buildFinding({ fixability: undefined }));
+		expect(out).toContain("→ Fix: Extract a shared helper.");
+		expect(out).not.toContain("(~10 lines)");
+	});
+
+	it("uses different severity icons", () => {
+		expect(formatFinding(buildFinding({ severity: "critical" })).split("\n")[0]).toMatch(/^🔴/);
+		expect(formatFinding(buildFinding({ severity: "medium" })).split("\n")[0]).toMatch(/^🟡/);
+		expect(formatFinding(buildFinding({ severity: "low" })).split("\n")[0]).toMatch(/^🔵/);
+		expect(formatFinding(buildFinding({ severity: "nit" })).split("\n")[0]).toMatch(/^⚪/);
+	});
+
+	it("omits line number from location when line is undefined", () => {
+		const out = formatFinding(buildFinding({ line: undefined }));
+		expect(out.split("\n")[0]).toContain("(src/user.ts)");
+		expect(out.split("\n")[0]).not.toContain("src/user.ts:42");
+	});
+
+	it("uses the lens display name from LENS_DISPLAY_NAMES", () => {
+		const out = formatFinding(buildFinding({ lens: "deduplication" }));
+		expect(out).toContain("[DRY]");
+		expect(out).not.toContain("[deduplication]");
+	});
+
+	it("falls back to the raw lens name when unknown", () => {
+		const out = formatFinding(buildFinding({ lens: "simplicity" }));
+		// simplicity → "KISS" via LENS_DISPLAY_NAMES
+		expect(out).toContain("[KISS]");
+	});
+});

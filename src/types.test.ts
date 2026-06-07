@@ -68,6 +68,44 @@ describe("mapRawToFinding", () => {
 	});
 });
 
+describe("mapRawToFinding — consequence/source/riskCode", () => {
+	it("coerces provided consequence and source to non-empty strings", () => {
+		const result = mapRawToFinding({
+			file: "src/a.ts",
+			consequence: "A test will fail next time.",
+			source: "helper foo()",
+		});
+		expect(result.consequence).toBe("A test will fail next time.");
+		expect(result.source).toBe("helper foo()");
+	});
+
+	it("uses empty strings for missing consequence and source", () => {
+		const result = mapRawToFinding({ file: "src/a.ts" });
+		expect(result.consequence).toBe("");
+		expect(result.source).toBe("");
+	});
+
+	it("uses empty string for empty-string consequence (not undefined)", () => {
+		const result = mapRawToFinding({
+			file: "src/a.ts",
+			consequence: "",
+			source: "",
+		});
+		expect(result.consequence).toBe("");
+		expect(result.source).toBe("");
+	});
+
+	it("passes through a riskCode when provided", () => {
+		const result = mapRawToFinding({ file: "src/a.ts", riskCode: "R1" });
+		expect(result.riskCode).toBe("R1");
+	});
+
+	it("defaults riskCode to undefined when not provided", () => {
+		const result = mapRawToFinding({ file: "src/a.ts" });
+		expect(result.riskCode).toBeUndefined();
+	});
+});
+
 describe("parseFindingsArray", () => {
 	it("parses a valid array of findings", () => {
 		const raw = [

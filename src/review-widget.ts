@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import type { ReviewJob, LensStatus } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { pathToFileLink } from "./persist.js";
+import type { Finding, Severity } from "./types.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -42,6 +43,98 @@ function renderLogLink(logPath: string | undefined, theme: Theme): string {
 	const label = theme.fg("dim", name);
 	return ` · ${hyperlink(label, url)}`;
 }
+
+/** Symbol per severity used by formatFinding. */
+const SEVERITY_ICON: Record<Severity, string> = {
+	critical: "🔴",
+	high: "🟠",
+	medium: "🟡",
+	low: "🔵",
+	nit: "⚪",
+};
+
+/** Short label for fixability in the rendered line. */
+const FIXABILITY_LABEL: Record<NonNullable<Finding["fixability"]>, string> = {
+	"quick-fix": "quick-fix (1-line)",
+	guided: "guided (~10 lines)",
+	manual: "manual (larger refactor)",
+};
+
+type FindingTheme = {
+	fg(color: string, text: string): string;
+	bold(text: string): string;
+	dim(text: string): string;
+};
+
+/**
+ * Render a Finding as a multi-line human-readable string.
+ *
+ * Output shape:
+ *   🔴 [KISS] Divergent Change — UserService.update_profile (src/user.ts:42)
+ *      Symptom: ...detail...
+ *      → Consequence: ...consequence...
+ *      → Source: ...source...
+ *      → Fix: quick-fix (1-line) — ...suggestion...
+ *
+ * Lines that have no data (e.g. legacy findings without consequence) are
+ * omitted. Lens name is rendered from LENS_DISPLAY_NAMES when the finding
+ * carries a `lens` field. The theme parameter allows the caller to inject
+ * terminal colors; the default is no-color for tests.
+ */
+export function formatFinding(
+	finding: Finding,
+	theme: FindingTheme = defaultTheme,
+): string {
+	const lensName = finding.lens
+		? (LENS_DISPLAY_NAMES[finding.lens] ?? finding.lens)
+		: "Review";
+	const icon = SEVERITY_ICON[finding.severity] ?? "⚪";
+	const tag = theme.fg("accent", `[${lensName}]`);
+	const category = theme.bold(finding.category);
+	const source = finding.source ?? "";
+	const location = finding.line
+		? ` (${finding.file}:${finding.line})`
+		: ` (${finding.file})`;
+	const heading = `${icon} ${tag} ${category} — ${source}${location}`;
+
+	const lines: string[] = [heading];
+	const indent = "   ";
+	if (finding.detail) {
+		lines.push(`${indent}Symptom: ${finding.detail}`);
+	}
+	if (finding.consequence) {
+		lines.push(
+			`${indent}${theme.fg("warning", "→ Consequence:")} ${finding.consequence}`,
+		);
+	}
+	if (finding.source && finding.source !== finding.summary) {
+		// already in heading; only repeat if it carries separate meaning
+	}
+	if (finding.suggestion) {
+		if (finding.fixability) {
+			const fixLabel = FIXABILITY_LABEL[finding.fixability];
+			lines.push(
+				`${indent}${theme.fg("success", "→ Fix:")} ${fixLabel} — ${finding.suggestion}`,
+			);
+		} else {
+			lines.push(
+				`${indent}${theme.fg("success", "→ Fix:")} ${finding.suggestion}`,
+			);
+		}
+	}
+	if (finding.riskCode) {
+		lines.push(
+			`${indent}${theme.fg("dim", `[riskCode: ${finding.riskCode}]`)}`,
+		);
+	}
+	return lines.join("\n");
+}
+
+const defaultTheme: FindingTheme = {
+	fg: (_c, t) => t,
+	bold: (t) => t,
+	dim: (t) => t,
+};
 
 type Theme = {
 	fg(color: string, text: string): string;
