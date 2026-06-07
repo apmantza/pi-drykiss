@@ -156,8 +156,16 @@ export class ConversationViewer implements Component {
 	}
 }
 
+/** Strip ANSI escape sequences from strings to prevent injection. */
+function stripAnsi(s: string): string {
+	return s.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, "");
+}
+
+/**
+ * Chunk a long line into smaller pieces for display.
+ */
 export function chunkLine(text: string, max: number): string[] {
-	const t = text.replace(/\n/g, " ");
+	const t = stripAnsi(text).replace(/\n/g, " ");
 	if (!t) return [];
 	if (t.length <= max) return [t];
 	const chunks: string[] = [];

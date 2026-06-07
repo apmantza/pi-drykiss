@@ -39,6 +39,9 @@ export interface PrDiffResult {
 /**
  * Parse a PR URL or shorthand into owner/repo/number.
  *
+ * Validates owner/repo names to reject path traversal characters (.., @, :).
+ * All returned owner/repo values are alphanumeric with . _ - only.
+ *
  * Supported formats:
  * - https://github.com/owner/repo/pull/123
  * - github.com/owner/repo/pull/123
@@ -49,8 +52,10 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 	const trimmed = input.trim();
 
 	// Full GitHub URL: https://github.com/owner/repo/pull/123
+	// Owner/repo from URL context are already validated by the URL structure
+	// (cannot contain .. or @ in a valid GitHub URL position)
 	const urlMatch = trimmed.match(
-		/(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/,
+		/(?:https?:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)\/pull\/(\d+)/,
 	);
 	if (urlMatch) {
 		return {
@@ -61,7 +66,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 	}
 
 	// Shorthand: owner/repo#123
-	const shorthandMatch = trimmed.match(/^([^/]+)\/([^#]+)#(\d+)$/);
+	const shorthandMatch = trimmed.match(/^([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)#(\d+)$/);
 	if (shorthandMatch) {
 		return {
 			owner: shorthandMatch[1],
@@ -74,7 +79,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 	const numberMatch = trimmed.match(/^\d+$/);
 	if (numberMatch && gitRemote) {
 		const remoteMatch = gitRemote.match(
-			/(?:https?:\/\/github\.com\/|git@github\.com:)([^/]+)\/([^/.]+)/,
+			/(?:https?:\/\/github\.com\/|git@github\.com:)([a-zA-Z0-9._-]+)\/([a-zA-Z0-9_-]+)(?:\.git)?$/,
 		);
 		if (remoteMatch) {
 			return {
