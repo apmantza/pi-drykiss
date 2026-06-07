@@ -50,6 +50,9 @@ export interface Finding {
 	readonly summary: string;
 	readonly detail: string;
 	readonly suggestion: string;
+	readonly consequence?: string;
+	readonly source?: string;
+	readonly fixability?: "quick-fix" | "guided" | "manual";
 	readonly confidence?: "confirmed" | "likely" | "suspect";
 	readonly lens?: ReviewLens;
 }
@@ -88,6 +91,10 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			summary: "",
 			detail: "",
 			suggestion: "",
+			consequence: "",
+			source: "",
+			fixability: undefined,
+			confidence: undefined,
 			lens,
 		};
 	}
@@ -99,6 +106,11 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 		summary: String(raw.summary ?? ""),
 		detail: String(raw.detail ?? raw.summary ?? ""),
 		suggestion: String(raw.suggestion ?? ""),
+		consequence: raw.consequence ? String(raw.consequence) : undefined,
+		source: raw.source ? String(raw.source) : undefined,
+		fixability: raw.fixability
+			? (String(raw.fixability) as "quick-fix" | "guided" | "manual")
+			: undefined,
 		confidence: raw.confidence
 			? (String(raw.confidence) as "confirmed" | "likely" | "suspect")
 			: undefined,

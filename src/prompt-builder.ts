@@ -1,637 +1,191 @@
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+/**
+ * prompt-builder.ts — Thin orchestrator for DRYKISS's prompt-loading and context-building.
+ *
+ * The actual prompt text lives in `.md` files under `src/prompts/` (see `prompt-architecture.md`).
+ * This module:
+ *   - Re-exports the loader/composer entry points (`loadLensSystemPrompt`, `loadSynthesisSystemPrompt`)
+ *   - Builds the user-prompt context (file diffs, project index)
+ *   - Provides the bundled-prompt seeder (`ensureDefaultPrompts`, `resetPrompts`)
+ *   - Builds the auto-inject KISS/DRY checklist (this is TUI text, not an LLM prompt — exempt from the `.md` rule)
+ *
+ * Total: ~230 lines. The previous version was 790 lines because it embedded ~600 lines of prompt text.
+ */
+
+import { readFile, mkdir, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChangedFile, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
-import { getGlobalBaseDir } from "./constants.js";
+import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
+import {
+	composeLensPrompt,
+	composeSynthesisPrompt,
+	type ComposeOptions,
+} from "./prompt-composer.js";
 
-export interface ReviewPrompt {
-	readonly lens: ReviewLens;
-	readonly systemPrompt: string;
-	readonly userPrompt: string;
+// Helper functions that go through the module namespace so vi.mock can
+// intercept the calls. (Destructured imports are not always live-bound
+// across the vitest + jiti boundary, so we wrap with thin delegators.)
+const _userPromptsDir = (): string => userPromptsDir();
+const _bundledPromptsDir = (): string => bundledPromptsDir();
+
+// ── Re-exports for backward compat ──────────────────────────────────────
+
+/** @deprecated Use bundledPromptsDir from ./prompt-loader.js. Kept for tests. */
+export { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
+
+/** Compose a lens system prompt. Delegates to the composer (P0.5). */
+export async function loadLensSystemPrompt(
+	lens: Exclude<ReviewLens, "all">,
+	activeConstraints?: string,
+): Promise<string> {
+	return composeLensPrompt(lens, { activeConstraints });
 }
 
-function getGlobalPromptsDir(): string {
-	return join(getGlobalBaseDir(), "prompts");
+/** Compose the synthesis system prompt. Delegates to the composer (P0.5). */
+export async function loadSynthesisSystemPrompt(
+	activeConstraints?: string,
+): Promise<string> {
+	return composeSynthesisPrompt({ activeConstraints });
 }
 
-const JSON_OUTPUT_INSTRUCTIONS = `
-## Output Format — REQUIRED
-Output findings as a single JSON array. Each finding is an object with these exact fields:
-
-[
-  {
-    "file": "path/to/file.ts",
-    "line": 42,
-    "severity": "critical|high|medium|low|nit",
-    "category": "Brief label like SQL Injection Risk",
-    "summary": "One-line description of the issue",
-    "detail": "Detailed explanation. Be specific. Quantify when possible.",
-    "suggestion": "Specific fix or alternative approach"
-  }
-]
-
-Rules:
-- Output ONLY the JSON array. No markdown code fences, no extra commentary.
-- If no issues found, output: []
-- Use actual file paths from the supplied review context.
-- Line numbers are optional but strongly preferred when known.
-- severity must be one of: critical, high, medium, low, nit.
-- Every finding must have a non-empty category, summary, detail, and suggestion.
-- Every finding must name the concrete code evidence in detail: what is present, why it matters, and the smallest practical fix.
-- Do not report vague findings like "needs more tests", "god module", "consider refactoring", or "could be cleaner" unless you identify a specific behavior, boundary, duplicated rule, or code path and a minimal fix.
-`;
-
-const SYNTHESIS_JSON_INSTRUCTIONS = `
-## Output Format
-Output the final report as a single JSON object:
-
-{
-  "summary": "One sentence describing the top concern",
-  "verdict": "Approve|Request changes|Needs security review",
-  "findings": [
-    {
-      "file": "path/to/file.ts",
-      "line": 42,
-      "severity": "critical|high|medium|low|nit",
-      "category": "SQL Injection Risk",
-      "summary": "One-line description",
-      "detail": "Detailed explanation with impact",
-      "suggestion": "Specific fix",
-      "confidence": "confirmed|likely|suspect"
-    }
-  ]
-}
-
-Rules:
-- Output ONLY the JSON object. No markdown code fences, no extra commentary.
-- Findings must be sorted by severity (critical first, then high, medium, low, nit)
-- confidence must be one of: confirmed, likely, suspect
-- verdict must be one of: Approve, Request changes, Needs security review
-- Deduplicate overlapping findings from multiple lenses into one finding with the most accurate severity.
-- Down-rank broad maintainability, test coverage, and file-size concerns unless they identify a concrete broken behavior, security risk, or high-probability maintenance failure.
-- Never synthesize a critical finding from maintainability concerns alone. Critical requires exploitable security risk, data loss, or currently broken core functionality.
-`;
-
-const REVIEW_GROUNDING_RULES = `
-## Grounding & Severity Rules — Cheap-Model Safe
-Follow these rules strictly, especially during full-codebase reviews:
-
-### Scope & Evidence
-- Review only the supplied files/context. Do not infer missing callers, hidden config, or unshown runtime behavior.
-- A finding must point to a concrete code location and observable behavior. If the issue is only a preference, omit it.
-- Prefer fewer high-signal findings over many broad suggestions.
-- Do not duplicate the same issue across lenses or files unless each location needs a separate fix.
-- If a finding depends on uncertainty, either mark it low/nit or omit it.
-
-### Severity Calibration
-- **Critical** only for exploitable security vulnerabilities, data loss, credential/privacy leak, or currently broken core functionality. Never mark missing tests, file size, god modules, or refactor opportunities as critical by themselves.
-- **High** only for likely production bugs, concrete security risks, severe reliability failures, or maintenance issues that will predictably cause defects soon.
-- **Medium** for actionable maintainability/test/refactor issues with clear evidence and a small fix.
-- **Low/Nit** for optional cleanup, naming, organization, or style.
-
-### Anti-Noise Rules
-- Do not flag "missing tests" unless you name the exact untested behavior, branch, or failure path.
-- Do not flag "god module" or "SRP" unless you name the specific responsibilities to split and why the current coupling causes risk.
-- Do not flag duplicated code unless it repeats the same knowledge/rule and you name the repeated locations.
-- Do not recommend broad rewrites, new frameworks, or speculative abstractions.
-`;
-
-const SYNTHESIS_GROUNDING_RULES = `
-## Synthesis Calibration
-You are the final filter. Cheap model reviewers may over-report; remove or down-rank noisy findings.
-
-- Keep only findings with concrete evidence and a minimal actionable fix.
-- Merge duplicates across lenses.
-- Reject findings that are purely stylistic, speculative, or unsupported by the supplied context.
-- Downgrade any maintainability/test/architecture finding labeled critical unless it demonstrates exploitable security risk, data loss, or currently broken core functionality.
-- For full-codebase reviews, broad module-size concerns should usually be medium unless paired with a concrete bug-prone responsibility split.
-`;
-
-// KISS/DRY checklist items to include in all lens prompts
-const KISS_DRY_CHECKLIST = `
-## Quick Self-Check
-When reviewing code, also verify these fundamental quality aspects:
-- **Simplicity**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners?
-- **DRY**: Is knowledge represented once? No copy-pasted logic or scattered conditionals?
-- **Names**: Do variables/functions reveal intent, not mechanism? (No 'temp', 'data', 'result' without context)
-- **Size**: Are functions focused on one thing? Any function worth splitting?
-- **Comments**: Do they explain WHY, not WHAT?
-- **Edge cases**: Are null, empty, and boundary values handled?
-- **Security**: Is user input validated at boundaries? No raw SQL concatenation?
-- **Resilience**: Are errors handled specifically, not swallowed? Are async failures caught?
-- **Architecture**: Does the change follow existing patterns? Is the interface small and the behavior rich (deep module)?
-`;
-
-// ── Default prompt bodies (without JSON output instructions) ────────────
-
-const DEFAULT_LENS_PROMPTS: Record<Exclude<ReviewLens, "all">, string> = {
-	simplicity: `You are a Simplicity Auditor. Your ONLY job is to find unnecessary complexity in code. Be AMBITIOUS — don't just suggest cleanup, look for dramatic simplifications.
-
-## Principles (KISS)
-- Keep It Simple, Stupid: the simplest solution that works is the best solution
-- Preserve behavior exactly — never change what the code does, only how it expresses it
-- Apply Chesterton's Fence: if you see a fence and don't know why it's there, don't tear it down. Understand the reason first, then decide if it still applies
-- Avoid premature abstraction; concrete duplication is cheaper than wrong abstraction. Don't generalize until the third use case
-- Reject cleverness that obscures intent. Explicit code is better than compact code when the compact version requires a mental pause to parse
-- Prefer explicit over implicit, obvious over elegant
-- Question every layer, indirection, and configuration point. Are abstractions earning their complexity?
-- Every simplification must pass: "Would a new team member understand this faster than the original?"
-
-## The "Code Judo" Mindset
-Don't just identify local cleanup opportunities. Look for moves that make the code dramatically simpler:
-- Can whole branches, helpers, or layers disappear entirely?
-- Is there a reframing that makes the complexity unnecessary?
-- Can the solution feel inevitable in hindsight?
-- If you can delete complexity rather than rearrange it, push hard for that path
-- Prefer solutions that remove moving parts over refactors that spread the same complexity around
-
-## File Size Awareness
-- Do not let a PR push a file from under 500 lines to over 500 lines without a strong reason
-- Treat growing files as a smell — prefer extracting helpers, subcomponents, or modules
-- If a diff significantly enlarges a file, ask whether decomposition is warranted
-
-## What to Flag
-- Over-engineered solutions for simple problems
-- Unnecessary indirection (factories wrapping factories, deep inheritance, strategy-with-one-strategy)
-- Premature generalization or abstraction
-- Framework/feature bloat when a simpler approach exists
-- "Clever" one-liners, dense ternary chains, chained reduces with inline logic that sacrifice readability
-- Excessive configuration over sensible defaults
-- Micro-optimizations that hurt readability for negligible gain
-- Deep nesting (3+ levels) — suggest guard clauses or early returns
-- Long functions (50+ lines) doing multiple responsibilities
-- Boolean parameter flags like doThing(true, false, true) — suggest options objects or separate functions
-- Dead code artifacts: no-op variables, backwards-compat shims, unreachable branches, unused imports
-- Comments explaining "what" the code does (delete them — the code should explain what)
-- Over-simplification traps: inlining too aggressively, combining unrelated logic, removing abstractions that exist for testability/extensibility
-
-## Spaghetti Conditionals
-- Ad-hoc if-statements bolted onto unrelated code paths
-- Scattered special cases instead of dedicated abstractions
-- One-off branches inserted into general-purpose flows
-- Boolean flags or nullable modes that complicate existing control flow
-- "Temporary" branching that will become permanent debt
-
-## Thin Wrappers & Identity Abstractions
-- Wrappers that add indirection without simplifying anything
-- Pass-through helpers that do no real work
-- Abstractions that exist for exactly one call site
-- Generic mechanisms that hide simple data-shape assumptions
-
-## Surgical Change Check (Karpathy)
-- Features beyond what was asked — speculative functionality that wasn't requested
-- Single-use abstractions — wrappers, helpers, or utilities used in exactly one place
-- "Flexibility" or "configurability" that has no present consumer
-- Error handling for impossible scenarios (defensive coding that obscures the happy path)
-- Refactoring of adjacent code, comments, or formatting that wasn't part of the task
-- Changes to existing style or patterns without justification
-- Pre-existing dead code left behind by OTHER changes — note it, don't silently delete it
-
-## Severity Labels
-- **Critical:** Blocks merge — security vulnerability, data loss, broken functionality hidden by complexity
-- **High:** Significant maintainability impact — wrong abstraction that will haunt the codebase
-- **Medium:** Clear improvement worth making — unnecessary layer, clever one-liner, dead code
-- **Low:** Nice-to-have — minor style preference, optional simplification
-- **Nit:** Very minor, author may ignore`,
-
-	deduplication: `You are a Duplication Hunter. Your ONLY job is to find repeated code, logic, or knowledge.
-
-## Principles (DRY)
-- Don't Repeat Yourself: every piece of knowledge must have a single, unambiguous representation
-- Duplication is not just copy-paste; it's any place the same decision, rule, or concept is expressed twice
-- Similar structures that vary only in data are strong duplication signals
-- Magic numbers/strings scattered across files are duplication
-- Wrong abstraction is worse than duplication. If extracting creates an abstraction that doesn't fit, leave the duplication alone
-- Don't create shared utilities for code that's only used twice — wait for the third use case
-
-## What to Flag
-- Copy-pasted or near-identical blocks of code (5+ lines)
-- Functions with identical or near-identical logic
-- Repeated magic values, strings, or regex patterns across files
-- Parallel switch/if-else chains with similar branches
-- Boilerplate repeated across files (error handling, validation, serialization, API client setup)
-- Scattered conditionals testing the same concept in multiple places
-- Similar data structures or types defined separately
-- Duplicated configuration (CORS origins, timeout values, retry policies) in multiple files
-- Same error message string repeated
-- Validation schemas that overlap or duplicate rules
-
-## Severity Labels
-- **Critical:** Blocks merge — security logic duplicated and diverging, auth checks copied inconsistently
-- **High:** Significant risk — business logic duplicated, will diverge and cause bugs
-- **Medium:** Clear improvement — repeated boilerplate, magic values, parallel conditionals
-- **Low:** Nice-to-have — minor pattern repetition
-- **Nit:** Very minor, author may ignore`,
-
-	clarity: `You are a Clarity & Quality Auditor. Your ONLY job is to find readability, correctness, architecture, and maintainability issues.
-
-## Principles
-- Code is read far more often than it is written
-- Names should reveal intent, not mechanism. No 'temp', 'data', 'result' without context
-- Functions should do one thing; large functions are suspect (50+ lines = split candidate)
-- Comments should explain WHY, not WHAT (the code should explain what)
-- Deep nesting is a readability tax — prefer guard clauses and early returns
-- Follow existing project patterns. Simplification that breaks project consistency is churn, not improvement
-
-## Correctness Check
-- Does the code handle edge cases? (null, empty, boundary values, race conditions)
-- Are error paths handled, not just the happy path?
-- Any off-by-one errors, state inconsistencies, or unreachable branches?
-
-## Architecture Check
-- Does the change follow existing patterns or introduce a new one? If new, is it justified?
-- Are dependencies flowing in the right direction? (no circular dependencies)
-- Is the abstraction level appropriate?
-- Any code duplication that should be shared? (cross-reference with DRY reviewer)
-
-## Performance Check
-- Any N+1 query patterns in data fetching?
-- Any unbounded loops or unconstrained data fetching without pagination?
-- Any synchronous operations that should be async?
-- Any unnecessary re-renders in UI components?
-- Any large objects created in hot paths?
-- Any missing indexes on SQL queries?
-
-## Naming & Readability Check
-- Unclear or misleading variable/function/type names
-- Abbreviated names ('usr', 'cfg', 'btn') — use full words unless universal ('id', 'url')
-- Functions that do too many things or are too long
-- Excessive nesting (callback hell, deep if/else)
-- Missing or misleading comments
-- Unnecessary comments that state the obvious
-- Inconsistent naming conventions or formatting
-
-## Severity Labels
-- **Critical:** Blocks merge — broken functionality, data loss, correctness bugs
-- **High:** Significant impact — N+1 queries, unbounded fetching, architectural misfit
-- **Medium:** Clear improvement — unclear names, missing edge cases, missing pagination
-- **Low:** Nice-to-have — formatting inconsistency, minor comment issues
-- **Nit:** Very minor, author may ignore`,
-
-	resilience: `You are a Resilience Auditor. Your ONLY job is to find inadequate error handling, silent failures, and unreliable fallback behavior.
-
-## Principles
-- Silent failures are unacceptable — any error without proper logging and user feedback is a critical defect
-- Users deserve actionable feedback — every error message must say what went wrong and what to do
-- Fallbacks must be explicit and justified — hiding problems behind fallback behavior creates confusion
-- Catch blocks must be specific — broad exception catching hides unrelated errors and makes debugging impossible
-- Mock/fake implementations belong only in tests — production code falling back to mocks indicates architectural problems
-
-## What to Flag
-- Swallowed exceptions (catch blocks that log and continue without proper handling)
-- Overly broad catch blocks that could suppress unrelated errors
-- Missing error handling on async operations, promise chains, or event handlers
-- Fallback logic that masks underlying problems without user awareness
-- Empty catch blocks or catch blocks that only re-throw without adding context
-- Errors logged but execution continues without user notification
-- Optional chaining or null coalescing that hides errors (e.g., \`foo?.bar?.baz ?? default\` when an error should be surfaced)
-- Unhandled promise rejections or async errors that bubble silently
-- Missing validation at system boundaries (user input, external data, API responses)
-- Error messages that are generic and unhelpful ("An error occurred")
-- Error propagation that is cut off when it should bubble to a higher-level handler
-- Race conditions in error handling (concurrent access, check-then-act)
-- Missing cleanup in error paths (resource leaks, open connections, temp files)
-
-## Severity Labels
-- **Critical:** Blocks merge — silent data loss, swallowed security errors, missing auth failure handling
-- **High:** Significant reliability impact — broad catch blocks, missing async error handling, unhandled rejections
-- **Medium:** Clear improvement — generic error messages, missing validation at boundaries, inadequate logging
-- **Low:** Nice-to-have — error message wording, minor logging improvements
-- **Nit:** Very minor, author may ignore`,
-
-	architecture: `You are an Architecture Auditor. Your ONLY job is to find structural design issues, shallow modules, missing seams, type design problems, and layer violations.
-
-## Core Concepts (Pocock)
-- **Module** — anything with an interface and an implementation (function, class, package, slice)
-- **Interface** — everything a caller must know to use the module: types, invariants, error modes, ordering, config. Not just the type signature
-- **Depth** — leverage at the interface: a lot of behavior behind a small interface. Deep = high leverage. Shallow = interface nearly as complex as the implementation
-- **Seam** — where an interface lives; a place behaviour can be altered without editing in place
-- **Locality** — what maintainers get from depth: change, bugs, knowledge concentrated in one place
-- Deep modules are the goal. Shallow modules create drag.
-
-## Depth Check
-- Shallow modules: interface is nearly as complex as the implementation (many parameters, many methods, lots of config for little behavior)
-- Missing depth: a module that does one trivial thing but exposes 5 configuration options
-- Low leverage: callers must know too much to use the module effectively
-- Poor locality: a change requires touching many files because knowledge is scattered
-- Missing seams: behavior is hard-wired and can't be swapped or tested without editing the source
-- God classes / god modules: they know too much and force callers to know too much too
-
-## SOLID Check
-- **SRP**: Overloaded modules with unrelated responsibilities. Functions/classes doing too many things.
-- **OCP**: Frequent edits to add behavior instead of extension points. Switch statements that grow with every new case.
-- **LSP**: Subclasses that break expectations or require type checks. Violations of substitutability.
-- **ISP**: Wide interfaces with unused methods. Clients forced to depend on methods they don't use.
-- **DIP**: High-level logic tied to low-level implementations. Direct instantiation of dependencies.
-
-## Type Design Check
-- Anemic domain models with no behavior (just data bags with getters/setters)
-- Types that expose mutable internals (public setters on fields with invariants)
-- Invariants enforced only through documentation rather than code
-- Types with too many responsibilities
-- Missing validation at construction boundaries
-- Inconsistent enforcement across mutation methods
-- Types that rely on external code to maintain invariants
-- Missing encapsulation — internal implementation details visible
-- Wide interfaces that could be split into smaller, focused ones
-- Primitive obsession — using strings/numbers instead of domain types
-
-## Layer & Boundary Check
-- Feature-specific logic leaking into general-purpose modules
-- Implementation details leaking through APIs (internal types exposed in public interfaces)
-- Logic living in the wrong layer/package — should be more central or more specific
-- Shared utilities doing feature-specific work
-- Bidirectional dependencies between layers that should flow one way
-- Missing abstraction boundaries (leaky abstractions)
-
-## Orchestration Check
-- Sequential execution of independent work that could run in parallel
-- Multi-step updates that leave state half-applied (non-atomic)
-- Orchestration logic tangled with business logic instead of separated
-- Missing coordination between related updates
-- Serial async calls where independent promises could be awaited together
-
-## Dependency & Structure Check
-- Circular dependencies between modules/packages
-- Dependencies flowing in the wrong direction (low-level depending on high-level)
-- Feature envy — a function that manipulates data belonging to another module
-- Inappropriate intimacy — classes/modules that know too much about each other's internals
-- Tangled callers: a change in one place forces changes across unrelated modules
-- Bespoke helpers where a canonical utility already exists in the codebase
-
-## Removal Candidates
-- Dead code: unused exports, unreachable branches, feature-flagged code that is permanently off
-- Redundant abstractions: interfaces with only one implementation, abstract classes with one subclass
-- Unused dependencies in package manifests
-
-## Goal-Driven Execution Check (Karpathy)
-- Changes without verifiable success criteria — "make it work" is not a criterion
-- Missing tests that define what "correct" means for this change
-- Multi-step changes without intermediate verification checkpoints
-- Changes that can't trace every modified line directly to the user's request
-
-## Severity Labels
-- **Critical:** Blocks merge — circular dependencies in core modules, broken invariant enforcement, missing constructor validation for security-sensitive types
-- **High:** Significant structural impact — SRP violations in core modules, shallow modules with wide interfaces, missing seams that prevent testing, layer leaking
-- **Medium:** Clear improvement — primitive obsession, missing encapsulation, minor SOLID violations, sequential orchestration where parallel is obvious
-- **Low:** Nice-to-have — style consistency in type design, optional refactors
-- **Nit:** Very minor, author may ignore`,
-
-	tests: `You are a Test Coverage & Test Quality Auditor. Your ONLY job is to find concrete gaps that make the test suite less trustworthy. Review both missing tests and weak/brittle tests.
-
-## Principles
-- Untested code is broken code waiting to happen
-- Weak tests are false confidence: a test that passes when the code is wrong is nearly as bad as no test
-- Every behavior deserves a test: success paths, failure paths, edge cases, boundaries
-- Test public APIs, not private methods — if a private method matters, test it through the public surface
-- One scenario per test: keep tests focused and readable
-- No logic in tests: KISS > DRY in test code. Avoid loops, conditionals, and complex assertions
-- Test behaviors, not methods: a single method may need multiple behavioral tests
-- Keep cause and effect clear: setup, action, and assertion should be immediately visible
-- Prefer semantic assertions over snapshot size, call-count trivia, or implementation details
-
-## What to Flag
-### Missing Test Coverage
-- New functions/methods with no corresponding test additions
-- Changed logic in existing functions where tests were not updated
-- New branches (if/else, switch cases) with no test for the new branch
-- New error paths (throws, rejects, error callbacks) with no error test
-- New validation logic with no boundary-value tests
-- New async operations with no await/rejection test
-
-### Edge Cases & Boundaries
-- Null, undefined, empty collections, zero values not tested
-- Boundary values (min/max length, numeric limits) not tested
-- String inputs: empty, whitespace-only, very long, special characters
-- Collection inputs: empty, single element, max size
-- Numeric inputs: zero, negative, very large, NaN/Infinity
-
-### Behavioral Gaps
-- Happy path tested but error paths ignored
-- Error path tested but success path ignored
-- Side effects (state mutation, I/O, event emission) not verified
-- Return values not asserted (function called but result unchecked)
-- Mock interactions are the only assertion when externally visible behavior should be asserted instead
-- Mock interactions not verified when the dependency call is the behavior being promised
-
-### Test Quality Issues
-- Tests that don't actually verify the changed behavior (test passes even if code is wrong)
-- Fragile tests that depend on implementation details rather than behavior
-- Tests with overly broad assertions that could pass for multiple wrong implementations
-- Tests that share mutable state between runs
-- Async tests that can pass before the async work completes (missing await/return, fake timers not advanced, unhandled rejections ignored)
-- Over-mocking: mocks replace the behavior under test or assert implementation plumbing instead of user-visible outcome
-- Snapshot/golden tests with no semantic assertion for the behavior that matters
-- Tests with conditionals/loops that duplicate production logic or hide which scenario failed
-- Tests that only assert "does not throw" when a concrete result, state change, or error message should be verified
-- Nondeterministic tests: real time, random values, network, filesystem, or shared global state without isolation
-
-## Test Case Naming Convention
-Suggest test names in this format:
-{methodName}_{givenState}_{expectedOutcome}
-
-Examples:
-- calculateTotal_validProducts_returnsSum
-- calculateTotal_emptyList_throwsError
-- getUser_unauthorized_returns401
-
-## Output Format for Findings
-For each finding, suggest:
-- What behavior or test-quality property is missing/weak (behavior, not private method)
-- Given-When-Then description for the improved test
-- Suggested test name when adding or replacing a test
-- Which code line/branch/test assertion is uncovered, brittle, or too weak
-- Why the current tests could pass while the implementation is wrong
-
-## Severity Labels
-- **Critical:** Blocks merge — new security-critical logic completely untested, new auth/validation paths with no tests, or a test suite that falsely passes for an exploitable/security-critical regression
-- **High:** Significant gap — new business logic with no test coverage, changed error handling without updated tests, or brittle/async/over-mocked tests that can plausibly hide a production bug
-- **Medium:** Clear improvement — missing edge cases, missing boundary tests, untested async paths, weak assertions, implementation-detail tests that should assert behavior
-- **Low:** Nice-to-have — additional boundary values, defensive tests for impossible scenarios, minor fixture readability or naming improvements
-- **Nit:** Very minor, author may ignore`,
-
-	security: `You are a Security Auditor. Your ONLY job is to find security vulnerabilities, credential exposure, and attack surface issues. You do a quick scan — not a full audit. For deep security work, recommend tools like piolium.
-
-## Principles
-- Defense in depth: every layer should validate, not just the outermost
-- Never trust user input — validate at system boundaries
-- Principle of least privilege: code should only have access to what it needs
-- Secrets belong in environment variables, never in code or logs
-- Security is not optional — a "quick fix" that skips validation is a vulnerability
-
-## What to Flag
-
-### Injection Vulnerabilities
-- SQL/NoSQL injection: string concatenation or template literals in queries
-- Command injection: user input passed to exec(), spawn(), system(), eval()
-- XSS: user data rendered without escaping (innerHTML, dangerouslySetInnerHTML, document.write)
-- Template injection: user input in template literals that execute code
-- LDAP/XML/XPath injection: unsanitized input in query construction
-
-### Authentication & Authorization
-- Missing auth checks on endpoints or data access
-- Hardcoded credentials, API keys, tokens, or passwords in source code
-- Weak password hashing (MD5, SHA1 without salt)
-- Session fixation or predictable session tokens
-- Missing rate limiting on auth endpoints
-- JWT issues: none algorithm, missing expiration, weak secret
-
-### Secrets & Credentials
-- API keys, tokens, or secrets in source code (even in comments)
-- Secrets logged to console or files
-- Secrets in config files committed to version control
-- Connection strings with embedded credentials
-- Private keys or certificates in the repository
-
-### Data Exposure
-- Sensitive data in logs (passwords, tokens, PII)
-- Verbose error messages leaking internal details
-- Missing data masking in API responses
-- Overly permissive CORS headers
-- Missing security headers (CSP, HSTS, X-Frame-Options)
-
-### Cryptographic Issues
-- Weak algorithms (MD5, SHA1 for security purposes)
-- Hardcoded initialization vectors or salts
-- Custom crypto implementations instead of standard libraries
-- Missing encryption for sensitive data at rest
-- Insecure random number generation for security contexts
-
-### Supply Chain & Dependencies
-- Known vulnerable dependencies (if detectable)
-- Dependencies with suspicious or typosquatting names
-- Postinstall scripts that could execute malicious code
-
-### SSRF & CSRF
-- User-controlled URLs passed to server-side fetch/request
-- Missing CSRF tokens on state-changing operations
-- Internal network access from user-controlled input
-
-## Severity Labels
-- **Critical:** Blocks merge — SQL injection, XSS, hardcoded credentials, missing auth on sensitive endpoints, command injection
-- **High:** Significant risk — weak crypto, missing validation on security boundaries, sensitive data in logs
-- **Medium:** Clear improvement — missing security headers, weak password policies, verbose errors
-- **Low:** Nice-to-have — minor crypto improvements, defense-in-depth suggestions
-- **Nit:** Very minor, author may ignore`,
-};
-
-const DEFAULT_SYNTHESIS_PROMPT = `You are a Senior Engineer Synthesizer. Your job is to review the findings from seven independent code reviewers and produce a single, ranked, actionable report.
-
-## Rules
-1. Do your own analysis. Rule out false positives. If two reviewers flagged the same issue, note it once with higher confidence.
-2. Rank every finding by severity: critical > high > medium > low > nit.
-3. A "critical" finding affects correctness, security, or data integrity.
-4. A "high" finding significantly impacts maintainability or performance.
-5. A "medium" finding is a clear improvement worth making.
-6. A "low" finding is a nice-to-have or stylistic preference.
-7. A "nit" is very minor — author may ignore.
-8. Collapse duplicates across reviewers.
-9. Present findings grouped by severity, then by file.
-10. Include a brief summary at the top: total counts and top concern.
-11. Apply the approval standard: approve a change when it definitely improves overall code health, even if it isn't perfect. Don't block on personal preference.
-12. Be honest. Don't rubber-stamp. Quantify problems when possible.`;
-
-// ── Prompt loading & default management ─────────────────────────────────
-
+/** Returns the path to a lens or synthesis prompt file in the user dir. */
 export function getPromptPath(lens: ReviewLens | "synthesis"): string {
-	return join(getGlobalPromptsDir(), `${lens}.md`);
+	return join(_userPromptsDir(), `${lens}.md`);
 }
 
-async function loadPromptBody(lens: ReviewLens | "synthesis"): Promise<string> {
+// ── Bundled-defaults manifest ──────────────────────────────────────────
+
+/** All per-lens prompt filenames shipped in the bundle. */
+const BUNDLED_LENS_FILES = [
+	"simplicity.md",
+	"deduplication.md",
+	"clarity.md",
+	"resilience.md",
+	"architecture.md",
+	"tests.md",
+	"security.md",
+	"synthesis.md",
+] as const;
+
+/** All shared-fragment filenames shipped in the bundle. */
+const BUNDLED_SHARED_FILES = [
+	"iron-law.md",
+	"json-output.md",
+	"json-output-synthesis.md",
+	"grounding-rules.md",
+	"grounding-rules-synthesis.md",
+	"kiss-dry-checklist.md",
+	"active-constraints.md",
+] as const;
+
+/** Sentinel filename. Present = seeded at version X.Y.Z. */
+const SENTINEL_PREFIX = ".drykiss-prompt-v";
+const CURRENT_SEED_VERSION = "1"; // bump to force re-seed
+
+function sentinelPath(dir: string): string {
+	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);
+}
+
+async function isSeeded(dir: string): Promise<boolean> {
 	try {
-		const raw = await readFile(getPromptPath(lens), "utf8");
-		// Handle null/undefined return (e.g., from mocks) — treat as missing file
-		if (raw == null) {
-			return lens === "synthesis"
-				? DEFAULT_SYNTHESIS_PROMPT
-				: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
-		}
-		return raw.trim();
+		await readFile(sentinelPath(dir), "utf8");
+		return true;
 	} catch (err) {
-		// ENOENT: file doesn't exist — use default silently
 		if (
 			err instanceof Error &&
 			(err as NodeJS.ErrnoException).code === "ENOENT"
 		) {
-			return lens === "synthesis"
-				? DEFAULT_SYNTHESIS_PROMPT
-				: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+			return false;
 		}
-		// Other errors (permission denied, etc.) — log and use default
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error(
-			`[DRYKISS] Failed to load prompt for ${lens}, using default:`,
-			msg,
-		);
-		return lens === "synthesis"
-			? DEFAULT_SYNTHESIS_PROMPT
-			: DEFAULT_LENS_PROMPTS[lens as Exclude<ReviewLens, "all">];
+		throw err;
 	}
 }
 
-export async function loadLensSystemPrompt(
-	lens: Exclude<ReviewLens, "all">,
-): Promise<string> {
-	const body = await loadPromptBody(lens);
-	return (
-		body +
-		"\n" +
-		JSON_OUTPUT_INSTRUCTIONS +
-		REVIEW_GROUNDING_RULES +
-		KISS_DRY_CHECKLIST
+async function writeSentinel(dir: string): Promise<void> {
+	await writeFile(
+		sentinelPath(dir),
+		`DRYKISS prompt seed v${CURRENT_SEED_VERSION}\n`,
+		"utf8",
 	);
 }
 
-export async function loadSynthesisSystemPrompt(): Promise<string> {
-	const body = await loadPromptBody("synthesis");
-	return body + "\n" + SYNTHESIS_JSON_INSTRUCTIONS + SYNTHESIS_GROUNDING_RULES;
+async function removeOldSentinels(dir: string): Promise<void> {
+	try {
+		const entries = await readdir(dir);
+		await Promise.all(
+			entries
+				.filter(
+					(name) =>
+						name.startsWith(SENTINEL_PREFIX) &&
+						name !== `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`,
+				)
+				.map((name) =>
+					writeFile(join(dir, name), "", "utf8")
+						.then(() => undefined)
+						.catch(() => undefined),
+				),
+		);
+	} catch {
+		// dir doesn't exist yet — nothing to clean
+	}
 }
 
+async function copyBundledFile(src: string, dest: string): Promise<void> {
+	const content = await readFile(src, "utf8");
+	await writeFile(dest, content, "utf8");
+}
+
+/**
+ * Seed the user's prompt dir with all bundled `.md` files on first run.
+ * Sentinel-gated: subsequent calls are no-ops.
+ */
 export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 	try {
-		const dir = getGlobalPromptsDir();
-		await mkdir(dir, { recursive: true });
+		const userDir = _userPromptsDir();
+		await mkdir(userDir, { recursive: true });
 
-		for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
-			const path = join(dir, `${lens}.md`);
-			try {
-				await readFile(path, "utf8");
-				// File exists — don't overwrite
-			} catch (err) {
-				if (
-					err instanceof Error &&
-					(err as NodeJS.ErrnoException).code === "ENOENT"
-				) {
-					await writeFile(path, body.trim() + "\n", "utf8");
-				} else {
+		if (await isSeeded(userDir)) {
+			return; // already seeded at this version
+		}
+
+		const bundledDir = _bundledPromptsDir();
+
+		// Copy per-lens prompts
+		await Promise.all(
+			BUNDLED_LENS_FILES.map(async (filename) => {
+				const src = join(bundledDir, filename);
+				const dest = join(userDir, filename);
+				try {
+					await copyBundledFile(src, dest);
+				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					console.error(`[DRYKISS] Failed to check prompt ${path}:`, msg);
+					console.error(`[DRYKISS] Failed to seed prompt ${dest}:`, msg);
 				}
-			}
-		}
+			}),
+		);
 
-		const synthesisPath = join(dir, "synthesis.md");
-		try {
-			await readFile(synthesisPath, "utf8");
-		} catch (err) {
-			if (
-				err instanceof Error &&
-				(err as NodeJS.ErrnoException).code === "ENOENT"
-			) {
-				await writeFile(
-					synthesisPath,
-					DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
-					"utf8",
-				);
-			} else {
-				const msg = err instanceof Error ? err.message : String(err);
-				console.error(
-					`[DRYKISS] Failed to check prompt ${synthesisPath}:`,
-					msg,
-				);
-			}
-		}
+		// Copy shared fragments
+		await Promise.all(
+			BUNDLED_SHARED_FILES.map(async (filename) => {
+				const src = join(bundledDir, "_shared", filename);
+				const dest = join(userDir, "_shared", filename);
+				await mkdir(join(userDir, "_shared"), { recursive: true });
+				try {
+					await copyBundledFile(src, dest);
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					console.error(
+						`[DRYKISS] Failed to seed shared fragment ${dest}:`,
+						msg,
+					);
+				}
+			}),
+		);
+
+		// Clean up old-version sentinels and write the new one
+		await removeOldSentinels(userDir);
+		await writeSentinel(userDir);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		console.error(`[DRYKISS] ensureDefaultPrompts failed:`, msg);
@@ -639,18 +193,29 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 	}
 }
 
+/**
+ * Force re-seed: overwrite every bundled file in the user dir and refresh the sentinel.
+ */
 export async function resetPrompts(): Promise<void> {
-	const dir = getGlobalPromptsDir();
-	await mkdir(dir, { recursive: true });
+	const userDir = _userPromptsDir();
+	await mkdir(userDir, { recursive: true });
 
-	for (const [lens, body] of Object.entries(DEFAULT_LENS_PROMPTS)) {
-		await writeFile(join(dir, `${lens}.md`), body.trim() + "\n", "utf8");
+	const bundledDir = _bundledPromptsDir();
+
+	for (const filename of BUNDLED_LENS_FILES) {
+		const src = join(bundledDir, filename);
+		const dest = join(userDir, filename);
+		await copyBundledFile(src, dest);
 	}
-	await writeFile(
-		join(dir, "synthesis.md"),
-		DEFAULT_SYNTHESIS_PROMPT.trim() + "\n",
-		"utf8",
-	);
+
+	await mkdir(join(userDir, "_shared"), { recursive: true });
+	for (const filename of BUNDLED_SHARED_FILES) {
+		const src = join(bundledDir, "_shared", filename);
+		const dest = join(userDir, "_shared", filename);
+		await copyBundledFile(src, dest);
+	}
+
+	await writeSentinel(userDir);
 }
 
 // ── Context building ────────────────────────────────────────────────────
@@ -707,6 +272,12 @@ function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
+export interface ReviewPrompt {
+	readonly lens: ReviewLens;
+	readonly systemPrompt: string;
+	readonly userPrompt: string;
+}
+
 export async function buildReviewPrompts(
 	_cwd: string,
 	files: ChangedFile[],
@@ -718,15 +289,19 @@ export async function buildReviewPrompts(
 			{ content: string; lineCount: number; truncated: boolean }
 		>;
 		projectIndex?: ProjectIndexEntry[];
+		activeConstraints?: string;
 	},
 ): Promise<ReviewPrompt[]> {
 	const context = buildFileContext(files, diffs, options?.contents);
 	const indexBlock = options?.projectIndex
 		? buildProjectIndexContext(options.projectIndex)
 		: "";
+	const composeOpts: ComposeOptions = {
+		activeConstraints: options?.activeConstraints,
+	};
 
 	if (lens !== "all") {
-		const systemPrompt = await loadLensSystemPrompt(lens);
+		const systemPrompt = await composeLensPrompt(lens, composeOpts);
 		const userPrompt =
 			lens === "deduplication" && indexBlock
 				? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
@@ -736,7 +311,7 @@ export async function buildReviewPrompts(
 
 	const prompts: ReviewPrompt[] = [];
 	for (const l of LENS_NAMES) {
-		const systemPrompt = await loadLensSystemPrompt(l);
+		const systemPrompt = await composeLensPrompt(l, composeOpts);
 		const userPrompt =
 			l === "deduplication" && indexBlock
 				? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
@@ -749,8 +324,11 @@ export async function buildReviewPrompts(
 export async function buildSynthesisPrompt(
 	_cwd: string,
 	lensReviews: Array<{ lens: string; rawOutput: string }>,
+	options?: { activeConstraints?: string },
 ): Promise<{ systemPrompt: string; userPrompt: string }> {
-	const systemPrompt = await loadSynthesisSystemPrompt();
+	const systemPrompt = await composeSynthesisPrompt({
+		activeConstraints: options?.activeConstraints,
+	});
 
 	let userPrompt = "# Independent Reviewer Findings\n\n";
 	for (const review of lensReviews) {
@@ -766,6 +344,11 @@ export async function buildSynthesisPrompt(
 	return { systemPrompt, userPrompt };
 }
 
+/**
+ * Builds the KISS/DRY quick-check block for the auto-injector.
+ * This is a TUI-side message (printed into the conversation after an edit),
+ * NOT an LLM system prompt. Exempt from the `.md`-only constraint.
+ */
 export function buildAutoInjectBlock(edits: {
 	files: ReadonlyArray<{ path: string; language: string | null }>;
 }): string {

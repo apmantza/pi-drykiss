@@ -541,7 +541,7 @@ export async function handleJobsCommand(
 	const { ConversationViewer } = await import("./conversation-viewer.js");
 	await ctx.ui.custom<undefined>(
 		(tui, theme, _keybindings, done) => {
-			return new ConversationViewer(tui, theme, done, job);
+			return new ConversationViewer(tui as any, theme, done, job);
 		},
 		{
 			overlay: true,

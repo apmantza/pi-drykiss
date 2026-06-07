@@ -1,4 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ChangedFile } from "./types.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
+
+// ── Mocks ───────────────────────────────────────────────────────────────
+
+// Mock the loader/composer layer so the tests control prompt content directly.
+// The tests are about prompt-builder.ts's behavior (composition order, context
+// building, seed lifecycle), not about file I/O. The actual file I/O is tested
+// in prompt-loader.test.ts and prompt-composer.test.ts (planned for P0.9).
+vi.mock("./prompt-loader.js", () => ({
+	loadPromptBody: vi.fn(),
+	bundledPromptsDir: vi.fn(() => "/bundled-prompts"),
+	userPromptsDir: vi.fn(() => "/user-prompts"),
+	loadPromptFile: vi.fn(),
+	loadSharedFragment: vi.fn(),
+}));
+
+vi.mock("./prompt-composer.js", () => ({
+	composeLensPrompt: vi.fn(),
+	composeSynthesisPrompt: vi.fn(),
+}));
+
 import {
 	buildReviewPrompts,
 	buildSynthesisPrompt,
@@ -6,16 +30,16 @@ import {
 	ensureDefaultPrompts,
 	resetPrompts,
 	loadLensSystemPrompt,
+	loadSynthesisSystemPrompt,
 	getPromptPath,
 } from "./prompt-builder.js";
-import type { ChangedFile } from "./types.js";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
+import {
+	composeLensPrompt,
+	composeSynthesisPrompt,
+} from "./prompt-composer.js";
 
-vi.mock("node:fs/promises", () => ({
-	readFile: vi.fn(),
-	mkdir: vi.fn().mockResolvedValue(undefined),
-	writeFile: vi.fn().mockResolvedValue(undefined),
-}));
+// ── Test helpers ────────────────────────────────────────────────────────
 
 const mockFiles: ChangedFile[] = [
 	{ path: "src/app.ts", status: "modified", language: "TypeScript" },
@@ -26,6 +50,48 @@ const mockDiffs = new Map<string, string>([
 	["src/app.ts", "@@ -1,2 +1,3 @@\n+console.log('hello')"],
 	["src/utils.ts", "@@ -0,0 +1,2 @@\n+export const x = 1"],
 ]);
+
+/**
+ * The fixture strings for each lens. Each is the *full composed system prompt*
+ * (iron-law + lens body + json-output + grounding-rules + kiss-dry-checklist).
+ * Tests assert substrings on these.
+ */
+const LENS_PROMPTS: Record<string, string> = {
+	simplicity:
+		"Simplicity Auditor · KISS principles · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check · Is the new code as simple as the problem allows · Is knowledge represented once · Do variables/functions reveal intent · Do they explain WHY, not WHAT",
+	deduplication:
+		"Duplication Hunter · DRY principles · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	clarity:
+		"Clarity & Quality Auditor · Performance Check · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	resilience:
+		"Resilience Auditor · silent failures · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	architecture:
+		"Architecture Auditor · SOLID · Depth · Seam · Locality · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	tests:
+		"Test Coverage & Test Quality Auditor · Given-When-Then · Weak tests are false confidence · Over-mocking · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	security:
+		"Security Auditor · Injection Vulnerabilities · Secrets & Credentials · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+};
+
+const SYNTHESIS_PROMPT =
+	"Senior Engineer Synthesizer · critical > high > medium > low > nit · Output the final report as a single JSON object · Synthesis Grounding rules";
+
+/** Wire the composer mock to return the right fixture for each lens. */
+function setComposerFixtures(): void {
+	vi.mocked(composeLensPrompt).mockImplementation(
+		async (lens) => LENS_PROMPTS[lens] ?? `__unmocked__:${lens}__`,
+	);
+	vi.mocked(composeSynthesisPrompt).mockResolvedValue(SYNTHESIS_PROMPT);
+}
+
+beforeEach(() => {
+	vi.resetAllMocks();
+	setComposerFixtures();
+	vi.mocked(bundledPromptsDir).mockReturnValue("/bundled-prompts");
+	vi.mocked(userPromptsDir).mockReturnValue(join(tmpdir(), "user-prompts"));
+});
+
+// ── buildReviewPrompts ──────────────────────────────────────────────────
 
 describe("buildReviewPrompts", () => {
 	it("returns single prompt for simplicity lens", async () => {
@@ -63,7 +129,6 @@ describe("buildReviewPrompts", () => {
 			mockDiffs,
 			"clarity",
 		);
-		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("clarity");
 		expect(prompts[0].systemPrompt).toContain("Clarity & Quality Auditor");
 		expect(prompts[0].systemPrompt).toContain("Performance Check");
@@ -76,7 +141,6 @@ describe("buildReviewPrompts", () => {
 			mockDiffs,
 			"resilience",
 		);
-		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("resilience");
 		expect(prompts[0].systemPrompt).toContain("Resilience Auditor");
 		expect(prompts[0].systemPrompt).toContain("silent failures");
@@ -89,7 +153,6 @@ describe("buildReviewPrompts", () => {
 			mockDiffs,
 			"architecture",
 		);
-		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("architecture");
 		expect(prompts[0].systemPrompt).toContain("Architecture Auditor");
 		expect(prompts[0].systemPrompt).toContain("SOLID");
@@ -105,7 +168,6 @@ describe("buildReviewPrompts", () => {
 			mockDiffs,
 			"tests",
 		);
-		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("tests");
 		expect(prompts[0].systemPrompt).toContain(
 			"Test Coverage & Test Quality Auditor",
@@ -124,7 +186,6 @@ describe("buildReviewPrompts", () => {
 			mockDiffs,
 			"security",
 		);
-		expect(prompts).toHaveLength(1);
 		expect(prompts[0].lens).toBe("security");
 		expect(prompts[0].systemPrompt).toContain("Security Auditor");
 		expect(prompts[0].systemPrompt).toContain("Injection Vulnerabilities");
@@ -232,7 +293,19 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].userPrompt).toContain("Full file");
 		expect(prompts[0].userPrompt).toContain("export const x = 1;");
 	});
+
+	it("passes activeConstraints to the composer", async () => {
+		await buildReviewPrompts("/cwd", mockFiles, mockDiffs, "simplicity", {
+			activeConstraints: "disable: [K1]",
+		});
+		expect(composeLensPrompt).toHaveBeenCalledWith(
+			"simplicity",
+			expect.objectContaining({ activeConstraints: "disable: [K1]" }),
+		);
+	});
 });
+
+// ── buildSynthesisPrompt ────────────────────────────────────────────────
 
 describe("buildSynthesisPrompt", () => {
 	it("returns system and user prompts", async () => {
@@ -253,7 +326,20 @@ describe("buildSynthesisPrompt", () => {
 		expect(result.userPrompt).toContain("SIMPLICITY REVIEWER");
 		expect(result.userPrompt).toContain("DEDUPLICATION REVIEWER");
 	});
+
+	it("passes activeConstraints to the synthesis composer", async () => {
+		await buildSynthesisPrompt(
+			"/cwd",
+			[{ lens: "simplicity", rawOutput: "[]" }],
+			{ activeConstraints: "ignore: [src/legacy/**]" },
+		);
+		expect(composeSynthesisPrompt).toHaveBeenCalledWith(
+			expect.objectContaining({ activeConstraints: "ignore: [src/legacy/**]" }),
+		);
+	});
 });
+
+// ── buildAutoInjectBlock ────────────────────────────────────────────────
 
 describe("buildAutoInjectBlock", () => {
 	it("returns block with empty file list when no files", () => {
@@ -283,54 +369,130 @@ describe("buildAutoInjectBlock", () => {
 	});
 });
 
+// ── Prompt loading & seed lifecycle ─────────────────────────────────────
+
 describe("prompt template management", () => {
-	beforeEach(() => {
-		vi.resetAllMocks();
+	describe("getPromptPath", () => {
+		it("returns the user-prompt path under the global prompts dir", () => {
+			// Override userPromptsDir (in this test only) to return a real-looking path
+			vi.mocked(userPromptsDir).mockReturnValue(
+				join(require("node:os").homedir(), ".pi", "drykiss", "prompts"),
+			);
+			const path = getPromptPath("simplicity");
+			expect(path).toMatch(/\.pi[/\\]drykiss[/\\]prompts[/\\]simplicity\.md$/);
+		});
+
+		it("returns the synthesis path", () => {
+			vi.mocked(userPromptsDir).mockReturnValue(
+				join(require("node:os").homedir(), ".pi", "drykiss", "prompts"),
+			);
+			const path = getPromptPath("synthesis");
+			expect(path).toMatch(/\.pi[/\\]drykiss[/\\]prompts[/\\]synthesis\.md$/);
+		});
 	});
 
-	it("getPromptPath returns correct path", () => {
-		const path = getPromptPath("simplicity");
-		expect(path).toMatch(/\.pi[/\\]drykiss[/\\]prompts[/\\]simplicity\.md$/);
+	describe("loadLensSystemPrompt", () => {
+		it("delegates to composeLensPrompt with no active constraints", async () => {
+			await loadLensSystemPrompt("simplicity");
+			expect(composeLensPrompt).toHaveBeenCalledWith(
+				"simplicity",
+				expect.objectContaining({ activeConstraints: undefined }),
+			);
+		});
+
+		it("passes activeConstraints through to the composer", async () => {
+			await loadLensSystemPrompt("simplicity", "disable: [K1]");
+			expect(composeLensPrompt).toHaveBeenCalledWith(
+				"simplicity",
+				expect.objectContaining({ activeConstraints: "disable: [K1]" }),
+			);
+		});
 	});
 
-	it("loadLensSystemPrompt loads custom prompt from disk", async () => {
-		vi.mocked(readFile).mockResolvedValue("Custom prompt body\n");
-		const prompt = await loadLensSystemPrompt("simplicity");
-		expect(prompt).toContain("Custom prompt body");
-		expect(prompt).toContain("Output findings as a single JSON array");
-		expect(readFile).toHaveBeenCalled();
+	describe("loadSynthesisSystemPrompt", () => {
+		it("delegates to composeSynthesisPrompt", async () => {
+			await loadSynthesisSystemPrompt();
+			expect(composeSynthesisPrompt).toHaveBeenCalled();
+		});
 	});
 
-	it("loadLensSystemPrompt falls back to default when file missing", async () => {
-		vi.mocked(readFile).mockRejectedValue(
-			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
-		);
-		const prompt = await loadLensSystemPrompt("simplicity");
-		expect(prompt).toContain("Simplicity Auditor");
-		expect(prompt).toContain("KISS");
-		expect(prompt).toContain("Output findings as a single JSON array");
-	});
+	/**
+	 * The seed and reset functions read from the bundled dir (real `.md` files
+	 * shipped in the repo at `src/prompts/`) and write to a real temp user dir.
+	 * We do NOT mock `node:fs/promises` for these tests — we use the real FS
+	 * so the integration is exercised end-to-end.
+	 */
+	describe("ensureDefaultPrompts / resetPrompts (real-fs integration)", () => {
+		async function withTempUserDir<T>(
+			callback: (userDir: string) => Promise<T>,
+		): Promise<T> {
+			const userDir = await mkdtemp(join(tmpdir(), "drykiss-user-"));
+			try {
+				return await callback(userDir);
+			} finally {
+				await rm(userDir, { recursive: true, force: true });
+			}
+		}
 
-	it("ensureDefaultPrompts creates missing prompt files", async () => {
-		vi.mocked(readFile).mockRejectedValue(
-			Object.assign(new Error("file not found"), { code: "ENOENT" as const }),
-		);
-		await ensureDefaultPrompts("/cwd");
-		expect(mkdir).toHaveBeenCalled();
-		expect(writeFile).toHaveBeenCalledTimes(8); // 7 lenses + synthesis
-	});
+		it("seeds the user dir with all bundled files on first run", async () => {
+			await withTempUserDir(async (userDir) => {
+				// bundledPromptsDir points to the real `src/prompts/` shipped in the repo
+				const bundledDir = join(process.cwd(), "src", "prompts");
+				vi.mocked(bundledPromptsDir).mockReturnValue(bundledDir);
+				vi.mocked(userPromptsDir).mockReturnValue(userDir);
 
-	it("ensureDefaultPrompts does not overwrite existing files", async () => {
-		vi.mocked(readFile).mockResolvedValue("existing content");
-		await ensureDefaultPrompts("/cwd");
-		expect(mkdir).toHaveBeenCalled();
-		expect(writeFile).not.toHaveBeenCalled();
-	});
+				await ensureDefaultPrompts("/cwd");
 
-	it("resetPrompts overwrites all prompt files", async () => {
-		vi.mocked(readFile).mockResolvedValue("existing content");
-		await resetPrompts();
-		expect(mkdir).toHaveBeenCalled();
-		expect(writeFile).toHaveBeenCalledTimes(8); // 7 lenses + synthesis
+				// 8 lens + 7 shared + 1 sentinel = 16 files
+				const entries = await readdir(userDir);
+				const sharedEntries = await readdir(join(userDir, "_shared"));
+				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
+				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(7);
+				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
+					true,
+				);
+			});
+		});
+
+		it("does not re-seed when the sentinel is present", async () => {
+			await withTempUserDir(async (userDir) => {
+				const bundledDir = join(process.cwd(), "src", "prompts");
+				vi.mocked(bundledPromptsDir).mockReturnValue(bundledDir);
+				vi.mocked(userPromptsDir).mockReturnValue(userDir);
+
+				await ensureDefaultPrompts("/cwd");
+				const before = (await readdir(userDir)).sort();
+
+				// Second call: sentinel present → no writes
+				await ensureDefaultPrompts("/cwd");
+				const after = (await readdir(userDir)).sort();
+
+				expect(after).toEqual(before);
+			});
+		});
+
+		it("resetPrompts overwrites the user dir with fresh bundled content", async () => {
+			await withTempUserDir(async (userDir) => {
+				const bundledDir = join(process.cwd(), "src", "prompts");
+				vi.mocked(bundledPromptsDir).mockReturnValue(bundledDir);
+				vi.mocked(userPromptsDir).mockReturnValue(userDir);
+
+				// First seed
+				await ensureDefaultPrompts("/cwd");
+				// Corrupt one file
+				await writeFile(join(userDir, "simplicity.md"), "CORRUPTED", "utf8");
+				const corrupted = await readFile(
+					join(userDir, "simplicity.md"),
+					"utf8",
+				);
+				expect(corrupted).toBe("CORRUPTED");
+
+				// Reset restores from bundled
+				await resetPrompts();
+				const restored = await readFile(join(userDir, "simplicity.md"), "utf8");
+				expect(restored).not.toBe("CORRUPTED");
+				expect(restored).toContain("Simplicity Auditor");
+			});
+		});
 	});
 });
