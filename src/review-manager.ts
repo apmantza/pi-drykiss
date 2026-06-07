@@ -246,8 +246,9 @@ export class ReviewManager {
 					 * runningCount bookkeeping. Without the re-drain call here
 					 * the queue would stall as soon as any task rejected. */
 					this.runningCount--;
-					this.drain(ctx, pi, cwd).catch((err) => {
-						});
+					this.drain(ctx, pi, cwd).catch(() => {
+						/* Don't let drain errors crash the loop */
+					});
 				});
 		}
 	}
@@ -567,8 +568,8 @@ export class ReviewManager {
 		if (job.synthesisResult) {
 			try {
 				job.reviewPath = await saveReview(job.files, job.synthesisResult);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
+			} catch {
+				/* Non-fatal: review result is still valid without persistence */
 			}
 		}
 

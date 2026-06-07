@@ -179,12 +179,14 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 		await Promise.all(
 			BUNDLED_LENS_FILES.map(async (filename) => {
 				const src = join(bundledDir, filename);
-				const dest = join(userDir, filename);
-				try {
-					await copyBundledFile(src, dest);
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-				}
+			const dest = join(userDir, filename);
+			try {
+				await copyBundledFile(src, dest);
+			} catch (err) {
+				throw new Error(
+					`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 			}),
 		);
 
@@ -197,7 +199,9 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 				try {
 					await copyBundledFile(src, dest);
 				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
+					throw new Error(
+						`Failed to seed shared fragment ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+					);
 				}
 			}),
 		);
@@ -206,7 +210,6 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 		await removeOldSentinels(userDir);
 		await writeSentinel(userDir);
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
 		throw err;
 	}
 }
