@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getGlobalBaseDir, getProjectBaseDir, getProjectConfigPath, CONFIG_FILE } from "./constants.js";
+import {
+	getGlobalBaseDir,
+	getProjectBaseDir,
+	getProjectConfigPath,
+	CONFIG_FILE,
+} from "./constants.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
 import type { Finding } from "./types.js";
 
@@ -191,7 +196,118 @@ export async function loadConfig(): Promise<DrykissConfig> {
  * Defaults are returned when the file is missing or corrupt (matching
  * the original loadConfig behaviour).
  */
-export async function loadEffectiveConfig(cwd?: string): Promise<{ config: DrykissConfig; warnings: string[]; }> { const warnings: string[] = []; const globalConfig = await loadConfigFile(getConfigPath(), warnings); let config: DrykissConfig = globalConfig ?? { interactive: true, confirmBeforeRun: true }; if (cwd && globalConfig) { const projectPath = getProjectConfigPath(cwd); const projectConfig = await loadConfigFile(projectPath, warnings); if (projectConfig) { config = { ...globalConfig, ...projectConfig, suppressions: [ ...(globalConfig.suppressions ?? []), ...(projectConfig.suppressions ?? []), ], }; } } if (!config.riskTargeting) { return { config, warnings }; } const rt = config.riskTargeting; const cleaned: { disable?: string[]; severity?: SeverityOverrideRule[]; ignore?: string[]; focus?: string[]; } = {}; if (rt.disable !== undefined) { const { valid, dropped } = partitionByRiskCode(rt.disable); cleaned.disable = valid; for (const code of dropped) { warnings.push(`Unknown risk code in disable: ${code}`); } } if (rt.focus !== undefined) { const { valid, dropped } = partitionByRiskCode(rt.focus); cleaned.focus = valid; for (const code of dropped) { warnings.push(`Unknown risk code in focus: ${code}`); } } if (cleaned.disable && cleaned.focus) { warnings.push("Both disable and focus are set; ignoring both. Use one or the other."); cleaned.disable = undefined; cleaned.focus = undefined; } if (rt.severity !== undefined) { const validRules: SeverityOverrideRule[] = []; for (const rule of rt.severity) { if (!VALID_RISK_CODES.has(rule.riskCode)) { warnings.push(`Unknown risk code in severity override: ${rule.riskCode}`); continue; } if (!isValidSeverity(rule.to)) { warnings.push(`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`); continue; } validRules.push({ riskCode: rule.riskCode, to: rule.to }); } cleaned.severity = validRules; } if (rt.ignore !== undefined) { cleaned.ignore = rt.ignore.filter((p) => typeof p === "string" && p.length > 0,); } return { config: { ...config, riskTargeting: { ...(cleaned.disable ? { disable: cleaned.disable } : {}), ...(cleaned.severity ? { severity: cleaned.severity } : {}), ...(cleaned.ignore ? { ignore: cleaned.ignore } : {}), ...(cleaned.focus ? { focus: cleaned.focus } : {}), }, }, warnings, }; } async function loadConfigFile(path: string, warnings: string[]): Promise<DrykissConfig | undefined> { try { const text = await readFile(path, "utf8"); return JSON.parse(text) as DrykissConfig; } catch (err) { if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") { return undefined; } if (err instanceof SyntaxError) { warnings.push(`Config file ${path} is corrupt; ignoring.`); return undefined; } throw err; } }
+export async function loadEffectiveConfig(
+	cwd?: string,
+): Promise<{ config: DrykissConfig; warnings: string[] }> {
+	const warnings: string[] = [];
+	const globalConfig = await loadConfigFile(getConfigPath(), warnings);
+	let config: DrykissConfig = globalConfig ?? {
+		interactive: true,
+		confirmBeforeRun: true,
+	};
+	if (cwd && globalConfig) {
+		const projectPath = getProjectConfigPath(cwd);
+		const projectConfig = await loadConfigFile(projectPath, warnings);
+		if (projectConfig) {
+			config = {
+				...globalConfig,
+				...projectConfig,
+				suppressions: [
+					...(globalConfig.suppressions ?? []),
+					...(projectConfig.suppressions ?? []),
+				],
+			};
+		}
+	}
+	if (!config.riskTargeting) {
+		return { config, warnings };
+	}
+	const rt = config.riskTargeting;
+	const cleaned: {
+		disable?: string[];
+		severity?: SeverityOverrideRule[];
+		ignore?: string[];
+		focus?: string[];
+	} = {};
+	if (rt.disable !== undefined) {
+		const { valid, dropped } = partitionByRiskCode(rt.disable);
+		cleaned.disable = valid;
+		for (const code of dropped) {
+			warnings.push(`Unknown risk code in disable: ${code}`);
+		}
+	}
+	if (rt.focus !== undefined) {
+		const { valid, dropped } = partitionByRiskCode(rt.focus);
+		cleaned.focus = valid;
+		for (const code of dropped) {
+			warnings.push(`Unknown risk code in focus: ${code}`);
+		}
+	}
+	if (cleaned.disable && cleaned.focus) {
+		warnings.push(
+			"Both disable and focus are set; ignoring both. Use one or the other.",
+		);
+		cleaned.disable = undefined;
+		cleaned.focus = undefined;
+	}
+	if (rt.severity !== undefined) {
+		const validRules: SeverityOverrideRule[] = [];
+		for (const rule of rt.severity) {
+			if (!VALID_RISK_CODES.has(rule.riskCode)) {
+				warnings.push(
+					`Unknown risk code in severity override: ${rule.riskCode}`,
+				);
+				continue;
+			}
+			if (!isValidSeverity(rule.to)) {
+				warnings.push(
+					`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`,
+				);
+				continue;
+			}
+			validRules.push({ riskCode: rule.riskCode, to: rule.to });
+		}
+		cleaned.severity = validRules;
+	}
+	if (rt.ignore !== undefined) {
+		cleaned.ignore = rt.ignore.filter(
+			(p) => typeof p === "string" && p.length > 0,
+		);
+	}
+	return {
+		config: {
+			...config,
+			riskTargeting: {
+				...(cleaned.disable ? { disable: cleaned.disable } : {}),
+				...(cleaned.severity ? { severity: cleaned.severity } : {}),
+				...(cleaned.ignore ? { ignore: cleaned.ignore } : {}),
+				...(cleaned.focus ? { focus: cleaned.focus } : {}),
+			},
+		},
+		warnings,
+	};
+}
+async function loadConfigFile(
+	path: string,
+	warnings: string[],
+): Promise<DrykissConfig | undefined> {
+	try {
+		const text = await readFile(path, "utf8");
+		return JSON.parse(text) as DrykissConfig;
+	} catch (err) {
+		if (
+			err instanceof Error &&
+			(err as NodeJS.ErrnoException).code === "ENOENT"
+		) {
+			return undefined;
+		}
+		if (err instanceof SyntaxError) {
+			warnings.push(`Config file ${path} is corrupt; ignoring.`);
+			return undefined;
+		}
+		throw err;
+	}
+}
 function isValidSeverity(s: unknown): s is SeverityOverride {
 	return (
 		s === "critical" ||

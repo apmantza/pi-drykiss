@@ -394,7 +394,6 @@ export async function handleConfigCommand(
 	);
 }
 
-
 // ── Phase 3: Suppression commands ──────────────────────────────────────
 
 /**
@@ -499,9 +498,10 @@ export async function handleSuppressCommand(
 
 		// Check for expired suppressions
 		const expiredIds = getExpiredSuppressionIds(suppressions);
-		const expiredMsg = expiredIds.length > 0
-			? ` (${expiredIds.length} expired suppression(s) present)`
-			: "";
+		const expiredMsg =
+			expiredIds.length > 0
+				? ` (${expiredIds.length} expired suppression(s) present)`
+				: "";
 
 		ctx.ui.notify(
 			`Suppression added: ${riskCode} on ${pattern} — "${reason}"${expiresAt ? ` (expires ${expiresAt})` : ""}${expiredMsg}`,
@@ -517,11 +517,10 @@ export async function handleSuppressCommand(
  * Handle the /drykiss-suppressions command — list all active suppressions.
  */
 export async function handleListSuppressionsCommand(
-	args: string,
+	_args: string,
 	ctx: ExtensionCommandContext,
 	cwd: string,
 ): Promise<void> {
-	const tokens = args.trim().split(/\s+/).filter(Boolean);
 	try {
 		const { config } = await loadEffectiveConfig(cwd);
 		const suppressions = config.suppressions ?? [];
@@ -549,7 +548,9 @@ export async function handleListSuppressionsCommand(
 		for (const s of suppressions) {
 			const isExpired = !active.includes(s);
 			const prefix = isExpired ? "❌ (EXPIRED) " : "✓ ";
-			const expiresStr = s.expiresAt ? ` — expires ${s.expiresAt}` : " — no expiry";
+			const expiresStr = s.expiresAt
+				? ` — expires ${s.expiresAt}`
+				: " — no expiry";
 			lines.push(
 				`${prefix}\`${s.riskCode}\` on \`${s.pattern}\` — ${s.reason}${expiresStr}`,
 			);

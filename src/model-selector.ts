@@ -10,7 +10,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { loadConfig, type DrykissConfig } from "./config.js";
 import { selectFreeModel, type ExcludedModel } from "./free-models.js";
-import { LOG_PREFIX } from "./constants.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
 
@@ -307,7 +306,7 @@ export async function selectModelWithAutoroute(
 	// so the caller can decide how to handle the unrecoverable error.
 	if (!ctx.hasUI) return undefined;
 
-	return selectModel(ctx, title, message);
+	return await selectModel(ctx, title, message);
 }
 
 /**
@@ -335,9 +334,8 @@ export async function selectModelOnError(
 			provider: failedModel.provider,
 			id: failedModel.id,
 		});
-	} catch (routeErr) {
-		const msg = routeErr instanceof Error ? routeErr.message : String(routeErr);
-		console.error(`${LOG_PREFIX} Model autoroute failed: ${msg}`);
+	} catch {
+		// Autoroute failed — return undefined so caller can decide how to handle
 		return undefined;
 	}
 }

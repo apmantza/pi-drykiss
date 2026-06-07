@@ -279,12 +279,6 @@ export async function fetchPrFileContents(
 		const results = await Promise.allSettled(
 			batch.map(async (path) => {
 				if (!isValidFilePath(path)) {
-					console.warn(
-						`[DRYKISS] Refusing to fetch unsafe file path: ${String(path).slice(
-							0,
-							100,
-						)}`,
-					);
 					return null;
 				}
 				try {
@@ -308,12 +302,6 @@ export async function fetchPrFileContents(
 					// validating so multi-line responses don't get rejected.
 					const decoded = decodeBase64Content(stdout);
 					if (decoded === null) {
-						console.warn(
-							`[DRYKISS] Unexpected API response for ${path}: ${stdout.slice(
-								0,
-								100,
-							)}`,
-						);
 						return null;
 					}
 					const lineCount = decoded.split("\n").length;
@@ -327,11 +315,7 @@ export async function fetchPrFileContents(
 						: decoded;
 
 					return { path, content, lineCount, truncated };
-				} catch (err) {
-					console.warn(
-						`[DRYKISS] Could not fetch content for ${path}:`,
-						err instanceof Error ? err.message : String(err),
-					);
+				} catch {
 					return null;
 				}
 			}),

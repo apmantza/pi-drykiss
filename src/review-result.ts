@@ -373,9 +373,9 @@ export function applySuppressions(
  * Returns true if the suppression has passed its `expiresAt` date.
  * When `expiresAt` is undefined, the suppression never expires.
  */
-export function isSuppressionExpired(
-	suppression: { expiresAt?: string },
-): boolean {
+export function isSuppressionExpired(suppression: {
+	expiresAt?: string;
+}): boolean {
 	if (!suppression.expiresAt) return false;
 	try {
 		const expiry = new Date(suppression.expiresAt);
@@ -393,7 +393,5 @@ export function isSuppressionExpired(
 export function getExpiredSuppressionIds(
 	suppressions: ReadonlyArray<{ id: string; expiresAt?: string }>,
 ): string[] {
-	return suppressions
-		.filter((s) => isSuppressionExpired(s))
-		.map((s) => s.id);
+	return suppressions.filter((s) => isSuppressionExpired(s)).map((s) => s.id);
 }

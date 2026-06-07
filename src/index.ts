@@ -24,7 +24,12 @@ import {
 	TESTS_COMMAND_NAME,
 	SECURITY_COMMAND_NAME,
 } from "./review-command.js";
-import { handleConfigCommand, handleSuppressCommand, handleListSuppressionsCommand, handleUnsuppressCommand } from "./config-command.js";
+import {
+	handleConfigCommand,
+	handleSuppressCommand,
+	handleListSuppressionsCommand,
+	handleUnsuppressCommand,
+} from "./config-command.js";
 import { loadConfig } from "./config.js";
 import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
