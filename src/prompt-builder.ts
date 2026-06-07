@@ -179,14 +179,14 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 		await Promise.all(
 			BUNDLED_LENS_FILES.map(async (filename) => {
 				const src = join(bundledDir, filename);
-			const dest = join(userDir, filename);
-			try {
-				await copyBundledFile(src, dest);
-			} catch (err) {
-				throw new Error(
-					`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
+				const dest = join(userDir, filename);
+				try {
+					await copyBundledFile(src, dest);
+				} catch (err) {
+					throw new Error(
+						`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
 			}),
 		);
 
@@ -323,10 +323,11 @@ export async function buildReviewPrompts(
 
 	if (lens !== "all") {
 		const systemPrompt = await composeLensPrompt(lens, composeOpts);
+		const examine = "Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence.";
 		const userPrompt =
 			lens === "deduplication" && indexBlock
-				? `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}\n${indexBlock}`
-				: `Review the following code changes for ${lens} issues. Output findings as JSON only.\n\n${context}`;
+				? `${examine} Output findings as JSON only.\n\n${context}\n${indexBlock}`
+				: `${examine} Output findings as JSON only.\n\n${context}`;
 		return [{ lens, systemPrompt, userPrompt }];
 	}
 
@@ -335,8 +336,8 @@ export async function buildReviewPrompts(
 		const systemPrompt = await composeLensPrompt(l, composeOpts);
 		const userPrompt =
 			l === "deduplication" && indexBlock
-				? `Review the following code changes. Output findings as JSON only.\n\n${context}\n${indexBlock}`
-				: `Review the following code changes. Output findings as JSON only.\n\n${context}`;
+				? `Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.\n\n${context}\n${indexBlock}`
+				: `Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.\n\n${context}`;
 		prompts.push({ lens: l, systemPrompt, userPrompt });
 	}
 	return prompts;

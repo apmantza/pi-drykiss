@@ -427,7 +427,7 @@ export class ReviewManager {
 				await this.runSynthesis(ctx, cwd, job);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-					job.synthesisStatus = "error";
+				job.synthesisStatus = "error";
 				job.synthesisResult = createFallbackSynthesis(
 					`Synthesis crashed: ${msg}`,
 				);
@@ -546,7 +546,6 @@ export class ReviewManager {
 			} else {
 				const rawText = result.text || "{}";
 				job.synthesisResult = parseSynthesis(rawText);
-
 			}
 			job.synthesisStatus = result.errorMessage ? "error" : "done";
 		} catch (err: any) {
