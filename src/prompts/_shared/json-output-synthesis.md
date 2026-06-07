@@ -1,5 +1,8 @@
-## Output Format
-Output the final report as a single JSON object:
+## 🔴 CRITICAL: Output Format — Must output valid JSON
+
+Output the final report as a single JSON object. Failure to output valid JSON will cause the review to be rejected.
+
+Example (do NOT include any surrounding text or fences):
 
 {
   "summary": "One sentence describing the top concern",
