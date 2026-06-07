@@ -323,7 +323,8 @@ export async function buildReviewPrompts(
 
 	if (lens !== "all") {
 		const systemPrompt = await composeLensPrompt(lens, composeOpts);
-		const examine = "Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence.";
+		const examine =
+			"Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence.";
 		const userPrompt =
 			lens === "deduplication" && indexBlock
 				? `${examine} Output findings as JSON only.\n\n${context}\n${indexBlock}`

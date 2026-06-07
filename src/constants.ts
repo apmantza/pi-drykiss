@@ -32,3 +32,6 @@ export const LENS_DISPLAY_NAMES: Record<string, string> = {
 	security: "Security",
 	synthesis: "Synthesis",
 };
+
+/** Log prefix for all DRYKISS console output */
+export const LOG_PREFIX = "[DRYKISS]";

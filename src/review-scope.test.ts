@@ -2,12 +2,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("./git-diff.js", () => ({
 	parseDiffOutput: vi.fn((stdout: string) => {
-		const files: Array<{ path: string; status: string; language: string | null }> = [];
+		const files: Array<{
+			path: string;
+			status: string;
+			language: string | null;
+		}> = [];
 		for (const line of stdout.split("\n")) {
 			if (!line.trim()) continue;
 			const parts = line.split("\t");
 			const path = parts[parts.length - 1];
-			if (path) files.push({ path, status: "modified", language: "TypeScript" });
+			if (path)
+				files.push({ path, status: "modified", language: "TypeScript" });
 		}
 		return files;
 	}),

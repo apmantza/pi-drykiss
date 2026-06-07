@@ -7,6 +7,16 @@ import { promisify } from "node:util";
 import type { ChangedFile } from "./types.js";
 import { detectLanguage } from "./git-diff.js";
 
+/**
+ * Safely encode owner/repo into a CLI-safe repo reference.
+ * Prevents URL injection via special characters in owner or repo names.
+ */
+function safeRepoRef(owner: string, repo: string): string {
+	return `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+}
+
+
+
 const execFileAsync = promisify(execFile);
 
 export interface PrInfo {
@@ -120,7 +130,7 @@ async function fetchPrDiffRaw(
 ): Promise<string> {
 	const { stdout } = await execFileAsync(
 		"gh",
-		["pr", "diff", String(number), "--repo", `${owner}/${repo}`],
+		["pr", "diff", String(number), "--repo", safeRepoRef(owner, repo)],
 		{ cwd, maxBuffer: 10 * 1024 * 1024 }, // 10MB buffer for large diffs
 	);
 	return stdout;
@@ -142,7 +152,7 @@ async function fetchPrMetadata(
 			"view",
 			String(number),
 			"--repo",
-			`${owner}/${repo}`,
+			safeRepoRef(owner, repo),
 			"--json",
 			"title,headRefOid",
 		],

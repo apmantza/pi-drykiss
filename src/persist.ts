@@ -2,7 +2,7 @@ import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Finding, SynthesisResult } from "./types.js";
-import { getGlobalBaseDir } from "./constants.js";
+import { getGlobalBaseDir, LOG_PREFIX } from "./constants.js";
 
 function getGlobalReviewsDir(): string {
 	return join(getGlobalBaseDir(), "reviews");
@@ -78,7 +78,7 @@ export async function saveSessionLog(
 		return resolved || path;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		console.warn(`[DRYKISS] Failed to export session log for ${lens}: ${msg}`);
+		console.warn(`${LOG_PREFIX} Failed to export session log for ${lens}: ${msg}`);
 		return undefined;
 	}
 }
@@ -113,7 +113,7 @@ export async function listReviews(): Promise<PersistedReview[]> {
 		}
 		// Log unexpected errors (e.g., permission denied) so users know why list is empty
 		const msg = err instanceof Error ? err.message : String(err);
-		console.warn(`[DRYKISS] Failed to list reviews: ${msg}`);
+		console.warn(`${LOG_PREFIX} Failed to list reviews: ${msg}`);
 		return [];
 	}
 }

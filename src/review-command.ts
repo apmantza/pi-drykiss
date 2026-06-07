@@ -28,6 +28,7 @@ import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
 import { filterIgnored } from "./review-result.js";
+import { LOG_PREFIX } from "./constants.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -270,7 +271,7 @@ async function runLensReview(
 		: await resolveModel(ctx, lens);
 
 	ctx.ui.notify(
-		`[DRYKISS] Launching ${lens} subagent with ${model.name}...`,
+		`${LOG_PREFIX} Launching ${lens} subagent with ${model.name}...`,
 		"info",
 	);
 
@@ -289,7 +290,7 @@ async function runLensReview(
 	const { findings, parseError } = parseFindingsJson(rawOutput, lens);
 	if (parseError && !result.errorMessage) {
 		ctx.ui.notify(
-			`[DRYKISS] ${lens} lens output could not be parsed. Check console for raw output.`,
+			`${LOG_PREFIX} ${lens} lens output could not be parsed. Check console for raw output.`,
 			"warning",
 		);
 	}
@@ -307,7 +308,7 @@ export async function handleDrykissCommand(
 		prepared = await prepareReview(args, ctx, pi, true);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		ctx.ui.notify(`[DRYKISS] Failed to prepare review: ${msg}`, "error");
+		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
 		return;
 	}
 	if (!prepared) return;
@@ -375,7 +376,7 @@ async function handleSingleLensCommand(
 		prepared = await prepareReview(args, ctx, pi, needsProjectIndex);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		ctx.ui.notify(`[DRYKISS] Failed to prepare review: ${msg}`, "error");
+		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
 		return;
 	}
 	if (!prepared) return;

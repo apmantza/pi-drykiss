@@ -10,6 +10,7 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
+import { LOG_PREFIX } from "./constants.js";
 import {
 	fetchPrDiff,
 	fetchPrFileContents,
@@ -144,7 +145,7 @@ async function gatherDiffs(
 			diffs.set(file.path, await getFileDiff(pi, cwd, file.path, options));
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`[DRYKISS] Failed to get diff for ${file.path}:`, msg);
+			console.error(`${LOG_PREFIX} Failed to get diff for ${file.path}:`, msg);
 			diffs.set(file.path, "(diff unavailable)");
 		}
 	}

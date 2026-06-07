@@ -2,6 +2,7 @@ import { readFile, readdir, stat, lstat } from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
+import { LOG_PREFIX } from "./constants.js";
 
 export const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	M: "modified",
@@ -211,7 +212,7 @@ export async function getFileContent(
 		filePath.startsWith("\\") ||
 		isWindowsAbsolute
 	) {
-		console.error(`[DRYKISS] Rejected absolute path: ${filePath}`);
+		console.error(`${LOG_PREFIX} Rejected absolute path: ${filePath}`);
 		return null;
 	}
 	// Decode URI-encoded sequences (handles %2e%2e etc.) and normalize.
@@ -223,12 +224,12 @@ export async function getFileContent(
 	try {
 		decodedPath = decodeURIComponent(filePath);
 	} catch {
-		console.error(`[DRYKISS] Rejected malformed path: ${filePath}`);
+		console.error(`${LOG_PREFIX} Rejected malformed path: ${filePath}`);
 		return null;
 	}
 	// After decoding, reject literal dot-dot and tilde.
 	if (decodedPath.includes("..") || decodedPath.includes("~")) {
-		console.error(`[DRYKISS] Rejected suspicious path: ${filePath}`);
+		console.error(`${LOG_PREFIX} Rejected suspicious path: ${filePath}`);
 		return null;
 	}
 	// Verify resolved path stays within cwd (defense-in-depth for Unicode/other tricks)
@@ -238,7 +239,7 @@ export async function getFileContent(
 		!resolved.startsWith(cwdResolved + path.sep) &&
 		resolved !== cwdResolved
 	) {
-		console.error(`[DRYKISS] Rejected path escaping cwd: ${filePath}`);
+		console.error(`${LOG_PREFIX} Rejected path escaping cwd: ${filePath}`);
 		return null;
 	}
 	try {
@@ -249,7 +250,7 @@ export async function getFileContent(
 		// the actual type (not the target's type), so this is safe.
 		const linkStats = await lstat(resolved);
 		if (!linkStats.isFile()) {
-			console.error(`[DRYKISS] Rejected non-regular file: ${filePath}`);
+			console.error(`${LOG_PREFIX} Rejected non-regular file: ${filePath}`);
 			return null;
 		}
 		const raw = await readFile(resolved, "utf8");
@@ -272,7 +273,7 @@ export async function getFileContent(
 		// Permission errors — warn the user but continue
 		if (code === "EACCES" || code === "EPERM") {
 			console.warn(
-				`[DRYKISS] Permission denied reading ${filePath}, skipping.`,
+				`${LOG_PREFIX} Permission denied reading ${filePath}, skipping.`,
 			);
 			return null;
 		}
@@ -397,15 +398,15 @@ export async function getProjectIndex(
 				if (exports.length > 0) {
 					entries.push({ path: filePath.replace(/\\/g, "/"), exports });
 				}
-				} catch (err) {
-					// skip unreadable files with a warning so the index is not silently incomplete
-					const code =
-						err instanceof Error
-							? (err as NodeJS.ErrnoException).code
-							: undefined;
-					if (code === "EACCES" || code === "EPERM") {
-						console.warn(`[DRYKISS] Skipping ${filePath}: permission denied`);
-					}
+			} catch (err) {
+				// skip unreadable files with a warning so the index is not silently incomplete
+				const code =
+					err instanceof Error
+						? (err as NodeJS.ErrnoException).code
+						: undefined;
+				if (code === "EACCES" || code === "EPERM") {
+					console.warn(`${LOG_PREFIX} Skipping ${filePath}: permission denied`);
+				}
 			}
 		}
 		if (entries.length >= maxFiles) break;

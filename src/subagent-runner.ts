@@ -20,7 +20,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
 import type { ReviewLens } from "./types.js";
 import { extractAssistantText } from "./content-utils.js";
-import { LENS_DISPLAY_NAMES } from "./constants.js";
+import { LENS_DISPLAY_NAMES, LOG_PREFIX } from "./constants.js";
 
 export interface SubagentResult {
 	lens: string;
@@ -120,7 +120,7 @@ export async function runLensSubagent(
 		// This is critical for the session to be visible in Pi's UI
 		await session.bindExtensions({
 			onError: (err) => {
-				console.error(`[DRYKISS] Extension error in ${displayName}:`, err);
+				console.error(`${LOG_PREFIX} Extension error in ${displayName}:`, err);
 			},
 		});
 

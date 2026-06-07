@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { loadConfig, type DrykissConfig } from "./config.js";
 import { selectFreeModel, type ExcludedModel } from "./free-models.js";
+import { LOG_PREFIX } from "./constants.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
 
@@ -323,7 +324,7 @@ export async function selectModelOnError(
 		});
 	} catch (routeErr) {
 		const msg = routeErr instanceof Error ? routeErr.message : String(routeErr);
-		console.error(`[DRYKISS] Model autoroute failed: ${msg}`);
+		console.error(`${LOG_PREFIX} Model autoroute failed: ${msg}`);
 		return undefined;
 	}
 }
