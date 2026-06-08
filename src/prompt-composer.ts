@@ -22,9 +22,7 @@
  * All prompt text lives in `.md` files; this module is pure composition.
  */
 
-import {
-	loadPromptBody,
-} from "./prompt-loader.js";
+import { loadPromptBody } from "./prompt-loader.js";
 import type { ReviewLens } from "./types.js";
 
 export type LensName = Exclude<ReviewLens, "all"> | "synthesis";

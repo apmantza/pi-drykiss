@@ -98,9 +98,7 @@ describe("loadPromptBody", () => {
 	});
 
 	it("rethrows non-ENOENT errors from user dir", async () => {
-		vi.mocked(readFile).mockRejectedValue(
-			new Error("Permission denied"),
-		);
+		vi.mocked(readFile).mockRejectedValue(new Error("Permission denied"));
 		const { loadPromptBody } = await import("./prompt-loader.js");
 		await expect(loadPromptBody("some-lens", "lens")).rejects.toThrow(
 			"Permission denied",

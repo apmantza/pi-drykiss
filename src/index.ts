@@ -183,9 +183,7 @@ export default function (pi: ExtensionAPI): void {
 			const s = job.synthesisResult;
 			const hasError =
 				job.overallStatus === "error" ||
-				job.lenses.some(
-					(l: string) => job.states.get(l)?.status === "error",
-				);
+				job.lenses.some((l: string) => job.states.get(l)?.status === "error");
 			const hasCritical = s && s.criticalCount > 0;
 			const hasHigh = s && s.highCount > 0;
 

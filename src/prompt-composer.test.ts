@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { composeLensPrompt, composeSynthesisPrompt } from "./prompt-composer.js";
+import {
+	composeLensPrompt,
+	composeSynthesisPrompt,
+} from "./prompt-composer.js";
 
 // Mock prompt-loader so we don't hit the filesystem
 vi.mock("./prompt-loader.js", () => ({
@@ -9,11 +12,12 @@ vi.mock("./prompt-loader.js", () => ({
 		if (name === "synthesis") return "# Synthesizer\nMerge findings.";
 		if (name === "json-output") return "```json\n{ findings: [] }\n```";
 		if (name === "json-output-synthesis")
-			return "```json\n{ summary: \"\" }\n```";
+			return '```json\n{ summary: "" }\n```';
 		if (name === "grounding-rules") return "## Grounding\nBe specific.";
 		if (name === "grounding-rules-synthesis")
 			return "## Synthesis Grounding\nCross-validate.";
-		if (name === "kiss-dry-checklist") return "## KISS/DRY Checklist\n- [ ] KISS";
+		if (name === "kiss-dry-checklist")
+			return "## KISS/DRY Checklist\n- [ ] KISS";
 		if (name === "active-constraints")
 			return "## Active Constraints\n{{active_constraints}}";
 		throw new Error(`Unknown prompt: ${name}`);

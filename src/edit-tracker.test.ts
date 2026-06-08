@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { createEditTracker } from "./edit-tracker.js";
 
+const WRITE_TOOL = "write";
+const EDIT_TOOL = "edit";
+
 describe("createEditTracker", () => {
 	it("tracks edits from the 'write' tool", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			path: "src/foo.ts",
 		});
 		expect(result).not.toBeNull();
@@ -13,7 +16,7 @@ describe("createEditTracker", () => {
 
 	it("tracks edits from the 'edit' tool", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("edit", {
+		const result = tracker.trackEdit(EDIT_TOOL, {
 			path: "src/bar.ts",
 		});
 		expect(result).not.toBeNull();
@@ -38,7 +41,7 @@ describe("createEditTracker", () => {
 
 	it("extracts path from 'file_path' key", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			file_path: "src/deep.ts",
 		});
 		expect(result).not.toBeNull();
@@ -47,7 +50,7 @@ describe("createEditTracker", () => {
 
 	it("extracts path from 'filePath' key", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			filePath: "src/camel.ts",
 		});
 		expect(result).not.toBeNull();
@@ -56,7 +59,7 @@ describe("createEditTracker", () => {
 
 	it("extracts path from string result with 'file:' prefix", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			details: "File: src/detail.ts",
 		});
 		expect(result).not.toBeNull();
@@ -65,14 +68,14 @@ describe("createEditTracker", () => {
 
 	it("extracts path from string result with 'File:' prefix", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("edit", "File: src/capital.ts");
+		const result = tracker.trackEdit(EDIT_TOOL, "File: src/capital.ts");
 		expect(result).not.toBeNull();
 		expect(result!.path).toBe("src/capital.ts");
 	});
 
 	it("extracts path from nested details object", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			details: { path: "src/nested.ts" },
 		});
 		expect(result).not.toBeNull();
@@ -81,7 +84,7 @@ describe("createEditTracker", () => {
 
 	it("detects language from file extension", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			path: "src/app.tsx",
 		});
 		expect(result).not.toBeNull();
@@ -90,7 +93,7 @@ describe("createEditTracker", () => {
 
 	it("returns null when path cannot be extracted", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			noise: "no path here",
 		});
 		expect(result).toBeNull();
@@ -98,17 +101,17 @@ describe("createEditTracker", () => {
 
 	it("deduplicates repeated edits to same file", () => {
 		const tracker = createEditTracker();
-		tracker.trackEdit("write", { path: "src/foo.ts" });
-		tracker.trackEdit("edit", { path: "src/foo.ts" });
-		tracker.trackEdit("write", { path: "src/foo.ts" });
+		tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts" });
+		tracker.trackEdit(EDIT_TOOL, { path: "src/foo.ts" });
+		tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts" });
 		const result = tracker.getLastTurnEdits();
 		expect(result).toBeNull(); // nothing ended yet
 	});
 
 	it("onTurnEnd captures edits and clears current state", () => {
 		const tracker = createEditTracker();
-		tracker.trackEdit("write", { path: "src/foo.ts" });
-		tracker.trackEdit("edit", { path: "src/bar.ts" });
+		tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts" });
+		tracker.trackEdit(EDIT_TOOL, { path: "src/bar.ts" });
 		tracker.onTurnEnd(0);
 		const turn = tracker.getLastTurnEdits();
 		expect(turn).not.toBeNull();
@@ -126,7 +129,7 @@ describe("createEditTracker", () => {
 
 	it("onTurnEnd clears state so subsequent calls see no duplicate files", () => {
 		const tracker = createEditTracker();
-		tracker.trackEdit("write", { path: "src/only.ts" });
+		tracker.trackEdit(WRITE_TOOL, { path: "src/only.ts" });
 		tracker.onTurnEnd(0);
 		const turn = tracker.getLastTurnEdits();
 		expect(turn!.files).toHaveLength(1);
@@ -138,7 +141,7 @@ describe("createEditTracker", () => {
 
 	it("clearLastTurnEdits resets last turn", () => {
 		const tracker = createEditTracker();
-		tracker.trackEdit("write", { path: "src/foo.ts" });
+		tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts" });
 		tracker.onTurnEnd(0);
 		expect(tracker.getLastTurnEdits()).not.toBeNull();
 		tracker.clearLastTurnEdits();
@@ -148,7 +151,7 @@ describe("createEditTracker", () => {
 	it("sanitizes control characters from extracted paths", () => {
 		const tracker = createEditTracker();
 		// Embed a newline to simulate injection attempt
-		const result = tracker.trackEdit("write", {
+		const result = tracker.trackEdit(WRITE_TOOL, {
 			path: "src/foo.ts\nrm -rf /",
 		});
 		expect(result).not.toBeNull();
@@ -158,13 +161,13 @@ describe("createEditTracker", () => {
 
 	it("returns null for null result", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", null);
+		const result = tracker.trackEdit(WRITE_TOOL, null);
 		expect(result).toBeNull();
 	});
 
 	it("returns null for undefined result", () => {
 		const tracker = createEditTracker();
-		const result = tracker.trackEdit("write", undefined);
+		const result = tracker.trackEdit(WRITE_TOOL, undefined);
 		expect(result).toBeNull();
 	});
 
