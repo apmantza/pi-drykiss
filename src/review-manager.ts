@@ -30,8 +30,9 @@ import { isModelError, selectModelOnError } from "./model-selector.js";
 async function computePrevScore(mode?: string): Promise<number | undefined> {
 	if (!mode) return undefined;
 	const history = await loadHistory();
-	for (const entry of history) {
-		if (entry.mode === mode) return entry.score;
+	// Iterate in reverse — newest entries are appended at the end
+	for (let i = history.length - 1; i >= 0; i--) {
+		if (history[i].mode === mode) return history[i].score;
 	}
 	return undefined;
 }

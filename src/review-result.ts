@@ -289,7 +289,14 @@ export function filterIgnored(
 		return { findings: [...findings], dropped: 0 };
 	}
 	// Simple glob matching (supports * and **)
-	const matchers = patterns.map((p) => globToRegex(p));
+	const matchers: RegExp[] = [];
+	for (const p of patterns) {
+		try {
+			matchers.push(globToRegex(p));
+		} catch {
+			// Skip invalid patterns — don't let a single bad pattern crash the entire review
+		}
+	}
 	const passed: Finding[] = [];
 	let dropped = 0;
 	for (const f of findings) {
@@ -375,10 +382,13 @@ export function applySuppressions(
 			// Skip invalid suppression entries
 			continue;
 		}
-		compiled.push({
-			...s,
-			regex: globToRegex(s.pattern),
-		});
+		try {
+			compiled.push({
+				...s,
+				regex: globToRegex(s.pattern),
+			});
+		} catch {
+		}
 	}
 
 	const suppressed: Finding[] = [];

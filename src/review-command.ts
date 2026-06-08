@@ -111,8 +111,9 @@ async function gatherContents(
 		try {
 			const result = await getFileContent(cwd, file.path);
 			if (result) contents.set(file.path, result);
-		} catch {
-			// Skip unreadable files — don't let one bad file block the entire review
+		} catch (e) {
+			// Skip unreadable files — warn so users know content was omitted
+			console.warn(`${LOG_PREFIX} Skipping unreadable file ${file.path}: ${(e as Error).message}`);
 		}
 	}
 	return contents;
@@ -190,7 +191,9 @@ export interface ParseFindingsResult {
 
 function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
 	// First, try to extract JSON array from the output
-	const jsonMatch = raw.match(/\[[\s\S]*\]/);
+	// Use non-greedy match: lens findings never contain nested arrays,
+	// and greedy match would capture trailing Mermaid graph syntax (e.g. A[a.ts]).
+	const jsonMatch = raw.match(/\[[\s\S]*?\]/);
 	const jsonStr = jsonMatch ? jsonMatch[0] : raw;
 
 	// Try parsing as-is first
@@ -833,6 +836,16 @@ function formatReviewResultForTool(result: ReviewResult): string {
 	];
 	if (trendLine) lines.push(trendLine);
 	lines.push(qualityGate);
+	if (result.validationIssues.length > 0) {
+		lines.push("");
+		lines.push(`validation issues (${result.validationIssues.length}):`);
+		for (const vi of result.validationIssues.slice(0, 5)) {
+			lines.push(`  - finding #${vi.findingIndex}: ${vi.reason}`);
+		}
+		if (result.validationIssues.length > 5) {
+			lines.push(`  ... and ${result.validationIssues.length - 5} more`);
+		}
+	}
 	if (result.mermaidGraph) {
 		lines.push("");
 		lines.push("=== Dependency Graph ===");
