@@ -23,6 +23,7 @@ export function findModelByHint(
 	available: Model<Api>[],
 	hint: string,
 ): Model<Api> | undefined {
+	if (!hint) return undefined;
 	const lower = hint.toLowerCase();
 
 	// Exact provider/id match
