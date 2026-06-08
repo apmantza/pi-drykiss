@@ -7,6 +7,7 @@ import {
 	setLensModel,
 	setDefaultModel,
 	loadEffectiveConfig,
+	saveProjectConfig,
 } from "./config.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -224,5 +225,70 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 			"src/legacy/**",
 			"tests/e2e/*.spec.ts",
 		]);
+	});
+
+	describe("saveProjectConfig", () => {
+		it("writes project config with suppressions, preserving existing fields", async () => {
+			vi.mocked(readFile).mockResolvedValue(
+				JSON.stringify({ defaultModel: "sonnet" }),
+			);
+			vi.mocked(writeFile).mockResolvedValue(undefined);
+
+			await saveProjectConfig("/some/project", {
+				suppressions: [
+					{
+						id: "s1",
+						riskCode: "K1",
+						pattern: "src/legacy/**",
+						reason: "Legacy code",
+						addedAt: "2026-01-01",
+					},
+				],
+			});
+
+			expect(mkdir).toHaveBeenCalled();
+			const dirArg = vi.mocked(mkdir).mock.calls[0][0] as string;
+			expect(dirArg).toContain(".pi");
+			expect(dirArg).toContain("drykiss");
+			expect(writeFile).toHaveBeenCalledTimes(1);
+			const written = JSON.parse(
+				vi.mocked(writeFile).mock.calls[0][1] as string,
+			);
+			// Existing field preserved
+			expect(written.defaultModel).toBe("sonnet");
+			// Suppressions added
+			expect(written.suppressions).toHaveLength(1);
+			expect(written.suppressions[0].id).toBe("s1");
+			expect(written.suppressions[0].riskCode).toBe("K1");
+		});
+
+		it("creates project config when no existing file", async () => {
+			vi.mocked(readFile).mockRejectedValue(
+				Object.assign(new Error("not found"), { code: "ENOENT" as const }),
+			);
+			vi.mocked(writeFile).mockResolvedValue(undefined);
+
+			await saveProjectConfig("/other/project", {
+				suppressions: [],
+			});
+
+			expect(writeFile).toHaveBeenCalledTimes(1);
+			const written = JSON.parse(
+				vi.mocked(writeFile).mock.calls[0][1] as string,
+			);
+			expect(written.suppressions).toEqual([]);
+			expect(written.defaultModel).toBeUndefined();
+		});
+
+		it("propagates writeFile errors", async () => {
+			vi.mocked(readFile).mockRejectedValue(
+				Object.assign(new Error("not found"), { code: "ENOENT" as const }),
+			);
+			vi.mocked(writeFile).mockRejectedValue(new Error("Disk full"));
+
+			await expect(
+				saveProjectConfig("/project", { suppressions: [] }),
+			).rejects.toThrow("Disk full");
+		});
 	});
 });

@@ -408,4 +408,58 @@ describe("ReviewManager", () => {
 		// works — before the fix, it would never have been started.
 		expect(job.states.get("clarity")!.status).toBe("done");
 	});
+
+	it("handles runSynthesis error with fallback result", async () => {
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		vi.mocked(runLensSubagent).mockImplementation(
+			async (...args: unknown[]) => {
+				const lens = args[5] as string;
+				if (lens === "synthesis") {
+					throw new Error("simulated synthesis crash");
+				}
+				return {
+					lens,
+					text: "[]",
+					modelName: "mock-model",
+					durationMs: 1,
+					session: { dispose: vi.fn() },
+				} as any;
+			},
+		);
+
+		const ctx = makeMinimalCtx();
+		const pi = makeMinimalPi();
+		const files = [
+			{
+				path: "test.ts",
+				status: "modified" as const,
+				language: "TypeScript",
+			},
+		];
+		const diffs = new Map([[ "test.ts", "diff" ]]);
+
+		const result = await manager.runReview(
+			ctx,
+			pi,
+			"/tmp/test",
+			files,
+			diffs,
+			undefined,
+			undefined,
+			{
+				lenses: ["simplicity"],
+				target: {
+					mode: "local",
+					label: "local",
+				},
+				onProgress: vi.fn(),
+				progressIntervalMs: 0,
+			},
+		);
+
+		expect(result.clean).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]).toContain("simulated synthesis crash");
+		expect(result.counts.total).toBe(0);
+	});
 });

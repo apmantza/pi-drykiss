@@ -138,4 +138,63 @@ describe("resolveReviewScope", () => {
 			"HEAD~1",
 		]);
 	});
+
+	it("resolves local scope by default when no request params", async () => {
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{},
+			{ contextMode: "full" },
+		);
+		expect(scope.mode).toBe("local");
+		expect(scope.label).toBe("local changes");
+		expect(scope.files).toHaveLength(1);
+		expect(scope.files[0].path).toBe("src/a.ts");
+		expect(scope.diffs.has("src/a.ts")).toBe(true);
+		expect(scope.contents?.get("src/a.ts")?.content).toContain("a");
+	});
+
+	it("resolves staged scope when staged=true", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{ staged: true },
+			{ contextMode: "diff" },
+		);
+		expect(scope.mode).toBe("staged");
+		expect(scope.label).toBe("staged changes");
+		expect(getChangedFiles).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.anything(),
+			expect.objectContaining({ staged: true }),
+		);
+		// contextMode=diff so contents should be undefined
+		expect(scope.contents).toBeUndefined();
+	});
+
+	it("resolves files scope with explicit file list", async () => {
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{ files: ["src/foo.ts", "src/bar.ts"] },
+			{ contextMode: "full" },
+		);
+		expect(scope.mode).toBe("files");
+		expect(scope.label).toBe("explicit files");
+		expect(scope.options.files).toEqual(["src/foo.ts", "src/bar.ts"]);
+	});
+
+	it("resolves full scope for all files", async () => {
+		const { getAllSourceFiles } = await import("./git-diff.js");
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{ all: true },
+			{ contextMode: "full", needsProjectIndex: true },
+		);
+		expect(scope.mode).toBe("full");
+		expect(scope.label).toBe("full codebase");
+		expect(getAllSourceFiles).toHaveBeenCalledWith("/repo");
+	});
 });
