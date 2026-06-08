@@ -24,8 +24,6 @@
 
 import {
 	loadPromptBody,
-	loadSharedFragment,
-	bundledPromptsDir,
 } from "./prompt-loader.js";
 import type { ReviewLens } from "./types.js";
 
@@ -45,17 +43,6 @@ function substitute(template: string, vars: Record<string, string>): string {
 		const v = vars[key];
 		return v != null ? v : `{{${key}}}`;
 	});
-}
-
-/** Load a shared fragment, with bundled fallback. */
-async function fragment(name: string): Promise<string> {
-	return loadSharedFragment({ dir: bundledPromptsDir() }, name).catch(
-		async (err) => {
-			// Bundled is the source of truth for shared fragments. If the bundled
-			// read fails, rethrow.
-			throw err;
-		},
-	);
 }
 
 /**

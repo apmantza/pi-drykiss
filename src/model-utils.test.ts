@@ -1,11 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { findModelByHint } from "./model-utils.js";
 
-function makeModel(
-	id: string,
-	provider = "anthropic",
-	name?: string,
-) {
+function makeModel(id: string, provider = "anthropic", name?: string) {
 	return { id, provider, name: name ?? id } as any;
 }
 

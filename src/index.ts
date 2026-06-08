@@ -184,7 +184,7 @@ export default function (pi: ExtensionAPI): void {
 			const hasError =
 				job.overallStatus === "error" ||
 				job.lenses.some(
-					(l: string) => (job.states as any)[l]?.status === "error",
+					(l: string) => job.states.get(l)?.status === "error",
 				);
 			const hasCritical = s && s.criticalCount > 0;
 			const hasHigh = s && s.highCount > 0;
@@ -477,7 +477,7 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderResult(result: any, _options: any, theme: any) {
-			const review = (result.details as any)?.result;
+			const review = result.details?.result;
 			const clean = review?.clean === true;
 			const counts = review?.counts ?? {};
 			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
@@ -546,7 +546,7 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderResult(result: any, _options: any, theme: any) {
-			const findings = (result.details as any)?.findings ?? [];
+			const findings = result.details?.findings ?? [];
 			const critical = findings.filter(
 				(f: any) => f.severity === "critical",
 			).length;

@@ -10,11 +10,10 @@
 export function stripAnsi(s: string): string {
 	// OSC: ESC ] ... ST (BEL \x07 or ESC \)
 	// CSI: ESC [ params letters
-	return s
-		.replace(
-			/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-			"",
-		);
+	return s.replace(
+		/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+		"",
+	);
 }
 
 /**
