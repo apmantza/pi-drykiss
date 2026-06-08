@@ -12,7 +12,12 @@ import {
 	parseSynthesis,
 } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
-import { saveReview, saveSessionLog, appendHistory, loadHistory } from "./persist.js";
+import {
+	saveReview,
+	saveSessionLog,
+	appendHistory,
+	loadHistory,
+} from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";

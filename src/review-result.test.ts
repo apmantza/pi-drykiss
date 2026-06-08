@@ -61,8 +61,8 @@ function job(overrides: Partial<ReviewJob> = {}): ReviewJob {
 			mediumCount: 0,
 			lowCount: 0,
 			nitCount: 0,
-		healthScore: 100,
-		scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			healthScore: 100,
+			scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
 		},
 		overallStatus: "done",
 		startedAt: 1,
@@ -217,8 +217,8 @@ describe("buildReviewResult", () => {
 					mediumCount: 0,
 					lowCount: 1,
 					nitCount: 0,
-				healthScore: 84,
-				scoreBreakdown: { critical: 1, warning: 0, suggestion: 1 },
+					healthScore: 84,
+					scoreBreakdown: { critical: 1, warning: 0, suggestion: 1 },
 				},
 			}),
 		);
@@ -241,9 +241,9 @@ describe("buildReviewResult", () => {
 				mediumCount: 0,
 				lowCount: 0,
 				nitCount: 0,
-			healthScore: 100,
-			scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-		},
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			},
 		});
 		base.states.set("security", {
 			status: "error",
@@ -449,5 +449,32 @@ describe("filterIgnored — Phase 2", () => {
 			]);
 			expect(result).toEqual(["s1"]);
 		});
+	});
+});
+
+describe("buildReviewResult — mermaidGraph", () => {
+	it("includes mermaidGraph from synthesisResult", () => {
+		const myJob = job({
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				mermaidGraph: "graph TD\n  A[a.ts]\n  B[b.ts]",
+			},
+		});
+		const result = buildReviewResult(myJob);
+		expect(result.mermaidGraph).toBe("graph TD\n  A[a.ts]\n  B[b.ts]");
+	});
+
+	it("omits mermaidGraph when synthesisResult has none", () => {
+		const result = buildReviewResult(job());
+		expect(result.mermaidGraph).toBeUndefined();
 	});
 });

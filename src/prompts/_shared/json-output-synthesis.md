@@ -21,7 +21,8 @@ Example (do NOT include any surrounding text or fences):
       "suggestion": "Specific fix",
       "confidence": "confirmed|likely|suspect"
     }
-  ]
+  ],
+  "mermaidGraph": "graph TD\n  subgraph src/\n    A[file.ts]\n  end"
 }
 
 Rules:
@@ -33,3 +34,4 @@ Rules:
 - Down-rank broad maintainability, test coverage, and file-size concerns unless they identify a concrete broken behavior, security risk, or high-probability maintenance failure.
 - Never synthesize a critical finding from maintainability concerns alone. Critical requires exploitable security risk, data loss, or currently broken core functionality.
 - Preserve the per-lens `consequence` and `fixability` fields from the original findings when merging; only edit if a downstream lens added evidence.
+- The `mermaidGraph` field is **optional**. Include a Mermaid `graph TD` string only when the architecture lens produced one or when you have enough structural context to draw meaningful file relationships. When absent, omit the field entirely.

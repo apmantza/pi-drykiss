@@ -46,6 +46,12 @@ export interface ReviewResult {
 	};
 	/** Health score from the previous run in the same mode (for trend delta). */
 	readonly prevScore?: number;
+	/**
+	 * Mermaid graph TD string showing file-level dependency structure.
+	 * Generated during review from the project index. Optional for
+	 * reviews without a project index.
+	 */
+	readonly mermaidGraph?: string;
 }
 
 export interface BuildReviewResultOptions {
@@ -122,6 +128,9 @@ export function buildReviewResult(
 		healthScore: hs.score,
 		scoreBreakdown: hs.breakdown,
 		...(options.prevScore != null ? { prevScore: options.prevScore } : {}),
+		...(synthesis?.mermaidGraph
+			? { mermaidGraph: synthesis.mermaidGraph }
+			: {}),
 	};
 }
 

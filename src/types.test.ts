@@ -4,8 +4,10 @@ import {
 	parseFindingsArray,
 	parseSynthesis,
 	createFallbackSynthesis,
+	computeHealthScore,
+	severityToTier,
 } from "./types.js";
-import type { ReviewLens } from "./types.js";
+import type { ReviewLens, Finding } from "./types.js";
 
 describe("mapRawToFinding", () => {
 	it("maps a complete raw object to Finding", () => {
@@ -159,69 +161,203 @@ describe("createFallbackSynthesis", () => {
 	});
 });
 
-describe("parseSynthesis", () => {
-	it("parses valid synthesis JSON", () => {
+describe("computeHealthScore", () => {
+	it("returns 100 for zero findings", () => {
+		const result = computeHealthScore([]);
+		expect(result.score).toBe(100);
+		expect(result.breakdown).toEqual({
+			critical: 0,
+			warning: 0,
+			suggestion: 0,
+		});
+	});
+
+	it("deducts 15 per critical finding", () => {
+		const findings = [
+			{ severity: "critical" } as Finding,
+			{ severity: "critical" } as Finding,
+		];
+		const result = computeHealthScore(findings);
+		expect(result.score).toBe(70);
+		expect(result.breakdown.critical).toBe(2);
+	});
+
+	it("deducts 5 per warning (high/medium) finding", () => {
+		const findings = [
+			{ severity: "high" } as Finding,
+			{ severity: "medium" } as Finding,
+		];
+		const result = computeHealthScore(findings);
+		expect(result.score).toBe(90);
+		expect(result.breakdown.warning).toBe(2);
+	});
+
+	it("deducts 1 per suggestion (low/nit) finding", () => {
+		const findings = [
+			{ severity: "low" } as Finding,
+			{ severity: "nit" } as Finding,
+		];
+		const result = computeHealthScore(findings);
+		expect(result.score).toBe(98);
+		expect(result.breakdown.suggestion).toBe(2);
+	});
+
+	it("floors at 0 with many critical findings", () => {
+		const findings = new Array(10)
+			.fill(null)
+			.map(() => ({ severity: "critical" }) as Finding);
+		const result = computeHealthScore(findings);
+		expect(result.score).toBe(0);
+	});
+
+	it("combines all tiers correctly", () => {
+		const findings = [
+			{ severity: "critical" } as Finding,
+			{ severity: "high" } as Finding,
+			{ severity: "medium" } as Finding,
+			{ severity: "low" } as Finding,
+		];
+		const result = computeHealthScore(findings);
+		// 100 - 15 - 5 - 5 - 1 = 74
+		expect(result.score).toBe(74);
+		expect(result.breakdown).toEqual({
+			critical: 1,
+			warning: 2,
+			suggestion: 1,
+		});
+	});
+});
+
+describe("severityToTier", () => {
+	it("maps critical → critical", () => {
+		expect(severityToTier("critical")).toBe("critical");
+	});
+	it("maps high → warning", () => {
+		expect(severityToTier("high")).toBe("warning");
+	});
+	it("maps medium → warning", () => {
+		expect(severityToTier("medium")).toBe("warning");
+	});
+	it("maps low → suggestion", () => {
+		expect(severityToTier("low")).toBe("suggestion");
+	});
+	it("maps nit → suggestion", () => {
+		expect(severityToTier("nit")).toBe("suggestion");
+	});
+});
+
+describe("parseSynthesis — mermaidGraph", () => {
+	it("extracts mermaidGraph when present", () => {
 		const raw = JSON.stringify({
-			findings: [
-				{ file: "a.ts", severity: "critical", summary: "issue" },
-				{ file: "b.ts", severity: "high", summary: "issue2" },
-			],
-			summary: "Found issues",
-			verdict: "Request changes",
+			findings: [],
+			summary: "ok",
+			verdict: "Approve",
+			mermaidGraph: "graph TD\n  A[a.ts]\n  B[b.ts]",
 		});
 		const result = parseSynthesis(raw);
-		expect(result.findings).toHaveLength(2);
-		expect(result.summary).toBe("Found issues");
-		expect(result.verdict).toBe("Request changes");
-		expect(result.criticalCount).toBe(1);
-		expect(result.highCount).toBe(1);
+		expect(result.mermaidGraph).toBe("graph TD\n  A[a.ts]\n  B[b.ts]");
 	});
 
-	it("handles JSON wrapped in markdown fences", () => {
-		const raw =
-			'```json\n{"findings": [], "summary": "ok", "verdict": "Approve"}\n```';
-		const result = parseSynthesis(raw);
-		expect(result.summary).toBe("ok");
-		expect(result.verdict).toBe("Approve");
-	});
-
-	it("handles JSON with trailing commas", () => {
-		const raw = '{"findings": [], "summary": "ok", "verdict": "Approve",}';
-		const result = parseSynthesis(raw);
-		expect(result.summary).toBe("ok");
-	});
-
-	it("returns fallback for non-JSON input", () => {
-		const result = parseSynthesis("not json at all");
-		expect(result.findings).toEqual([]);
-		expect(result.verdict).toBe("Request changes");
-		expect(result.summary).toContain("non-JSON");
-	});
-
-	it("returns fallback for null/undefined parsed value", () => {
-		const result = parseSynthesis("null");
-		expect(result.findings).toEqual([]);
-		expect(result.verdict).toBe("Request changes");
-	});
-
-	it("counts findings by severity", () => {
+	it("omits mermaidGraph when absent", () => {
 		const raw = JSON.stringify({
-			findings: [
-				{ file: "a.ts", severity: "critical" },
-				{ file: "b.ts", severity: "critical" },
-				{ file: "c.ts", severity: "high" },
-				{ file: "d.ts", severity: "medium" },
-				{ file: "e.ts", severity: "low" },
-				{ file: "f.ts", severity: "nit" },
-			],
-			summary: "test",
-			verdict: "Request changes",
+			findings: [],
+			summary: "ok",
+			verdict: "Approve",
 		});
 		const result = parseSynthesis(raw);
-		expect(result.criticalCount).toBe(2);
-		expect(result.highCount).toBe(1);
-		expect(result.mediumCount).toBe(1);
-		expect(result.lowCount).toBe(1);
-		expect(result.nitCount).toBe(1);
+		expect(result.mermaidGraph).toBeUndefined();
 	});
+
+	it("omits mermaidGraph when empty string", () => {
+		const raw = JSON.stringify({
+			findings: [],
+			summary: "ok",
+			verdict: "Approve",
+			mermaidGraph: "",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.mermaidGraph).toBeUndefined();
+	});
+
+	it("omits mermaidGraph when whitespace only", () => {
+		const raw = JSON.stringify({
+			findings: [],
+			summary: "ok",
+			verdict: "Approve",
+			mermaidGraph: "   ",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.mermaidGraph).toBeUndefined();
+	});
+});
+
+describe("createFallbackSynthesis — mermaidGraph", () => {
+	it("omits mermaidGraph in fallback (no graph available)", () => {
+		const result = createFallbackSynthesis("error");
+		expect(result.mermaidGraph).toBeUndefined();
+	});
+});
+it("parses valid synthesis JSON", () => {
+	const raw = JSON.stringify({
+		findings: [
+			{ file: "a.ts", severity: "critical", summary: "issue" },
+			{ file: "b.ts", severity: "high", summary: "issue2" },
+		],
+		summary: "Found issues",
+		verdict: "Request changes",
+	});
+	const result = parseSynthesis(raw);
+	expect(result.findings).toHaveLength(2);
+	expect(result.summary).toBe("Found issues");
+	expect(result.verdict).toBe("Request changes");
+	expect(result.criticalCount).toBe(1);
+	expect(result.highCount).toBe(1);
+});
+
+it("handles JSON wrapped in markdown fences", () => {
+	const raw =
+		'```json\n{"findings": [], "summary": "ok", "verdict": "Approve"}\n```';
+	const result = parseSynthesis(raw);
+	expect(result.summary).toBe("ok");
+	expect(result.verdict).toBe("Approve");
+});
+
+it("handles JSON with trailing commas", () => {
+	const raw = '{"findings": [], "summary": "ok", "verdict": "Approve",}';
+	const result = parseSynthesis(raw);
+	expect(result.summary).toBe("ok");
+});
+
+it("returns fallback for non-JSON input", () => {
+	const result = parseSynthesis("not json at all");
+	expect(result.findings).toEqual([]);
+	expect(result.verdict).toBe("Request changes");
+	expect(result.summary).toContain("non-JSON");
+});
+
+it("returns fallback for null/undefined parsed value", () => {
+	const result = parseSynthesis("null");
+	expect(result.findings).toEqual([]);
+	expect(result.verdict).toBe("Request changes");
+});
+
+it("counts findings by severity", () => {
+	const raw = JSON.stringify({
+		findings: [
+			{ file: "a.ts", severity: "critical" },
+			{ file: "b.ts", severity: "critical" },
+			{ file: "c.ts", severity: "high" },
+			{ file: "d.ts", severity: "medium" },
+			{ file: "e.ts", severity: "low" },
+			{ file: "f.ts", severity: "nit" },
+		],
+		summary: "test",
+		verdict: "Request changes",
+	});
+	const result = parseSynthesis(raw);
+	expect(result.criticalCount).toBe(2);
+	expect(result.highCount).toBe(1);
+	expect(result.mediumCount).toBe(1);
+	expect(result.lowCount).toBe(1);
+	expect(result.nitCount).toBe(1);
 });

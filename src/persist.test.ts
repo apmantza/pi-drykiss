@@ -6,8 +6,11 @@ import {
 	formatReviewForDisplay,
 	saveSessionLog,
 	pathToFileLink,
+	loadHistory,
+	appendHistory,
 } from "./persist.js";
 import type { SynthesisResult } from "./types.js";
+import type { ReviewHistoryEntry } from "./persist.js";
 
 vi.mock("node:fs/promises", () => ({
 	mkdir: vi.fn().mockResolvedValue(undefined),
@@ -285,5 +288,124 @@ describe("formatReviewForDisplay", () => {
 		const md = formatReviewForDisplay(review);
 		expect(md).toContain("Total findings: 0");
 		expect(md).not.toContain("## Critical");
+	});
+});
+
+describe("loadHistory", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("returns empty array when file does not exist", async () => {
+		vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+		const result = await loadHistory();
+		expect(result).toEqual([]);
+	});
+
+	it("returns empty array when file contains invalid JSON", async () => {
+		vi.mocked(readFile).mockResolvedValue("not json" as any);
+		const result = await loadHistory();
+		expect(result).toEqual([]);
+	});
+
+	it("returns parsed history entries", async () => {
+		const entries = [
+			{
+				date: "2026-06-01",
+				mode: "local",
+				score: 85,
+				breakdown: { critical: 0, warning: 2, suggestion: 5 },
+				totalFindings: 7,
+				verdict: "Request changes",
+			},
+			{
+				date: "2026-06-02",
+				mode: "full",
+				score: 92,
+				breakdown: { critical: 0, warning: 1, suggestion: 3 },
+				totalFindings: 4,
+				verdict: "Approve",
+			},
+		];
+		vi.mocked(readFile).mockResolvedValue(JSON.stringify(entries) as any);
+		const result = await loadHistory();
+		expect(result).toHaveLength(2);
+		expect(result[0].score).toBe(85);
+		expect(result[1].score).toBe(92);
+	});
+
+	it("returns empty array for non-array JSON", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({ some: "object" }) as any,
+		);
+		const result = await loadHistory();
+		expect(result).toEqual([]);
+	});
+});
+
+describe("appendHistory", () => {
+	const mockEntry: ReviewHistoryEntry = {
+		date: "2026-06-08",
+		mode: "local",
+		score: 74,
+		breakdown: { critical: 1, warning: 2, suggestion: 1 },
+		totalFindings: 4,
+		verdict: "Request changes",
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("appends a new entry when history is empty", async () => {
+		vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+		await appendHistory(mockEntry);
+		expect(mkdir).toHaveBeenCalled();
+		expect(writeFile).toHaveBeenCalledTimes(1);
+		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		expect(written).toHaveLength(1);
+		expect(written[0].score).toBe(74);
+	});
+
+	it("skips duplicate entries (same date/mode/score)", async () => {
+		vi.mocked(readFile).mockResolvedValue(JSON.stringify([mockEntry]) as any);
+		await appendHistory(mockEntry);
+		// Should not write since it's a duplicate
+		expect(writeFile).not.toHaveBeenCalled();
+	});
+
+	it("appends to existing history", async () => {
+		const existing = [
+			{
+				date: "2026-06-01",
+				mode: "local",
+				score: 85,
+				breakdown: { critical: 0, warning: 2, suggestion: 5 },
+				totalFindings: 7,
+				verdict: "Approve",
+			},
+		];
+		vi.mocked(readFile).mockResolvedValue(JSON.stringify(existing) as any);
+		await appendHistory(mockEntry);
+		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		expect(written).toHaveLength(2);
+		expect(written[1].score).toBe(74);
+	});
+
+	it("trims history to at most 100 entries", async () => {
+		const existing = Array.from({ length: 100 }, (_, i) => ({
+			date: `2026-06-${String(i + 1).padStart(2, "0")}`,
+			mode: "local",
+			score: 100,
+			breakdown: { critical: 0, warning: 0, suggestion: 0 },
+			totalFindings: 0,
+			verdict: "Approve",
+		}));
+		vi.mocked(readFile).mockResolvedValue(JSON.stringify(existing) as any);
+		await appendHistory(mockEntry);
+		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		expect(written).toHaveLength(100);
+		// Oldest entry (2026-06-01) should be dropped
+		expect(written[0].date).not.toBe("2026-06-01");
 	});
 });

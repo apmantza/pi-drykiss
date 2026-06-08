@@ -184,7 +184,7 @@ export function getConfigPath(): string {
 }
 
 export async function loadConfig(): Promise<DrykissConfig> {
-	const { config, warnings } = await loadEffectiveConfig();
+	const { config } = await loadEffectiveConfig();
 	// Callers that need validation warnings should use loadEffectiveConfig directly
 	return config;
 }

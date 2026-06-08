@@ -94,6 +94,13 @@ export interface SynthesisResult {
 	readonly verdict: "Approve" | "Request changes" | "Needs security review";
 	readonly healthScore: number;
 	readonly scoreBreakdown: ScoreBreakdown;
+	/**
+	 * Mermaid graph TD string showing file-level dependency structure.
+	 * Generated during synthesis from the project index. Optional for
+	 * backward compat with persisted reviews; new runs should populate
+	 * this when the project index is available.
+	 */
+	readonly mermaidGraph?: string;
 }
 
 /** Brooks-lint severity tiers for health-score computation. */
@@ -129,22 +136,24 @@ export function severityToTier(severity: Severity): SeverityTier {
  * Formula: 100 − 15·critical − 5·warning − 1·suggestion, floor 0.
  */
 export function computeHealthScore(findings: readonly Finding[]): {
-score: number;
-breakdown: ScoreBreakdown;
+	score: number;
+	breakdown: ScoreBreakdown;
 } {
-const b = { critical: 0, warning: 0, suggestion: 0 };
-for (const f of findings) {
-const tier = severityToTier(f.severity);
-b[tier]++;
+	const b = { critical: 0, warning: 0, suggestion: 0 };
+	for (const f of findings) {
+		const tier = severityToTier(f.severity);
+		b[tier]++;
+	}
+	const breakdown: ScoreBreakdown = { ...b };
+	const score = Math.max(
+		0,
+		100 -
+			breakdown.critical * 15 -
+			breakdown.warning * 5 -
+			breakdown.suggestion * 1,
+	);
+	return { score, breakdown };
 }
-const breakdown: ScoreBreakdown = { ...b };
-const score = Math.max(
-0,
-100 - breakdown.critical * 15 - breakdown.warning * 5 - breakdown.suggestion * 1,
-);
-return { score, breakdown };
-}
-
 
 export interface TurnEdits {
 	readonly files: readonly EditedFile[];
@@ -246,6 +255,7 @@ export function parseSynthesis(raw: string): SynthesisResult {
 		const findings = Array.isArray(parsed.findings)
 			? (parsed.findings as any[]).map((f) => mapRawToFinding(f))
 			: [];
+		const hs = computeHealthScore(findings);
 		return {
 			findings,
 			summary: String(parsed.summary ?? ""),
@@ -257,8 +267,11 @@ export function parseSynthesis(raw: string): SynthesisResult {
 			mediumCount: findings.filter((f) => f.severity === "medium").length,
 			lowCount: findings.filter((f) => f.severity === "low").length,
 			nitCount: findings.filter((f) => f.severity === "nit").length,
-			healthScore: computeHealthScore(findings).score,
-			scoreBreakdown: computeHealthScore(findings).breakdown,
+			healthScore: hs.score,
+			scoreBreakdown: hs.breakdown,
+			...(typeof parsed.mermaidGraph === "string" && parsed.mermaidGraph.trim()
+				? { mermaidGraph: String(parsed.mermaidGraph).trim() }
+				: {}),
 		};
 	} catch {
 		return createFallbackSynthesis(

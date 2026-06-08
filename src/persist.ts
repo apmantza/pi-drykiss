@@ -164,18 +164,14 @@ export async function loadHistory(): Promise<ReviewHistoryEntry[]> {
  * Append a new entry to the health-score history.
  * Loads existing entries, appends the new one, writes back.
  */
-export async function appendHistory(
-	entry: ReviewHistoryEntry,
-): Promise<void> {
+export async function appendHistory(entry: ReviewHistoryEntry): Promise<void> {
 	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
 	const existing = await loadHistory();
 	// Avoid duplicates: skip if the same date/mode/score combo already exists
 	const isDuplicate = existing.some(
 		(e) =>
-			e.date === entry.date &&
-			e.mode === entry.mode &&
-			e.score === entry.score,
+			e.date === entry.date && e.mode === entry.mode && e.score === entry.score,
 	);
 	if (isDuplicate) return;
 	existing.push(entry);

@@ -298,4 +298,107 @@ describe("review command error handling", () => {
 		// and catch the error
 		expect(mockCtx.ui.notify).toHaveBeenCalled();
 	});
+
+	it("includes health score and quality gate in autoreview output", async () => {
+		const { executeDrykissAutoreviewTool } = await import(
+			"./review-command.js"
+		);
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		(mockManager as any).runReview = vi.fn().mockResolvedValue({
+			jobId: "job-1",
+			clean: false,
+			status: "done",
+			verdict: "Request changes",
+			target: { mode: "local", label: "local changes" },
+			files: ["src/a.ts"],
+			counts: { total: 2, critical: 1, high: 1, medium: 0, low: 0, nit: 0 },
+			findings: [
+				{
+					file: "src/a.ts",
+					severity: "critical",
+					category: "Bug",
+					summary: "x",
+					detail: "x",
+					suggestion: "x",
+					confidence: "confirmed",
+				},
+				{
+					file: "src/a.ts",
+					severity: "high",
+					category: "Bug",
+					summary: "y",
+					detail: "y",
+					suggestion: "y",
+					confidence: "confirmed",
+				},
+			],
+			summary: "Issues found.",
+			errors: [],
+			validationIssues: [],
+			healthScore: 60,
+			scoreBreakdown: { critical: 1, warning: 1, suggestion: 0 },
+			prevScore: 80,
+		});
+
+		const result = await executeDrykissAutoreviewTool(
+			{ mode: "local", lenses: ["security"], maxFiles: 5 },
+			mockCtx,
+			mockPi,
+			mockManager,
+			undefined,
+			vi.fn(),
+		);
+
+		const text = result.content[0].text;
+		expect(text).toContain("health score: 60/100");
+		expect(text).toContain("trend: 80 → 60");
+		expect(text).toContain("⛔ quality gate: FAIL");
+	});
+
+	it("includes mermaidGraph in autoreview output when present", async () => {
+		const { executeDrykissAutoreviewTool } = await import(
+			"./review-command.js"
+		);
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		(mockManager as any).runReview = vi.fn().mockResolvedValue({
+			jobId: "job-2",
+			clean: true,
+			status: "done",
+			verdict: "Approve",
+			target: { mode: "full", label: "full scan" },
+			files: ["src/a.ts"],
+			counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+			findings: [],
+			summary: "Clean.",
+			errors: [],
+			validationIssues: [],
+			healthScore: 100,
+			scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			mermaidGraph: "graph TD\n  A[a.ts]\n  B[b.ts]",
+		});
+
+		const result = await executeDrykissAutoreviewTool(
+			{
+				mode: "files",
+				files: ["src/a.ts"],
+				lenses: ["architecture"],
+				maxFiles: 5,
+			},
+			mockCtx,
+			mockPi,
+			mockManager,
+			undefined,
+			vi.fn(),
+		);
+
+		const text = result.content[0].text;
+		expect(text).toContain("=== Dependency Graph ===");
+		expect(text).toContain("graph TD");
+	});
 });
