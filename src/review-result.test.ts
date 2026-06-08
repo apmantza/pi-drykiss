@@ -345,8 +345,16 @@ describe("filterIgnored — Phase 2", () => {
 
 		it("suppresses finding matching riskCode and glob", () => {
 			const findings = [
-				finding({ file: "src/legacy/foo.ts", severity: "high", riskCode: "K1" }),
-				finding({ file: "src/modern/bar.ts", severity: "high", riskCode: "K1" }),
+				finding({
+					file: "src/legacy/foo.ts",
+					severity: "high",
+					riskCode: "K1",
+				}),
+				finding({
+					file: "src/modern/bar.ts",
+					severity: "high",
+					riskCode: "K1",
+				}),
 			];
 			const result = applySuppressions(findings, [
 				{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
@@ -374,18 +382,20 @@ describe("filterIgnored — Phase 2", () => {
 
 		it("does not suppress non-matching riskCode", () => {
 			const f = finding({ file: "src/foo.ts", riskCode: "D1" });
-			const result = applySuppressions([f], [
-				{ id: "s1", riskCode: "K1", pattern: "src/foo.ts" },
-			]);
+			const result = applySuppressions(
+				[f],
+				[{ id: "s1", riskCode: "K1", pattern: "src/foo.ts" }],
+			);
 			expect(result.active).toHaveLength(1);
 			expect(result.suppressed).toHaveLength(0);
 		});
 
 		it("does not suppress non-matching file pattern", () => {
 			const f = finding({ file: "src/other.ts", riskCode: "K1" });
-			const result = applySuppressions([f], [
-				{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
-			]);
+			const result = applySuppressions(
+				[f],
+				[{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" }],
+			);
 			expect(result.active).toHaveLength(1);
 			expect(result.suppressed).toHaveLength(0);
 		});

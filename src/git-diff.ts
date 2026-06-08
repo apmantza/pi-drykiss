@@ -289,7 +289,13 @@ export interface ProjectIndexEntry {
 }
 
 async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
-	const entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
+	let entries: import("fs").Dirent[];
+	try {
+		entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
+	} catch {
+		// Skip unreadable directories to avoid blocking the entire file scan
+		return;
+	}
 	for (const entry of entries) {
 		// Skip symlinks at the directory AND file level — readdir's
 		// Dirent.isFile()/isDirectory() follow symlinks, so a symlink to

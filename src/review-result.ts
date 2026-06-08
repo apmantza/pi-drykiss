@@ -282,12 +282,14 @@ export function filterIgnored(
 
 /** Convert a simple glob pattern to a regex (supports **, *, ?). */
 function globToRegex(pattern: string): RegExp {
+	// Normalize backslashes to forward slashes for cross-platform support
+	const normalized = pattern.replace(/\\/g, "/");
 	let regex = "^";
-	for (let i = 0; i < pattern.length; i++) {
-		const ch = pattern[i];
+	for (let i = 0; i < normalized.length; i++) {
+		const ch = normalized[i];
 		if (ch === "*") {
 			// ** matches any number of path segments
-			if (pattern[i + 1] === "*") {
+			if (normalized[i + 1] === "*") {
 				regex += ".*";
 				i++; // skip second *
 			} else {
@@ -336,11 +338,24 @@ export function applySuppressions(
 		return { suppressed: [], active: [...findings] };
 	}
 
-	// Pre-compile glob patterns
-	const compiled = suppressions.map((s) => ({
-		...s,
-		regex: globToRegex(s.pattern),
-	}));
+	// Pre-compile glob patterns, skipping invalid entries
+	const compiled: Array<{
+		id: string;
+		riskCode: string;
+		regex: RegExp;
+		reason?: string;
+		suppressSeverity?: "nit";
+	}> = [];
+	for (const s of suppressions) {
+		if (!s.pattern || !s.riskCode) {
+			// Skip invalid suppression entries
+			continue;
+		}
+		compiled.push({
+			...s,
+			regex: globToRegex(s.pattern),
+		});
+	}
 
 	const suppressed: Finding[] = [];
 	const active: Finding[] = [];

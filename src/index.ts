@@ -226,11 +226,11 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			// Result preview (collapsed) or full report (expanded)
-		if (expanded && s) {
-			const suppressedCount = s.findings.filter(
-				(f: any) => f._suppressed === true,
-			).length;
-			const reportLines = formatReviewForDisplay({
+			if (expanded && s) {
+				const suppressedCount = s.findings.filter(
+					(f: any) => f._suppressed === true,
+				).length;
+				const reportLines = formatReviewForDisplay({
 					timestamp: new Date(job.startedAt).toISOString(),
 					files: job.files,
 					findings: s.findings,
@@ -261,9 +261,8 @@ export default function (pi: ExtensionAPI): void {
 
 	function sendReviewNotification(piRef: ExtensionAPI, job: ReviewJob) {
 		const s = job.synthesisResult;
-		const suppressedCount = s?.findings?.filter(
-			(f: any) => f._suppressed === true,
-		).length ?? 0;
+		const suppressedCount =
+			s?.findings?.filter((f: any) => f._suppressed === true).length ?? 0;
 		const report = s
 			? formatReviewForDisplay({
 					timestamp: new Date(job.startedAt).toISOString(),

@@ -8,7 +8,7 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { Key, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { ReviewJob } from "./review-manager.js";
-import { extractAssistantText } from "./content-utils.js";
+import { extractAssistantText, stripAnsi } from "./content-utils.js";
 
 export class ConversationViewer implements Component {
 	private scrollOffset = 0;
@@ -60,10 +60,14 @@ export class ConversationViewer implements Component {
 					} else if (msg.role === "assistant") {
 						const textParts: string[] = [];
 						const toolCalls: string[] = [];
-						for (const c of msg.content as any[]) {
-							if (c.type === "text" && c.text) textParts.push(c.text);
-							else if (c.type === "toolCall")
-								toolCalls.push(`Tool: ${c.name ?? c.toolName ?? "unknown"}`);
+						if (typeof msg.content === "string") {
+							textParts.push(msg.content);
+						} else if (Array.isArray(msg.content)) {
+							for (const c of msg.content) {
+								if (c.type === "text" && c.text) textParts.push(c.text);
+								else if (c.type === "toolCall")
+									toolCalls.push(`Tool: ${c.name ?? "unknown"}`);
+							}
 						}
 						if (textParts.length) {
 							for (const chunk of chunkLine(textParts.join("\n"), 180)) {
@@ -154,14 +158,6 @@ export class ConversationViewer implements Component {
 			);
 		}
 	}
-}
-
-/** Strip ANSI escape sequences from strings to prevent injection. */
-function stripAnsi(s: string): string {
-	return s.replace(
-		/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-		"",
-	);
 }
 
 /**

@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import type { ReviewJob, LensStatus } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { pathToFileLink } from "./persist.js";
+import { stripAnsi } from "./content-utils.js";
 import type { Finding, Severity } from "./types.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -91,7 +92,7 @@ export function formatFinding(
 	const icon = SEVERITY_ICON[finding.severity] ?? "⚪";
 	const tag = theme.fg("accent", `[${lensName}]`);
 	const category = theme.bold(finding.category);
-	const source = finding.source ?? "";
+	const source = stripAnsi(finding.source ?? "");
 	const location = finding.line
 		? ` (${finding.file}:${finding.line})`
 		: ` (${finding.file})`;
@@ -103,11 +104,11 @@ export function formatFinding(
 	const lines: string[] = [`${heading}${suppressedTag}`];
 	const indent = "   ";
 	if (finding.detail) {
-		lines.push(`${indent}Symptom: ${finding.detail}`);
+		lines.push(`${indent}Symptom: ${stripAnsi(finding.detail)}`);
 	}
 	if (finding.consequence) {
 		lines.push(
-			`${indent}${theme.fg("warning", "→ Consequence:")} ${finding.consequence}`,
+			`${indent}${theme.fg("warning", "→ Consequence:")} ${stripAnsi(finding.consequence)}`,
 		);
 	}
 	if (finding.source && finding.source !== finding.summary) {
@@ -117,11 +118,11 @@ export function formatFinding(
 		if (finding.fixability) {
 			const fixLabel = FIXABILITY_LABEL[finding.fixability];
 			lines.push(
-				`${indent}${theme.fg("success", "→ Fix:")} ${fixLabel} — ${finding.suggestion}`,
+				`${indent}${theme.fg("success", "→ Fix:")} ${fixLabel} — ${stripAnsi(finding.suggestion)}`,
 			);
 		} else {
 			lines.push(
-				`${indent}${theme.fg("success", "→ Fix:")} ${finding.suggestion}`,
+				`${indent}${theme.fg("success", "→ Fix:")} ${stripAnsi(finding.suggestion)}`,
 			);
 		}
 	}

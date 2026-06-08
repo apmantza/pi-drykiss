@@ -178,7 +178,8 @@ export function getConfigPath(): string {
 }
 
 export async function loadConfig(): Promise<DrykissConfig> {
-	const { config } = await loadEffectiveConfig();
+	const { config, warnings } = await loadEffectiveConfig();
+	// Callers that need validation warnings should use loadEffectiveConfig directly
 	return config;
 }
 
@@ -205,15 +206,18 @@ export async function loadEffectiveConfig(
 		interactive: true,
 		confirmBeforeRun: true,
 	};
-	if (cwd && globalConfig) {
+	if (cwd) {
 		const projectPath = getProjectConfigPath(cwd);
 		const projectConfig = await loadConfigFile(projectPath, warnings);
 		if (projectConfig) {
 			config = {
-				...globalConfig,
+				...(globalConfig ?? {
+					interactive: true,
+					confirmBeforeRun: true,
+				}),
 				...projectConfig,
 				suppressions: [
-					...(globalConfig.suppressions ?? []),
+					...(globalConfig?.suppressions ?? []),
 					...(projectConfig.suppressions ?? []),
 				],
 			};

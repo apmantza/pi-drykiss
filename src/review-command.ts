@@ -108,8 +108,13 @@ async function gatherContents(
 		{ content: string; lineCount: number; truncated: boolean }
 	>();
 	for (const file of files) {
-		const result = await getFileContent(cwd, file.path);
-		if (result) contents.set(file.path, result);
+		try {
+			const result = await getFileContent(cwd, file.path);
+			if (result) contents.set(file.path, result);
+		} catch {
+			// File content is best-effort — skip on read errors
+			continue;
+		}
 	}
 	return contents;
 }
@@ -805,9 +810,10 @@ function formatReviewProgress(job: ReviewJob): string {
 }
 
 function formatReviewResultForTool(result: ReviewResult): string {
-	const suppressedStr = result.counts.suppressed > 0
-		? `, ${result.counts.suppressed} suppressed`
-		: "";
+	const suppressedStr =
+		result.counts.suppressed > 0
+			? `, ${result.counts.suppressed} suppressed`
+			: "";
 	const findingsLine = `findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit${suppressedStr})`;
 	const lines = [
 		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,

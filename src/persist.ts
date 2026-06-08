@@ -84,7 +84,9 @@ export async function saveSessionLog(
 		return resolved || path;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		console.warn(`${LOG_PREFIX} Failed to export session log for ${lens}: ${msg}`);
+		console.warn(
+			`${LOG_PREFIX} Failed to export session log for ${lens}: ${msg}`,
+		);
 		return undefined;
 	}
 }
@@ -138,7 +140,8 @@ export function formatReviewForDisplay(review: PersistedReview): string {
 	md += `## Summary\n`;
 	md += `- Total findings: ${review.findings.length}`;
 	md += ` (${review.criticalCount} critical, ${review.highCount} high, ${review.mediumCount} medium, ${review.lowCount} low, ${review.nitCount} nit`;
-	if (review.suppressedCount > 0) md += `, ${review.suppressedCount} suppressed`;
+	if (review.suppressedCount > 0)
+		md += `, ${review.suppressedCount} suppressed`;
 	md += `)
 `;
 	md += `- ${review.summary}\n`;

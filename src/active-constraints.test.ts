@@ -15,16 +15,16 @@ describe("buildActiveConstraints", () => {
 		const rt: RiskTargeting = { disable: ["K1", "R1"] };
 		const result = buildActiveConstraints(rt);
 		expect(result).toContain("DISABLED");
-		expect(result).toContain("K1 (KISS violation)");
-		expect(result).toContain("R1 (Divergent change)");
+		expect(result).toContain("`K1` (KISS violation)");
+		expect(result).toContain("`R1` (Divergent change)");
 	});
 
 	it("includes focused risk codes", () => {
 		const rt: RiskTargeting = { focus: ["R4", "R5"] };
 		const result = buildActiveConstraints(rt);
 		expect(result).toContain("FOCUSED");
-		expect(result).toContain("R4 (Refactor backlog)");
-		expect(result).toContain("R5 (Lost intent)");
+		expect(result).toContain("`R4` (Refactor backlog)");
+		expect(result).toContain("`R5` (Lost intent)");
 	});
 
 	it("includes severity overrides", () => {
@@ -33,7 +33,7 @@ describe("buildActiveConstraints", () => {
 		};
 		const result = buildActiveConstraints(rt);
 		expect(result).toContain("Severity overrides");
-		expect(result).toContain('K1 (KISS violation): report as "low"');
+		expect(result).toContain("`K1` (KISS violation): report as `low` instead of the default");
 	});
 
 	it("includes ignore patterns", () => {

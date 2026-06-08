@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
 	loadConfig,
@@ -66,11 +67,12 @@ async function handleBooleanToggle(
 		}
 		await saveConfig(config);
 		ctx.ui.notify(`${config[configKey] ? onLabel : offLabel}.`, "info");
+		return true;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		ctx.ui.notify(`Failed to update ${configKey}: ${msg}`, "error");
+		return false;
 	}
-	return true;
 }
 
 export async function handleConfigCommand(
@@ -400,9 +402,7 @@ export async function handleConfigCommand(
  * Generate a unique suppression ID.
  */
 function generateSuppressionId(): string {
-	const timestamp = Date.now().toString(36);
-	const random = Math.random().toString(36).substring(2, 8);
-	return `sup-${timestamp}-${random}`;
+	return `sup-${randomUUID().slice(0, 10)}`;
 }
 
 /**
