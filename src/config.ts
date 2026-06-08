@@ -203,24 +203,24 @@ export async function loadConfig(): Promise<DrykissConfig> {
  * Defaults are returned when the file is missing or corrupt (matching
  * the original loadConfig behaviour).
  */
+/** Default config values used when no config file exists. */
+const DEFAULT_CONFIG: Pick<DrykissConfig, "interactive" | "confirmBeforeRun"> = {
+	interactive: true,
+	confirmBeforeRun: true,
+};
+
 export async function loadEffectiveConfig(
 	cwd?: string,
 ): Promise<{ config: DrykissConfig; warnings: string[] }> {
 	const warnings: string[] = [];
 	const globalConfig = await loadConfigFile(getConfigPath(), warnings);
-	let config: DrykissConfig = globalConfig ?? {
-		interactive: true,
-		confirmBeforeRun: true,
-	};
+	let config: DrykissConfig = globalConfig ?? DEFAULT_CONFIG;
 	if (cwd) {
 		const projectPath = getProjectConfigPath(cwd);
 		const projectConfig = await loadConfigFile(projectPath, warnings);
 		if (projectConfig) {
 			config = {
-				...(globalConfig ?? {
-					interactive: true,
-					confirmBeforeRun: true,
-				}),
+				...(globalConfig ?? DEFAULT_CONFIG),
 				...projectConfig,
 				suppressions: [
 					...(globalConfig?.suppressions ?? []),

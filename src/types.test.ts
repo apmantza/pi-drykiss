@@ -297,67 +297,70 @@ describe("createFallbackSynthesis — mermaidGraph", () => {
 		expect(result.mermaidGraph).toBeUndefined();
 	});
 });
-it("parses valid synthesis JSON", () => {
-	const raw = JSON.stringify({
-		findings: [
-			{ file: "a.ts", severity: "critical", summary: "issue" },
-			{ file: "b.ts", severity: "high", summary: "issue2" },
-		],
-		summary: "Found issues",
-		verdict: "Request changes",
+describe("parseSynthesis", () => {
+	it("parses valid synthesis JSON", () => {
+		const raw = JSON.stringify({
+			findings: [
+				{ file: "a.ts", severity: "critical", summary: "issue" },
+				{ file: "b.ts", severity: "high", summary: "issue2" },
+			],
+			summary: "Found issues",
+			verdict: "Request changes",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.findings).toHaveLength(2);
+		expect(result.summary).toBe("Found issues");
+		expect(result.verdict).toBe("Request changes");
+		expect(result.criticalCount).toBe(1);
+		expect(result.highCount).toBe(1);
 	});
-	const result = parseSynthesis(raw);
-	expect(result.findings).toHaveLength(2);
-	expect(result.summary).toBe("Found issues");
-	expect(result.verdict).toBe("Request changes");
-	expect(result.criticalCount).toBe(1);
-	expect(result.highCount).toBe(1);
-});
-
-it("handles JSON wrapped in markdown fences", () => {
-	const raw =
-		'```json\n{"findings": [], "summary": "ok", "verdict": "Approve"}\n```';
-	const result = parseSynthesis(raw);
-	expect(result.summary).toBe("ok");
-	expect(result.verdict).toBe("Approve");
-});
-
-it("handles JSON with trailing commas", () => {
-	const raw = '{"findings": [], "summary": "ok", "verdict": "Approve",}';
-	const result = parseSynthesis(raw);
-	expect(result.summary).toBe("ok");
-});
-
-it("returns fallback for non-JSON input", () => {
-	const result = parseSynthesis("not json at all");
-	expect(result.findings).toEqual([]);
-	expect(result.verdict).toBe("Request changes");
-	expect(result.summary).toContain("non-JSON");
-});
-
-it("returns fallback for null/undefined parsed value", () => {
-	const result = parseSynthesis("null");
-	expect(result.findings).toEqual([]);
-	expect(result.verdict).toBe("Request changes");
-});
-
-it("counts findings by severity", () => {
-	const raw = JSON.stringify({
-		findings: [
-			{ file: "a.ts", severity: "critical" },
-			{ file: "b.ts", severity: "critical" },
-			{ file: "c.ts", severity: "high" },
-			{ file: "d.ts", severity: "medium" },
-			{ file: "e.ts", severity: "low" },
-			{ file: "f.ts", severity: "nit" },
-		],
-		summary: "test",
-		verdict: "Request changes",
+	
+	it("handles JSON wrapped in markdown fences", () => {
+		const raw =
+			'```json\n{"findings": [], "summary": "ok", "verdict": "Approve"}\n```';
+		const result = parseSynthesis(raw);
+		expect(result.summary).toBe("ok");
+		expect(result.verdict).toBe("Approve");
 	});
-	const result = parseSynthesis(raw);
-	expect(result.criticalCount).toBe(2);
-	expect(result.highCount).toBe(1);
-	expect(result.mediumCount).toBe(1);
-	expect(result.lowCount).toBe(1);
-	expect(result.nitCount).toBe(1);
+	
+	it("handles JSON with trailing commas", () => {
+		const raw = '{"findings": [], "summary": "ok", "verdict": "Approve",}';
+		const result = parseSynthesis(raw);
+		expect(result.summary).toBe("ok");
+	});
+	
+	it("returns fallback for non-JSON input", () => {
+		const result = parseSynthesis("not json at all");
+		expect(result.findings).toEqual([]);
+		expect(result.verdict).toBe("Request changes");
+		expect(result.summary).toContain("non-JSON");
+	});
+	
+	it("returns fallback for null/undefined parsed value", () => {
+		const result = parseSynthesis("null");
+		expect(result.findings).toEqual([]);
+		expect(result.verdict).toBe("Request changes");
+	});
+	
+	it("counts findings by severity", () => {
+		const raw = JSON.stringify({
+			findings: [
+				{ file: "a.ts", severity: "critical" },
+				{ file: "b.ts", severity: "critical" },
+				{ file: "c.ts", severity: "high" },
+				{ file: "d.ts", severity: "medium" },
+				{ file: "e.ts", severity: "low" },
+				{ file: "f.ts", severity: "nit" },
+			],
+			summary: "test",
+			verdict: "Request changes",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.criticalCount).toBe(2);
+		expect(result.highCount).toBe(1);
+		expect(result.mediumCount).toBe(1);
+		expect(result.lowCount).toBe(1);
+		expect(result.nitCount).toBe(1);
+	});
+	
 });

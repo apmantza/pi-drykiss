@@ -374,8 +374,6 @@ export function applySuppressions(
 		id: string;
 		riskCode: string;
 		regex: RegExp;
-		reason?: string;
-		suppressSeverity?: "nit";
 	}> = [];
 	for (const s of suppressions) {
 		if (!s.pattern || !s.riskCode) {
@@ -388,6 +386,7 @@ export function applySuppressions(
 				regex: globToRegex(s.pattern),
 			});
 		} catch {
+			// Malformed glob pattern — skip this suppression entry silently
 		}
 	}
 
@@ -430,7 +429,11 @@ export function isSuppressionExpired(suppression: {
 		const expiry = new Date(suppression.expiresAt);
 		return expiry.getTime() <= Date.now();
 	} catch {
-		// Invalid date — treat as never-expiring
+		// Invalid date — treat as never-expiring and emit a warning
+		console.warn(
+			"DRYKISS: Invalid expiresAt date for suppression:",
+			suppression.expiresAt,
+		);
 		return false;
 	}
 }

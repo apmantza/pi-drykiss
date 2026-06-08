@@ -155,7 +155,12 @@ export async function loadHistory(): Promise<ReviewHistoryEntry[]> {
 		const parsed = JSON.parse(raw);
 		if (Array.isArray(parsed)) return parsed as ReviewHistoryEntry[];
 		return [];
-	} catch {
+	} catch (e) {
+		// ENOENT = file doesn't exist yet, expected on first run
+		// Other errors (corrupt JSON, permissions) should be surfaced
+		if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+			console.warn("DRYKISS: Failed to load health score history:", (e as Error).message);
+		}
 		return [];
 	}
 }
