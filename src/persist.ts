@@ -126,6 +126,68 @@ export async function listReviews(): Promise<PersistedReview[]> {
 	}
 }
 
+/* ── Health Score History ───────────────────────────────────── */
+
+export interface ReviewHistoryEntry {
+	readonly date: string;
+	readonly mode: string;
+	readonly score: number;
+	readonly breakdown: {
+		readonly critical: number;
+		readonly warning: number;
+		readonly suggestion: number;
+	};
+	readonly totalFindings: number;
+	readonly verdict: string;
+}
+
+function getGlobalHistoryPath(): string {
+	return join(getGlobalBaseDir(), "history.json");
+}
+
+/**
+ * Load the health-score history from disk.
+ * Returns an empty array if the file doesn't exist or is corrupt.
+ */
+export async function loadHistory(): Promise<ReviewHistoryEntry[]> {
+	try {
+		const raw = await readFile(getGlobalHistoryPath(), "utf8");
+		const parsed = JSON.parse(raw);
+		if (Array.isArray(parsed)) return parsed as ReviewHistoryEntry[];
+		return [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Append a new entry to the health-score history.
+ * Loads existing entries, appends the new one, writes back.
+ */
+export async function appendHistory(
+	entry: ReviewHistoryEntry,
+): Promise<void> {
+	const dir = getGlobalBaseDir();
+	await mkdir(dir, { recursive: true });
+	const existing = await loadHistory();
+	// Avoid duplicates: skip if the same date/mode/score combo already exists
+	const isDuplicate = existing.some(
+		(e) =>
+			e.date === entry.date &&
+			e.mode === entry.mode &&
+			e.score === entry.score,
+	);
+	if (isDuplicate) return;
+	existing.push(entry);
+	// Keep at most 100 entries (newest first for writing convenience)
+	const trimmed = existing.slice(-100);
+	await writeFile(
+		getGlobalHistoryPath(),
+		JSON.stringify(trimmed, null, 2),
+		"utf8",
+	);
+}
+
 export function formatReviewForDisplay(review: PersistedReview): string {
 	const sevOrder: Array<"critical" | "high" | "medium" | "low" | "nit"> = [
 		"critical",

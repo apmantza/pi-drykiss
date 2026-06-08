@@ -1,5 +1,6 @@
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
+import { computeHealthScore } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
 
 export interface ReviewResultTarget {
@@ -37,6 +38,14 @@ export interface ReviewResult {
 	readonly summary: string;
 	readonly errors: string[];
 	readonly validationIssues: ReviewValidationIssue[];
+	readonly healthScore: number;
+	readonly scoreBreakdown: {
+		readonly critical: number;
+		readonly warning: number;
+		readonly suggestion: number;
+	};
+	/** Health score from the previous run in the same mode (for trend delta). */
+	readonly prevScore?: number;
 }
 
 export interface BuildReviewResultOptions {
@@ -57,6 +66,8 @@ export interface BuildReviewResultOptions {
 		pattern: string;
 		id: string;
 	}>;
+	/** Health score from the previous run in the same mode (for trend delta). */
+	readonly prevScore?: number;
 }
 
 const SEVERITIES: readonly Severity[] = [
@@ -90,6 +101,7 @@ export function buildReviewResult(
 		errors.length === 0 &&
 		active.length === 0 &&
 		verdict === "Approve";
+	const hs = computeHealthScore(active);
 
 	return {
 		jobId: job.id,
@@ -107,6 +119,9 @@ export function buildReviewResult(
 		summary: synthesis?.summary ?? "Review did not produce a synthesis result.",
 		errors,
 		validationIssues: validation.issues,
+		healthScore: hs.score,
+		scoreBreakdown: hs.breakdown,
+		...(options.prevScore != null ? { prevScore: options.prevScore } : {}),
 	};
 }
 

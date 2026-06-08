@@ -61,6 +61,8 @@ function job(overrides: Partial<ReviewJob> = {}): ReviewJob {
 			mediumCount: 0,
 			lowCount: 0,
 			nitCount: 0,
+		healthScore: 100,
+		scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
 		},
 		overallStatus: "done",
 		startedAt: 1,
@@ -215,6 +217,8 @@ describe("buildReviewResult", () => {
 					mediumCount: 0,
 					lowCount: 1,
 					nitCount: 0,
+				healthScore: 84,
+				scoreBreakdown: { critical: 1, warning: 0, suggestion: 1 },
 				},
 			}),
 		);
@@ -237,7 +241,9 @@ describe("buildReviewResult", () => {
 				mediumCount: 0,
 				lowCount: 0,
 				nitCount: 0,
-			},
+			healthScore: 100,
+			scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+		},
 		});
 		base.states.set("security", {
 			status: "error",

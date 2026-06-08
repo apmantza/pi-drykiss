@@ -92,7 +92,59 @@ export interface SynthesisResult {
 	readonly lowCount: number;
 	readonly nitCount: number;
 	readonly verdict: "Approve" | "Request changes" | "Needs security review";
+	readonly healthScore: number;
+	readonly scoreBreakdown: ScoreBreakdown;
 }
+
+/** Brooks-lint severity tiers for health-score computation. */
+export type SeverityTier = "critical" | "warning" | "suggestion";
+
+export interface ScoreBreakdown {
+	readonly critical: number;
+	readonly warning: number;
+	readonly suggestion: number;
+}
+
+/**
+ * Map DRYKISS severity levels to brooks-lint's 3-tier scoring system.
+ *   critical → critical
+ *   high, medium → warning
+ *   low, nit → suggestion
+ */
+export function severityToTier(severity: Severity): SeverityTier {
+	switch (severity) {
+		case "critical":
+			return "critical";
+		case "high":
+		case "medium":
+			return "warning";
+		case "low":
+		case "nit":
+			return "suggestion";
+	}
+}
+
+/**
+ * Compute the health score from an array of findings.
+ * Formula: 100 − 15·critical − 5·warning − 1·suggestion, floor 0.
+ */
+export function computeHealthScore(findings: readonly Finding[]): {
+score: number;
+breakdown: ScoreBreakdown;
+} {
+const b = { critical: 0, warning: 0, suggestion: 0 };
+for (const f of findings) {
+const tier = severityToTier(f.severity);
+b[tier]++;
+}
+const breakdown: ScoreBreakdown = { ...b };
+const score = Math.max(
+0,
+100 - breakdown.critical * 15 - breakdown.warning * 5 - breakdown.suggestion * 1,
+);
+return { score, breakdown };
+}
+
 
 export interface TurnEdits {
 	readonly files: readonly EditedFile[];
@@ -165,8 +217,10 @@ export function parseFindingsArray(raw: unknown, lens?: ReviewLens): Finding[] {
 
 /** Create a fallback SynthesisResult for error cases. */
 export function createFallbackSynthesis(summary: string): SynthesisResult {
+	const empty: Finding[] = [];
+	const hs = computeHealthScore(empty);
 	return {
-		findings: [],
+		findings: empty,
 		summary,
 		verdict: "Request changes",
 		criticalCount: 0,
@@ -174,6 +228,8 @@ export function createFallbackSynthesis(summary: string): SynthesisResult {
 		mediumCount: 0,
 		lowCount: 0,
 		nitCount: 0,
+		healthScore: hs.score,
+		scoreBreakdown: hs.breakdown,
 	};
 }
 
@@ -201,6 +257,8 @@ export function parseSynthesis(raw: string): SynthesisResult {
 			mediumCount: findings.filter((f) => f.severity === "medium").length,
 			lowCount: findings.filter((f) => f.severity === "low").length,
 			nitCount: findings.filter((f) => f.severity === "nit").length,
+			healthScore: computeHealthScore(findings).score,
+			scoreBreakdown: computeHealthScore(findings).breakdown,
 		};
 	} catch {
 		return createFallbackSynthesis(

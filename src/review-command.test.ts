@@ -114,6 +114,8 @@ describe("drykiss_autoreview tool", () => {
 				summary: "Clean.",
 				errors: [],
 				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
 			}),
 		} as any;
 

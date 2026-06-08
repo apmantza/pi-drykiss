@@ -112,8 +112,6 @@ async function gatherContents(
 			const result = await getFileContent(cwd, file.path);
 			if (result) contents.set(file.path, result);
 		} catch {
-			// File content is best-effort — skip on read errors
-			continue;
 		}
 	}
 	return contents;
@@ -815,12 +813,24 @@ function formatReviewResultForTool(result: ReviewResult): string {
 			? `, ${result.counts.suppressed} suppressed`
 			: "";
 	const findingsLine = `findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit${suppressedStr})`;
+	const scoreLine = `health score: ${result.healthScore}/100`;
+const breakdown = result.scoreBreakdown;
+const scoreDetail = `(critical: ${breakdown.critical}, warning: ${breakdown.warning}, suggestion: ${breakdown.suggestion})`;
+	const trendLine =
+result.prevScore != null
+? `trend: ${result.prevScore} → ${result.healthScore} (${result.healthScore - result.prevScore >= 0 ? "+" : ""}${result.healthScore - result.prevScore})`
+: "";
+	const qualityGate = result.healthScore < 70 ? "⛔ quality gate: FAIL" : "✅ quality gate: pass";
 	const lines = [
 		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,
 		`target: ${result.target?.label ?? "unknown"}`,
 		`verdict: ${result.verdict}`,
 		findingsLine,
+		scoreLine,
+		scoreDetail,
 	];
+	if (trendLine) lines.push(trendLine);
+	lines.push(qualityGate);
 	if (result.reportPath) lines.push(`report: ${result.reportPath}`);
 	if (result.errors.length > 0)
 		lines.push(`errors: ${result.errors.join("; ")}`);

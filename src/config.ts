@@ -171,6 +171,12 @@ export interface DrykissConfig {
 	suppressions?: Suppression[];
 	/** Automatic closeout review configuration. */
 	autoreview?: DrykissAutoreviewConfig;
+	/**
+	 * Minimum health score threshold for the quality gate (0-100).
+	 * Reviews with score below this value show a FAIL indicator.
+	 * Default: 70.
+	 */
+	qualityGate?: number;
 }
 
 export function getConfigPath(): string {

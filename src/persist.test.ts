@@ -42,6 +42,8 @@ describe("saveReview", () => {
 			mediumCount: 0,
 			lowCount: 0,
 			nitCount: 0,
+			healthScore: 85,
+			scoreBreakdown: { critical: 1, warning: 0, suggestion: 0 },
 		};
 
 		const path = await saveReview(["src/app.ts"], synthesis);

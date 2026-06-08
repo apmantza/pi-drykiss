@@ -12,11 +12,24 @@ import {
 	parseSynthesis,
 } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
-import { saveReview, saveSessionLog } from "./persist.js";
+import { saveReview, saveSessionLog, appendHistory, loadHistory } from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
+
+/**
+ * Load the most recent health score for a given review mode from history.
+ * Returns undefined when no prior record exists.
+ */
+async function computePrevScore(mode?: string): Promise<number | undefined> {
+	if (!mode) return undefined;
+	const history = await loadHistory();
+	for (const entry of history) {
+		if (entry.mode === mode) return entry.score;
+	}
+	return undefined;
+}
 import {
 	buildReviewResult,
 	type ReviewResult,
@@ -616,11 +629,22 @@ export class ReviewManager {
 			options.onProgress,
 			options.progressIntervalMs,
 		);
-		return buildReviewResult(job, {
+		const result = buildReviewResult(job, {
 			target: options.target,
 			severityOverrides: options.severityOverrides,
 			suppressions: options.suppressions,
+			prevScore: await computePrevScore(options.target?.label),
 		});
+		// Fire-and-forget persist history
+		appendHistory({
+			date: new Date().toISOString(),
+			mode: options.target?.label ?? "unknown",
+			score: result.healthScore,
+			breakdown: result.scoreBreakdown,
+			totalFindings: result.counts.total,
+			verdict: result.verdict,
+		}).catch(() => {});
+		return result;
 	}
 
 	waitForReview(
