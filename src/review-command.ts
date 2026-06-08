@@ -774,7 +774,7 @@ export async function executeDrykissAutoreviewTool(
 			: result;
 
 	return {
-		content: [{ type: "text", text: formatReviewResultForTool(finalResult) }],
+		content: [{ type: "text", text: formatReviewResultForTool(finalResult, { qualityGateThreshold: config.qualityGate }) }],
 		details: { result: finalResult },
 	};
 }
@@ -811,7 +811,11 @@ function formatReviewProgress(job: ReviewJob): string {
 	return `DRYKISS autoreview progress: ${done}/${job.lenses.length} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
 }
 
-function formatReviewResultForTool(result: ReviewResult): string {
+function formatReviewResultForTool(
+	result: ReviewResult,
+	options?: { qualityGateThreshold?: number },
+): string {
+	const threshold = options?.qualityGateThreshold ?? 70;
 	const suppressedStr =
 		result.counts.suppressed > 0
 			? `, ${result.counts.suppressed} suppressed`
@@ -825,7 +829,9 @@ function formatReviewResultForTool(result: ReviewResult): string {
 			? `trend: ${result.prevScore} → ${result.healthScore} (${result.healthScore - result.prevScore >= 0 ? "+" : ""}${result.healthScore - result.prevScore})`
 			: "";
 	const qualityGate =
-		result.healthScore < 70 ? "⛔ quality gate: FAIL" : "✅ quality gate: pass";
+		result.healthScore < threshold
+			? "⛔ quality gate: FAIL"
+			: "✅ quality gate: pass";
 	const lines = [
 		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,
 		`target: ${result.target?.label ?? "unknown"}`,

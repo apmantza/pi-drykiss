@@ -141,7 +141,17 @@ export class ReviewManager {
 			"Model Error",
 			`Model "${failedModel.name}" failed.\n\nChoose a different model for ${taskLabel}:`,
 		);
-		if (!selected) return null; // user cancelled
+		if (!selected) {
+			// User cancelled — dispose the failed session before returning
+			if (failedSession) {
+				try {
+					failedSession.dispose();
+				} catch {
+					/* ignore dispose errors */
+				}
+			}
+			return null;
+		}
 
 		ctx.ui.notify(`Switching to ${selected.name} for ${taskLabel}...`, "info");
 		const retryResult = await runFn(selected);

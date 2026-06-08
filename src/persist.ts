@@ -173,10 +173,15 @@ export async function appendHistory(entry: ReviewHistoryEntry): Promise<void> {
 	const dir = getGlobalBaseDir();
 	await mkdir(dir, { recursive: true });
 	const existing = await loadHistory();
-	// Avoid duplicates: skip if the same date/mode/score combo already exists
+	// Avoid duplicates: skip if the same date/mode/breakdown combo already exists
 	const isDuplicate = existing.some(
 		(e) =>
-			e.date === entry.date && e.mode === entry.mode && e.score === entry.score,
+			e.date === entry.date &&
+			e.mode === entry.mode &&
+			e.breakdown.critical === entry.breakdown.critical &&
+			e.breakdown.warning === entry.breakdown.warning &&
+			e.breakdown.suggestion === entry.breakdown.suggestion &&
+			e.totalFindings === entry.totalFindings,
 	);
 	if (isDuplicate) return;
 	existing.push(entry);

@@ -209,6 +209,27 @@ const DEFAULT_CONFIG: Pick<DrykissConfig, "interactive" | "confirmBeforeRun"> = 
 	confirmBeforeRun: true,
 };
 
+/**
+ * Deduplicate suppression entries by id (preferred) or by riskCode+pattern.
+ * Later entries with the same key overwrite earlier ones (project overrides global).
+ */
+function deduplicateSuppressions(
+	suppressions: readonly Suppression[],
+): Suppression[] {
+	const seen = new Set<string>();
+	const result: Suppression[] = [];
+	// Iterate in reverse so later entries (project config) take precedence
+	for (let i = suppressions.length - 1; i >= 0; i--) {
+		const s = suppressions[i];
+		const key = s.id ?? `${s.riskCode}:${s.pattern}`;
+		if (!seen.has(key)) {
+			seen.add(key);
+			result.unshift(s);
+		}
+	}
+	return result;
+}
+
 export async function loadEffectiveConfig(
 	cwd?: string,
 ): Promise<{ config: DrykissConfig; warnings: string[] }> {
@@ -222,10 +243,10 @@ export async function loadEffectiveConfig(
 			config = {
 				...(globalConfig ?? DEFAULT_CONFIG),
 				...projectConfig,
-				suppressions: [
+				suppressions: deduplicateSuppressions([
 					...(globalConfig?.suppressions ?? []),
 					...(projectConfig.suppressions ?? []),
-				],
+				]),
 			};
 		}
 	}

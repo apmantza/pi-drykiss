@@ -186,8 +186,8 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			summary: "",
 			detail: "",
 			suggestion: "",
-			consequence: "",
-			source: "",
+			consequence: undefined,
+			source: undefined,
 			fixability: undefined,
 			confidence: undefined,
 			lens,
@@ -202,8 +202,8 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 		summary: String(raw.summary ?? ""),
 		detail: String(raw.detail ?? raw.summary ?? ""),
 		suggestion: String(raw.suggestion ?? ""),
-		consequence: raw.consequence ? String(raw.consequence) : "",
-		source: raw.source ? String(raw.source) : "",
+		consequence: raw.consequence ? String(raw.consequence) : undefined,
+		source: raw.source ? String(raw.source) : undefined,
 		fixability: raw.fixability
 			? (String(raw.fixability) as "quick-fix" | "guided" | "manual")
 			: undefined,

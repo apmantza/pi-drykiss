@@ -81,20 +81,20 @@ describe("mapRawToFinding — consequence/source/riskCode", () => {
 		expect(result.source).toBe("helper foo()");
 	});
 
-	it("uses empty strings for missing consequence and source", () => {
+	it("uses undefined for missing consequence and source", () => {
 		const result = mapRawToFinding({ file: "src/a.ts" });
-		expect(result.consequence).toBe("");
-		expect(result.source).toBe("");
+		expect(result.consequence).toBeUndefined();
+		expect(result.source).toBeUndefined();
 	});
 
-	it("uses empty string for empty-string consequence (not undefined)", () => {
+	it("uses undefined for empty-string consequence and source (not '')", () => {
 		const result = mapRawToFinding({
 			file: "src/a.ts",
 			consequence: "",
 			source: "",
 		});
-		expect(result.consequence).toBe("");
-		expect(result.source).toBe("");
+		expect(result.consequence).toBeUndefined();
+		expect(result.source).toBeUndefined();
 	});
 
 	it("passes through a riskCode when provided", () => {
