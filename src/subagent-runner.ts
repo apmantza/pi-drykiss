@@ -159,7 +159,15 @@ export async function runLensSubagent(
 		}
 
 		try {
-			await session.prompt(userPrompt);
+			// Run the one-shot review directly through the core agent. AgentSession.prompt()
+			// also runs session-level post-turn continuation hooks; for isolated
+			// no-tool reviewer sessions those hooks can create a secondary continuation
+			// error after the model has already produced a valid review.
+			await session.agent.prompt({
+				role: "user",
+				content: [{ type: "text", text: userPrompt }],
+				timestamp: Date.now(),
+			});
 			await session.agent.waitForIdle();
 		} finally {
 			// Always clean up listeners, even if prompt() throws
@@ -192,12 +200,23 @@ export async function runLensSubagent(
 		}
 	}
 
+	const text = finalText.trim();
+	if (text && isPostRunContinuationError(errorMessage)) {
+		errorMessage = undefined;
+	}
+
 	return {
 		lens,
-		text: finalText.trim(),
+		text,
 		modelName: model.name,
 		durationMs: Date.now() - start,
 		session,
 		...(errorMessage ? { errorMessage } : {}),
 	};
+}
+
+function isPostRunContinuationError(message: string | undefined): boolean {
+	return (
+		message?.includes("Cannot continue from message role: assistant") ?? false
+	);
 }
