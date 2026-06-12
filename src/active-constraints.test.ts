@@ -33,7 +33,9 @@ describe("buildActiveConstraints", () => {
 		};
 		const result = buildActiveConstraints(rt);
 		expect(result).toContain("Severity overrides");
-		expect(result).toContain("`K1` (KISS violation): report as `low` instead of the default");
+		expect(result).toContain(
+			"`K1` (KISS violation): report as `low` instead of the default",
+		);
 	});
 
 	it("includes ignore patterns", () => {

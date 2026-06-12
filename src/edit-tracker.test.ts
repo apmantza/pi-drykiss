@@ -102,7 +102,9 @@ describe("createEditTracker", () => {
 	it("rejects absolute paths", () => {
 		const tracker = createEditTracker();
 		expect(tracker.trackEdit(WRITE_TOOL, { path: "/etc/passwd" })).toBeNull();
-		expect(tracker.trackEdit(WRITE_TOOL, { path: "C:\\windows\\system.ini" })).toBeNull();
+		expect(
+			tracker.trackEdit(WRITE_TOOL, { path: "C:\\windows\\system.ini" }),
+		).toBeNull();
 	});
 
 	it("rejects paths with parent directory traversal", () => {

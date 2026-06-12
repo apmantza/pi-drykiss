@@ -4,6 +4,7 @@ import {
 	isPrReference,
 	isValidFilePath,
 	decodeBase64Content,
+	parseUnifiedDiff,
 } from "./github-pr.js";
 
 describe("parsePrUrl", () => {
@@ -192,3 +193,25 @@ describe("decodeBase64Content", () => {
 		expect(decodeBase64Content(wrapped)).toBe(src);
 	});
 });
+
+describe("parseUnifiedDiff", () => {
+	it("parses a modified file", () => {
+		const diff = `diff --git a/src/foo.ts b/src/foo.ts\nindex 1234..5678 100644\n--- a/src/foo.ts\n+++ b/src/foo.ts\n@@ -1 +1 @@\n-old\n+new`;
+		const result = parseUnifiedDiff(diff);
+		expect(result.files).toHaveLength(1);
+		expect(result.files[0]).toMatchObject({
+			path: "src/foo.ts",
+			status: "modified",
+		});
+		expect(result.diffs.get("src/foo.ts")).toContain("diff --git");
+	});
+
+	it("parses added and deleted files", () => {
+		const diff = `diff --git a/src/new.ts b/src/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/new.ts\n@@ -0,0 +1 @@\n+hello\ndiff --git a/src/gone.ts b/src/gone.ts\ndeleted file mode 100644\n--- a/src/gone.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-goodbye`;
+		const result = parseUnifiedDiff(diff);
+		expect(result.files).toHaveLength(2);
+		expect(result.files[0].status).toBe("added");
+		expect(result.files[1].status).toBe("deleted");
+	});
+});
+

@@ -48,7 +48,9 @@ export function buildActiveConstraints(rt: RiskTargeting | undefined): string {
 			const severityStr = SEVERITY_VALUES.has(rule.to)
 				? `\`${rule.to}\``
 				: `\`${sanitizeInline(rule.to)}\``;
-			lines.push(`  - ${codeStr}: report as ${severityStr} instead of the default`);
+			lines.push(
+				`  - ${codeStr}: report as ${severityStr} instead of the default`,
+			);
 		}
 	}
 

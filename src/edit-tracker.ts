@@ -49,9 +49,11 @@ function extractFilePathFromValue(result: unknown): string | null {
 
 	if (typeof result === "object") {
 		const obj = result as Record<string, unknown>;
-		if (typeof obj["file_path"] === "string") return sanitizePath(obj["file_path"]);
+		if (typeof obj["file_path"] === "string")
+			return sanitizePath(obj["file_path"]);
 		if (typeof obj["path"] === "string") return sanitizePath(obj["path"]);
-		if (typeof obj["filePath"] === "string") return sanitizePath(obj["filePath"]);
+		if (typeof obj["filePath"] === "string")
+			return sanitizePath(obj["filePath"]);
 		if (obj["details"]) return extractFilePathFromValue(obj["details"]);
 	}
 

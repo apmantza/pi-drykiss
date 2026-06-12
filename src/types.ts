@@ -2,7 +2,13 @@ import { lenientJsonParse } from "./json-utils.js";
 
 export interface ChangedFile {
 	readonly path: string;
-	readonly status: "modified" | "added" | "renamed" | "copied" | "deleted" | "unchanged";
+	readonly status:
+		| "modified"
+		| "added"
+		| "renamed"
+		| "copied"
+		| "deleted"
+		| "unchanged";
 	readonly language: string | null;
 }
 

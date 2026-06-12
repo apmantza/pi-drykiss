@@ -173,7 +173,7 @@ async function fetchPrMetadata(
 /**
  * Parse a unified diff into ChangedFile[] and a Map of path → diff.
  */
-function parseUnifiedDiff(diffOutput: string): {
+export function parseUnifiedDiff(diffOutput: string): {
 	files: ChangedFile[];
 	diffs: Map<string, string>;
 } {
