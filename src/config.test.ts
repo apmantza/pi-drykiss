@@ -227,6 +227,32 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 		]);
 	});
 
+	it("deduplicates overlapping global and project suppressions", async () => {
+		vi.mocked(readFile).mockImplementation(async (path) => {
+			const p = String(path).replace(/\\/g, "/");
+			// Global config lives directly under the drykiss base dir.
+			if (p.endsWith(".pi/drykiss/config.json") && !p.includes("/project")) {
+				return JSON.stringify({
+					suppressions: [
+						{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
+					],
+				});
+			}
+			// Project config path includes the project directory first.
+			if (p.includes("/project/.pi/drykiss/config.json")) {
+				return JSON.stringify({
+					suppressions: [
+						{ id: "s1", riskCode: "K1", pattern: "src/legacy/**" },
+						{ id: "s2", riskCode: "D1", pattern: "tests/e2e/*.ts" },
+					],
+				});
+			}
+			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+		});
+		const result = await loadEffectiveConfig("/project");
+		expect(result.config.suppressions).toHaveLength(2);
+	});
+
 	describe("saveProjectConfig", () => {
 		it("writes project config with suppressions, preserving existing fields", async () => {
 			vi.mocked(readFile).mockResolvedValue(

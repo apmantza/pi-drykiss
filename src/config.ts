@@ -6,6 +6,7 @@ import {
 	getProjectConfigPath,
 	CONFIG_FILE,
 	SEVERITY_VALUES,
+	LOG_PREFIX,
 } from "./constants.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
 
@@ -178,8 +179,10 @@ export function getConfigPath(): string {
 }
 
 export async function loadConfig(): Promise<DrykissConfig> {
-	const { config } = await loadEffectiveConfig();
-	// Callers that need validation warnings should use loadEffectiveConfig directly
+	const { config, warnings } = await loadEffectiveConfig();
+	for (const warning of warnings) {
+		console.warn(`${LOG_PREFIX} ${warning}`);
+	}
 	return config;
 }
 
