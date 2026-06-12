@@ -9,7 +9,11 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { loadConfig, type DrykissConfig } from "./config.js";
-import { selectFreeModel, type ExcludedModel } from "./free-models.js";
+import {
+	selectFreeModel,
+	normalizeScopeHints,
+	type ExcludedModel,
+} from "./free-models.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
 
@@ -236,29 +240,11 @@ export function isServerError(err: unknown): boolean {
 }
 
 /**
- * Extract valid scope hint strings from a `modelScope` config value.
- * Handles single-string, array-of-strings, and undefined forms.
- * Shared between selectModelWithAutoroute (toast note) and
- * config-command.ts (show output).
- */
-export function extractScopeHints(
-	scope: string | string[] | undefined,
-): string[] {
-	if (scope === undefined) return [];
-	if (Array.isArray(scope)) {
-		return scope.filter((s) => typeof s === "string" && s.trim());
-	}
-	const trimmed = scope.trim();
-	if (trimmed.length === 0) return [];
-	return [trimmed];
-}
-
-/**
  * Build the trailing scope note shown in the "Auto-routing to <model>" toast.
  * Handles both the single-hint and list forms of `config.modelScope`.
  */
 function formatScopeNote(scope: string | string[] | undefined): string {
-	const hints = extractScopeHints(scope);
+	const hints = normalizeScopeHints(scope);
 	if (hints.length === 0) return "";
 	if (hints.length === 1) return `, scope: ${hints[0]}`;
 	return `, scope: [${hints.join(", ")}]`;

@@ -329,20 +329,28 @@ async function runLensReview(
 	return { lens, findings, rawOutput, modelName: result.modelName };
 }
 
+async function prepareReviewOrNotify(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+	needsProjectIndex: boolean,
+): Promise<NonNullable<Awaited<ReturnType<typeof prepareReview>>> | null> {
+	try {
+		return await prepareReview(args, ctx, pi, needsProjectIndex);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
+		return null;
+	}
+}
+
 export async function handleDrykissCommand(
 	args: string,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	let prepared: Awaited<ReturnType<typeof prepareReview>> = null;
-	try {
-		prepared = await prepareReview(args, ctx, pi, true);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
-		return;
-	}
+	const prepared = await prepareReviewOrNotify(args, ctx, pi, true);
 	if (!prepared) return;
 
 	const {
@@ -403,14 +411,12 @@ async function handleSingleLensCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	let prepared: Awaited<ReturnType<typeof prepareReview>> = null;
-	try {
-		prepared = await prepareReview(args, ctx, pi, needsProjectIndex);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
-		return;
-	}
+	const prepared = await prepareReviewOrNotify(
+		args,
+		ctx,
+		pi,
+		needsProjectIndex,
+	);
 	if (!prepared) return;
 
 	const { options, files, diffs, contents, projectIndex, activeConstraints } =

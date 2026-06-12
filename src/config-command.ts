@@ -9,7 +9,8 @@ import {
 	loadEffectiveConfig,
 	type Suppression,
 } from "./config.js";
-import { selectModel, extractScopeHints } from "./model-selector.js";
+import { selectModel } from "./model-selector.js";
+import { normalizeScopeHints } from "./free-models.js";
 import { resetPrompts } from "./prompt-builder.js";
 import { LENS_NAMES } from "./types.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
@@ -37,7 +38,7 @@ function formatAutoreview(
  * Wraps each hint in backticks for readability.
  */
 function formatModelScope(scope: string | string[] | undefined): string {
-	const hints = extractScopeHints(scope);
+	const hints = normalizeScopeHints(scope);
 	if (hints.length === 0) return "(any free model)";
 	return hints.map((h) => `\`${h}\``).join(", ");
 }

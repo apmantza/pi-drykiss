@@ -288,15 +288,7 @@ export function filterIgnored(
 	if (patterns.length === 0) {
 		return { findings: [...findings], dropped: 0 };
 	}
-	// Simple glob matching (supports * and **)
-	const matchers: RegExp[] = [];
-	for (const p of patterns) {
-		try {
-			matchers.push(globToRegex(p));
-		} catch {
-			// Skip invalid patterns — don't let a single bad pattern crash the entire review
-		}
-	}
+	const matchers = compileGlobMatchers(patterns);
 	const passed: Finding[] = [];
 	let dropped = 0;
 	for (const f of findings) {
@@ -309,6 +301,22 @@ export function filterIgnored(
 		}
 	}
 	return { findings: passed, dropped };
+}
+
+/**
+ * Compile a list of glob patterns into regex matchers.
+ * Silently skips invalid patterns so a single bad pattern doesn't crash the review.
+ */
+function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
+	const matchers: RegExp[] = [];
+	for (const p of patterns) {
+		try {
+			matchers.push(globToRegex(p));
+		} catch {
+			// Skip invalid patterns
+		}
+	}
+	return matchers;
 }
 
 /** Convert a simple glob pattern to a regex (supports **, *, ?). */
@@ -380,14 +388,12 @@ export function applySuppressions(
 			// Skip invalid suppression entries
 			continue;
 		}
-		try {
-			compiled.push({
-				...s,
-				regex: globToRegex(s.pattern),
-			});
-		} catch {
-			// Malformed glob pattern — skip this suppression entry silently
-		}
+		const regexes = compileGlobMatchers([s.pattern]);
+		if (regexes.length === 0) continue;
+		compiled.push({
+			...s,
+			regex: regexes[0],
+		});
 	}
 
 	const suppressed: Finding[] = [];

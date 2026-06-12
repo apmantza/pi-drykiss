@@ -18,13 +18,9 @@ vi.mock("./config.js", () => ({
 	getModelForLens: vi.fn(),
 }));
 
-vi.mock("./model-selector.js", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("./model-selector.js")>();
-	return {
-		selectModel: vi.fn(),
-		extractScopeHints: actual.extractScopeHints,
-	};
-});
+vi.mock("./model-selector.js", () => ({
+	selectModel: vi.fn(),
+}));
 
 vi.mock("./prompt-builder.js", () => ({
 	resetPrompts: vi.fn().mockResolvedValue(undefined),
