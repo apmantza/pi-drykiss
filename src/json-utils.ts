@@ -7,6 +7,14 @@
  * - Unterminated strings (best-effort)
  * - Markdown code fences around JSON
  */
+function stripJsonMarkdownFences(raw: string): string {
+	return raw.replace(/^```(?:json)?\s*\n?/gm, "").replace(/```\s*$/gm, "");
+}
+
+function fixTrailingCommas(raw: string): string {
+	return raw.replace(/,\s*([}\]])/g, "$1");
+}
+
 export function lenientJsonParse<T = unknown>(raw: string): T {
 	// Try strict parse first (fast path)
 	try {
@@ -18,7 +26,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	let fixed = raw;
 
 	// 1. Remove markdown code fences if present
-	fixed = fixed.replace(/^```(?:json)?\s*\n?/gm, "").replace(/```\s*$/gm, "");
+	fixed = stripJsonMarkdownFences(fixed);
 
 	// 2. Extract JSON object or array if wrapped in text
 	// Use brace/bracket depth tracking to correctly handle nested structures
@@ -70,8 +78,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	}
 
 	// 3. Fix trailing commas (common LLM mistake)
-	// Matches: ,} or ,] (with optional whitespace between)
-	fixed = fixed.replace(/,\s*([}\]])/g, "$1");
+	fixed = fixTrailingCommas(fixed);
 
 	// 4. Fix unescaped newlines inside string values
 	// This regex matches content between quotes and escapes literal newlines
@@ -123,7 +130,7 @@ export function sanitizeJsonString(raw: string): string {
 	let s = raw;
 
 	// Remove markdown code fences if present
-	s = s.replace(/```(?:json)?\s*/gi, "");
+	s = stripJsonMarkdownFences(s);
 
 	// Replace literal newlines/tabs inside strings with escaped versions
 	// Use depth-aware scanner to correctly handle escaped quotes and nested braces
@@ -179,7 +186,7 @@ export function sanitizeJsonString(raw: string): string {
 	s = sanitizeStrings(s);
 
 	// Remove trailing commas before } or ]
-	s = s.replace(/,\s*([}\]])/g, "$1");
+	s = fixTrailingCommas(s);
 
 	return s;
 }
