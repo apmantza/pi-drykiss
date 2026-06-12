@@ -229,6 +229,9 @@ export function isServerError(err: unknown): boolean {
 		"bad gateway",
 		"service unavailable",
 		"gateway timeout",
+		"terminated",
+		"stream terminated",
+		"connection terminated",
 	]);
 }
 

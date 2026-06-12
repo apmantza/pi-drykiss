@@ -261,7 +261,7 @@ export default function (pi: ExtensionAPI): void {
 		const s = job.synthesisResult;
 		const suppressedCount =
 			s?.findings?.filter((f: any) => f._suppressed === true).length ?? 0;
-		const report = s
+		let report = s
 			? formatReviewForDisplay({
 					timestamp: new Date(job.startedAt).toISOString(),
 					files: job.files,
@@ -276,6 +276,17 @@ export default function (pi: ExtensionAPI): void {
 					suppressedCount,
 				})
 			: "Review completed but synthesis produced no output.";
+		const lensErrors = job.lenses
+			.map((lens) => {
+				const state = job.states.get(lens);
+				return state?.status === "error"
+					? `- ${lens}: ${state.errorMessage ?? "lens failed"}`
+					: undefined;
+			})
+			.filter((line): line is string => line !== undefined);
+		if (lensErrors.length > 0) {
+			report += `\n## Review warnings\n${lensErrors.join("\n")}\n`;
+		}
 
 		// Strip session objects (contain non-cloneable async handlers) before sending
 		// Convert Map to plain object for serialization (structured clone fails on Maps)

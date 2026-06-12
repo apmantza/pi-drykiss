@@ -9,6 +9,7 @@ import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
 import {
 	LENS_NAMES,
 	createFallbackSynthesis,
+	parseFindingsArray,
 	parseSynthesis,
 } from "./types.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
@@ -22,6 +23,7 @@ import type { SubagentResult } from "./subagent-runner.js";
 import { findModelByHint } from "./llm.js";
 import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
+import { LOG_PREFIX } from "./constants.js";
 
 /**
  * Load the most recent health score for a given review mode from history.
@@ -93,6 +95,31 @@ function safeProgress(
 		onProgress?.(job);
 	} catch {
 		/* progress callbacks must not affect review execution */
+	}
+}
+
+function applySuccessfulLensOutput(
+	state: LensState,
+	text: string,
+	lens: ReviewLens,
+): void {
+	state.status = "done";
+	const rawOutput = text || "[]";
+	try {
+		const parsed = lenientJsonParse(rawOutput);
+		const findingsSource =
+			typeof parsed === "object" &&
+			parsed !== null &&
+			"findings" in parsed &&
+			Array.isArray((parsed as { findings?: unknown }).findings)
+				? (parsed as { findings: unknown[] }).findings
+				: parsed;
+		const findings = parseFindingsArray(findingsSource, lens);
+		state.rawOutput = JSON.stringify(findings, null, 2);
+		state.findingsCount = findings.length;
+	} catch {
+		state.rawOutput = rawOutput;
+		state.findingsCount = 0;
 	}
 }
 
@@ -271,7 +298,9 @@ export class ReviewManager {
 			}
 
 			// Start draining
-			this.drain(ctx, pi, cwd);
+			this.drain(ctx, pi, cwd).catch((err) => {
+				console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
+			});
 			return id;
 		} catch (err) {
 			// If anything fails after adding the job, clean up so no stale
@@ -313,8 +342,8 @@ export class ReviewManager {
 					 * runningCount bookkeeping. Without the re-drain call here
 					 * the queue would stall as soon as any task rejected. */
 					this.runningCount--;
-					this.drain(ctx, pi, cwd).catch(() => {
-						/* Don't let drain errors crash the loop */
+					this.drain(ctx, pi, cwd).catch((err) => {
+						console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
 					});
 				});
 		}
@@ -404,18 +433,7 @@ export class ReviewManager {
 						state.errorMessage = retryResult.errorMessage;
 						state.rawOutput = `ERROR: ${retryResult.errorMessage}`;
 					} else {
-						state.status = "done";
-						state.rawOutput = retryResult.text || "[]";
-						try {
-							const arr = lenientJsonParse<unknown[]>(
-								(state.rawOutput.match(/\[[\s\S]*\]/)?.[0] ??
-									state.rawOutput) ||
-									"[]",
-							);
-							state.findingsCount = Array.isArray(arr) ? arr.length : 0;
-						} catch {
-							state.findingsCount = 0;
-						}
+						applySuccessfulLensOutput(state, retryResult.text, task.lens);
 					}
 				} else {
 					state.status = "error";
@@ -429,17 +447,7 @@ export class ReviewManager {
 				state.rawOutput = `ERROR: ${result.errorMessage}`;
 			}
 		} else {
-			state.status = "done";
-			state.rawOutput = result.text || "[]";
-			try {
-				const arr = lenientJsonParse<unknown[]>(
-					(state.rawOutput.match(/\[[\s\S]*\]/)?.[0] ?? state.rawOutput) ||
-						"[]",
-				);
-				state.findingsCount = Array.isArray(arr) ? arr.length : 0;
-			} catch {
-				state.findingsCount = 0;
-			}
+			applySuccessfulLensOutput(state, result.text, task.lens);
 		}
 
 		try {
@@ -488,8 +496,8 @@ export class ReviewManager {
 		}
 
 		// Keep draining - catch errors to prevent unhandled rejections
-		this.drain(ctx, pi, cwd).catch(() => {
-			/* Don't let drain errors crash the loop */
+		this.drain(ctx, pi, cwd).catch((err) => {
+			console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
 		});
 	}
 
