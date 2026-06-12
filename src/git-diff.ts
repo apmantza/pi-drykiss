@@ -382,40 +382,57 @@ function extractExports(content: string, ext: string): string[] {
 	return exports;
 }
 
-export async function getProjectIndex(
+async function* projectIndexCandidates(
 	cwd: string,
-	maxFiles = 200,
-): Promise<ProjectIndexEntry[]> {
+	paths?: readonly string[],
+): AsyncGenerator<string> {
+	if (paths && paths.length > 0) {
+		for (const p of paths) yield p;
+		return;
+	}
+
 	const dirsToWalk = await getSourceDirs(cwd);
-
-	const entries: ProjectIndexEntry[] = [];
 	const seenPaths = new Set<string>();
-
 	for (const dir of dirsToWalk) {
 		for await (const filePath of walkDir(cwd, dir)) {
 			if (seenPaths.has(filePath)) continue;
 			seenPaths.add(filePath);
-			if (entries.length >= maxFiles) break;
+			yield filePath;
+		}
+	}
+}
 
-			try {
-				const raw = await readFile(path.join(cwd, filePath), "utf8");
-				const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-				const exports = extractExports(raw, ext);
-				if (exports.length > 0) {
-					entries.push({ path: filePath.replace(/\\/g, "/"), exports });
-				}
-			} catch (err) {
-				// skip unreadable files with a warning so the index is not silently incomplete
-				const code =
-					err instanceof Error
-						? (err as NodeJS.ErrnoException).code
-						: undefined;
-				if (code === "EACCES" || code === "EPERM") {
-					console.warn(`${LOG_PREFIX} Skipping ${filePath}: permission denied`);
-				}
+export async function getProjectIndex(
+	cwd: string,
+	maxFiles = 200,
+	paths?: readonly string[],
+): Promise<ProjectIndexEntry[]> {
+	const entries: ProjectIndexEntry[] = [];
+	const seenPaths = new Set<string>();
+
+	for await (const filePath of projectIndexCandidates(cwd, paths)) {
+		const normalized = filePath.replace(/\\/g, "/");
+		if (seenPaths.has(normalized)) continue;
+		seenPaths.add(normalized);
+		if (entries.length >= maxFiles) break;
+
+		try {
+			const raw = await readFile(path.join(cwd, normalized), "utf8");
+			const ext = normalized.split(".").pop()?.toLowerCase() ?? "";
+			const exports = extractExports(raw, ext);
+			if (exports.length > 0) {
+				entries.push({ path: normalized, exports });
+			}
+		} catch (err) {
+			// skip unreadable files with a warning so the index is not silently incomplete
+			const code =
+				err instanceof Error
+					? (err as NodeJS.ErrnoException).code
+					: undefined;
+			if (code === "EACCES" || code === "EPERM") {
+				console.warn(`${LOG_PREFIX} Skipping ${normalized}: permission denied`);
 			}
 		}
-		if (entries.length >= maxFiles) break;
 	}
 
 	return entries;

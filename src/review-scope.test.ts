@@ -94,7 +94,7 @@ describe("resolveReviewScope", () => {
 			expect.objectContaining({ ref: "main", staged: false, all: false }),
 		);
 		expect(getFileDiff).toHaveBeenCalled();
-		expect(getProjectIndex).toHaveBeenCalledWith("/repo");
+		expect(getProjectIndex).toHaveBeenCalledWith("/repo", 200, undefined);
 	});
 
 	it("resolves PR scopes with PR metadata and fetched contents", async () => {

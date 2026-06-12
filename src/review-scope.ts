@@ -90,7 +90,11 @@ export async function resolveReviewScope(
 		contextMode !== "diff" ? await gatherContents(cwd, files) : undefined;
 	const projectIndex =
 		options.needsProjectIndex && contextMode !== "diff"
-			? await getProjectIndex(cwd)
+			? await getProjectIndex(
+					cwd,
+					200,
+					mode === "full" ? files.map((f) => f.path) : undefined,
+				)
 			: undefined;
 
 	return {
