@@ -363,6 +363,13 @@ describe("getFileContent", () => {
 		expect(result).toBeNull();
 		expect(readFile).not.toHaveBeenCalled();
 	});
+
+	it("allows filenames containing '..' when not a path segment", async () => {
+		vi.mocked(readFile).mockResolvedValue("ok");
+		const result = await getFileContent("/cwd", "src/range..10.ts");
+		expect(result).not.toBeNull();
+		expect(readFile).toHaveBeenCalled();
+	});
 });
 
 describe("getProjectIndex", () => {

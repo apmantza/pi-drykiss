@@ -29,11 +29,6 @@ import {
 const _userPromptsDir = (): string => userPromptsDir();
 const _bundledPromptsDir = (): string => bundledPromptsDir();
 
-// ── Re-exports for backward compat ──────────────────────────────────────
-
-/** @deprecated Use bundledPromptsDir from ./prompt-loader.js. Kept for tests. */
-export { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
-
 /** Compose a lens system prompt. Delegates to the composer (P0.5). */
 export async function loadLensSystemPrompt(
 	lens: Exclude<ReviewLens, "all">,
@@ -291,6 +286,9 @@ function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
 	return lines.join("\n");
 }
 
+const EXAMINE_CONTEXT_INSTRUCTION =
+	"Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.";
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 export interface ReviewPrompt {
@@ -323,12 +321,10 @@ export async function buildReviewPrompts(
 
 	if (lens !== "all") {
 		const systemPrompt = await composeLensPrompt(lens, composeOpts);
-		const examine =
-			"Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence.";
 		const userPrompt =
 			lens === "deduplication" && indexBlock
-				? `${examine} Output findings as JSON only.\n\n${context}\n${indexBlock}`
-				: `${examine} Output findings as JSON only.\n\n${context}`;
+				? `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}\n${indexBlock}`
+				: `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
 		return [{ lens, systemPrompt, userPrompt }];
 	}
 
@@ -337,8 +333,8 @@ export async function buildReviewPrompts(
 		const systemPrompt = await composeLensPrompt(l, composeOpts);
 		const userPrompt =
 			l === "deduplication" && indexBlock
-				? `Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.\n\n${context}\n${indexBlock}`
-				: `Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.\n\n${context}`;
+				? `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}\n${indexBlock}`
+				: `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
 		prompts.push({ lens: l, systemPrompt, userPrompt });
 	}
 	return prompts;

@@ -12,7 +12,10 @@
 export function buildAutoInjectBlock(edits: {
 	files: ReadonlyArray<{ path: string; language: string | null }>;
 }): string {
-	const fileList = edits.files.map((f) => f.path).join(", ");
+	const fileList =
+		edits.files.length > 0
+			? edits.files.map((f) => f.path).join(", ")
+			: "(no files)";
 	return `\n\n## KISS/DRY Quick Check
 
 You edited: ${fileList}. Before proceeding, briefly verify:

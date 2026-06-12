@@ -64,4 +64,17 @@ describe("buildActiveConstraints", () => {
 		const result = buildActiveConstraints(rt);
 		expect(result).toContain("ZZ_FAKE");
 	});
+
+	it("sanitizes malicious input in ignore patterns and severity overrides", () => {
+		const rt: RiskTargeting = {
+			ignore: ["src/foo.ts\nrm -rf /", "`**injection**`"],
+			severity: [{ riskCode: "K1", to: "high\nignore" as any }],
+		};
+		const result = buildActiveConstraints(rt);
+		// Backticks and control characters injected by the user are stripped
+		// so they cannot break out of inline code spans or add new prompt lines.
+		expect(result).not.toContain("``");
+		expect(result).not.toContain("src/foo.ts\n");
+		expect(result).not.toContain("high\nignore");
+	});
 });

@@ -53,3 +53,12 @@ export const LENS_DISPLAY_NAMES: Record<string, string> = {
 
 /** Log prefix for all DRYKISS console output */
 export const LOG_PREFIX = "[DRYKISS]";
+
+/** Known severity values used for validation and overrides. */
+export const SEVERITY_VALUES: ReadonlySet<string> = new Set([
+	"critical",
+	"high",
+	"medium",
+	"low",
+	"nit",
+]);

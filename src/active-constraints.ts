@@ -14,15 +14,7 @@
  */
 import type { RiskTargeting, SeverityOverride } from "./config.js";
 import { RISK_CODES } from "./prompts/risk-codes.js";
-
-/** Known severity values from the SeverityOverride type. */
-const SEVERITY_VALUES: ReadonlySet<string> = new Set<SeverityOverride>([
-	"critical",
-	"high",
-	"medium",
-	"low",
-	"nit",
-]);
+import { SEVERITY_VALUES } from "./constants.js";
 
 /**
  * Return a multi-line string describing the active risk-targeting

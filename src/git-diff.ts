@@ -227,8 +227,9 @@ export async function getFileContent(
 		console.error(`${LOG_PREFIX} Rejected malformed path: ${filePath}`);
 		return null;
 	}
-	// After decoding, reject literal dot-dot and tilde.
-	if (decodedPath.includes("..") || decodedPath.includes("~")) {
+	// After decoding, reject literal dot-dot as a path segment and tilde anywhere.
+	const isDotDotSegment = /(?<=^|[\\/])\.\.(?=[\\/]|$)/.test(decodedPath);
+	if (isDotDotSegment || decodedPath.includes("~")) {
 		console.error(`${LOG_PREFIX} Rejected suspicious path: ${filePath}`);
 		return null;
 	}
@@ -426,9 +427,7 @@ export async function getProjectIndex(
 		} catch (err) {
 			// skip unreadable files with a warning so the index is not silently incomplete
 			const code =
-				err instanceof Error
-					? (err as NodeJS.ErrnoException).code
-					: undefined;
+				err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
 			if (code === "EACCES" || code === "EPERM") {
 				console.warn(`${LOG_PREFIX} Skipping ${normalized}: permission denied`);
 			}

@@ -43,6 +43,8 @@ describe("buildAutoInjectBlock", () => {
 
 	it("handles empty file list gracefully", () => {
 		const result = buildAutoInjectBlock({ files: [] });
+		expect(result).toContain("(no files)");
+		expect(result).not.toContain("You edited: .");
 		expect(result).toContain("KISS");
 		expect(result).toContain("DRY");
 	});

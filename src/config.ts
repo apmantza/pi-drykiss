@@ -5,9 +5,9 @@ import {
 	getProjectBaseDir,
 	getProjectConfigPath,
 	CONFIG_FILE,
+	SEVERITY_VALUES,
 } from "./constants.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
-import type { Finding } from "./types.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
 
@@ -35,12 +35,6 @@ export interface Suppression {
 	 * suppression never expires.
 	 */
 	readonly expiresAt?: string;
-}
-
-/** Marker attached to a suppressed finding (not persisted). */
-export interface SuppressedFinding extends Finding {
-	_suppressed: true;
-	_suppressionRef: string;
 }
 
 /** A risk code as used in config: one of the codes from RISK_CODES. */
@@ -341,13 +335,7 @@ async function loadConfigFile(
 	}
 }
 function isValidSeverity(s: unknown): s is SeverityOverride {
-	return (
-		s === "critical" ||
-		s === "high" ||
-		s === "medium" ||
-		s === "low" ||
-		s === "nit"
-	);
+	return typeof s === "string" && SEVERITY_VALUES.has(s);
 }
 
 function partitionByRiskCode(codes: readonly string[]): {
