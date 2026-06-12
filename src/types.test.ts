@@ -314,7 +314,7 @@ describe("parseSynthesis", () => {
 		expect(result.criticalCount).toBe(1);
 		expect(result.highCount).toBe(1);
 	});
-	
+
 	it("handles JSON wrapped in markdown fences", () => {
 		const raw =
 			'```json\n{"findings": [], "summary": "ok", "verdict": "Approve"}\n```';
@@ -322,26 +322,26 @@ describe("parseSynthesis", () => {
 		expect(result.summary).toBe("ok");
 		expect(result.verdict).toBe("Approve");
 	});
-	
+
 	it("handles JSON with trailing commas", () => {
 		const raw = '{"findings": [], "summary": "ok", "verdict": "Approve",}';
 		const result = parseSynthesis(raw);
 		expect(result.summary).toBe("ok");
 	});
-	
+
 	it("returns fallback for non-JSON input", () => {
 		const result = parseSynthesis("not json at all");
 		expect(result.findings).toEqual([]);
 		expect(result.verdict).toBe("Request changes");
 		expect(result.summary).toContain("non-JSON");
 	});
-	
+
 	it("returns fallback for null/undefined parsed value", () => {
 		const result = parseSynthesis("null");
 		expect(result.findings).toEqual([]);
 		expect(result.verdict).toBe("Request changes");
 	});
-	
+
 	it("counts findings by severity", () => {
 		const raw = JSON.stringify({
 			findings: [
@@ -362,5 +362,4 @@ describe("parseSynthesis", () => {
 		expect(result.lowCount).toBe(1);
 		expect(result.nitCount).toBe(1);
 	});
-	
 });

@@ -159,7 +159,10 @@ export async function loadHistory(): Promise<ReviewHistoryEntry[]> {
 		// ENOENT = file doesn't exist yet, expected on first run
 		// Other errors (corrupt JSON, permissions) should be surfaced
 		if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-			console.warn("DRYKISS: Failed to load health score history:", (e as Error).message);
+			console.warn(
+				"DRYKISS: Failed to load health score history:",
+				(e as Error).message,
+			);
 		}
 		return [];
 	}

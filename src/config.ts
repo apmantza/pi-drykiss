@@ -204,10 +204,11 @@ export async function loadConfig(): Promise<DrykissConfig> {
  * the original loadConfig behaviour).
  */
 /** Default config values used when no config file exists. */
-const DEFAULT_CONFIG: Pick<DrykissConfig, "interactive" | "confirmBeforeRun"> = {
-	interactive: true,
-	confirmBeforeRun: true,
-};
+const DEFAULT_CONFIG: Pick<DrykissConfig, "interactive" | "confirmBeforeRun"> =
+	{
+		interactive: true,
+		confirmBeforeRun: true,
+	};
 
 /**
  * Deduplicate suppression entries by id (preferred) or by riskCode+pattern.

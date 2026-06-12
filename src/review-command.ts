@@ -113,7 +113,9 @@ async function gatherContents(
 			if (result) contents.set(file.path, result);
 		} catch (e) {
 			// Skip unreadable files — warn so users know content was omitted
-			console.warn(`${LOG_PREFIX} Skipping unreadable file ${file.path}: ${(e as Error).message}`);
+			console.warn(
+				`${LOG_PREFIX} Skipping unreadable file ${file.path}: ${(e as Error).message}`,
+			);
 		}
 	}
 	return contents;
@@ -774,7 +776,14 @@ export async function executeDrykissAutoreviewTool(
 			: result;
 
 	return {
-		content: [{ type: "text", text: formatReviewResultForTool(finalResult, { qualityGateThreshold: config.qualityGate }) }],
+		content: [
+			{
+				type: "text",
+				text: formatReviewResultForTool(finalResult, {
+					qualityGateThreshold: config.qualityGate,
+				}),
+			},
+		],
 		details: { result: finalResult },
 	};
 }
