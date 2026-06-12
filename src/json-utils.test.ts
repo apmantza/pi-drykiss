@@ -56,6 +56,14 @@ describe("lenientJsonParse", () => {
 		const input = '{"a": {"b": 1,},}';
 		expect(lenientJsonParse(input)).toEqual({ a: { b: 1 } });
 	});
+
+	it("handles escaped quotes and backslashes inside strings", () => {
+		const input =
+			'[{"file": "src\\\\test\\"quote\\".ts", "detail": "path has \\\\ and \\""}]';
+		const parsed = lenientJsonParse(input);
+		expect(Array.isArray(parsed)).toBe(true);
+		expect((parsed as any[])[0].file).toBe('src\\test"quote".ts');
+	});
 });
 
 describe("sanitizeJsonString", () => {

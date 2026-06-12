@@ -393,7 +393,14 @@ export class ReviewManager {
 
 		state.durationMs = result.durationMs;
 		state.session = result.session;
-		state.logPath = await saveSessionLog(job.id, task.lens, result.session);
+		try {
+			state.logPath = await saveSessionLog(job.id, task.lens, result.session);
+		} catch (err) {
+			console.warn(
+				`${LOG_PREFIX} Failed to save session log for ${task.lens}:`,
+				err instanceof Error ? err.message : String(err),
+			);
+		}
 		if (result.errorMessage) {
 			// Check if this is a model error (quota/auth) that should trigger model selection
 			const isModelErr = isModelError(result.errorMessage);
@@ -423,11 +430,18 @@ export class ReviewManager {
 				);
 				if (retryResult) {
 					state.session = retryResult.session;
-					state.logPath = await saveSessionLog(
-						job.id,
-						task.lens,
-						retryResult.session,
-					);
+					try {
+						state.logPath = await saveSessionLog(
+							job.id,
+							task.lens,
+							retryResult.session,
+						);
+					} catch (err) {
+						console.warn(
+							`${LOG_PREFIX} Failed to save session log for ${task.lens}:`,
+							err instanceof Error ? err.message : String(err),
+						);
+					}
 					if (retryResult.errorMessage) {
 						state.status = "error";
 						state.errorMessage = retryResult.errorMessage;
