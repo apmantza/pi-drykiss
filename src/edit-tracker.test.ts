@@ -99,6 +99,26 @@ describe("createEditTracker", () => {
 		expect(result).toBeNull();
 	});
 
+	it("rejects absolute paths", () => {
+		const tracker = createEditTracker();
+		expect(tracker.trackEdit(WRITE_TOOL, { path: "/etc/passwd" })).toBeNull();
+		expect(tracker.trackEdit(WRITE_TOOL, { path: "C:\\windows\\system.ini" })).toBeNull();
+	});
+
+	it("rejects paths with parent directory traversal", () => {
+		const tracker = createEditTracker();
+		expect(
+			tracker.trackEdit(WRITE_TOOL, { path: "src/../../etc/passwd" }),
+		).toBeNull();
+	});
+
+	it("rejects paths with injected newlines or control characters", () => {
+		const tracker = createEditTracker();
+		expect(
+			tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts\nrm -rf /" }),
+		).toBeNull();
+	});
+
 	it("deduplicates repeated edits to same file", () => {
 		const tracker = createEditTracker();
 		tracker.trackEdit(WRITE_TOOL, { path: "src/foo.ts" });
@@ -148,15 +168,13 @@ describe("createEditTracker", () => {
 		expect(tracker.getLastTurnEdits()).toBeNull();
 	});
 
-	it("sanitizes control characters from extracted paths", () => {
+	it("rejects paths containing control characters", () => {
 		const tracker = createEditTracker();
 		// Embed a newline to simulate injection attempt
 		const result = tracker.trackEdit(WRITE_TOOL, {
 			path: "src/foo.ts\nrm -rf /",
 		});
-		expect(result).not.toBeNull();
-		expect(result!.path).not.toContain("\n");
-		expect(result!.path).toBe("src/foo.tsrm -rf /"); // trimmed, newlines removed
+		expect(result).toBeNull();
 	});
 
 	it("returns null for null result", () => {

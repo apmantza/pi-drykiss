@@ -7,10 +7,33 @@ const TRACKED_TOOLS = new Set(["write", "edit"]);
 
 /**
  * Sanitize a file path string for safe embedding in system prompts.
- * Strips newlines, control characters, and non-printable chars.
+ * Rejects absolute paths, parent-directory traversal, control characters,
+ * and any characters outside the safe set.
  */
-function sanitizePath(s: string): string {
-	return s.replace(/[\n\r\x00-\x1f\x7f]/g, "").trim();
+function sanitizePath(s: string): string | null {
+	// Reject control characters outright rather than silently stripping them,
+	// so injected newlines cannot smuggle additional prompt instructions.
+	if (/[\n\r\x00-\x1f\x7f]/.test(s)) return null;
+
+	const cleaned = s.trim();
+	if (cleaned.length === 0) return null;
+
+	// Reject absolute paths and parent-directory traversal segments.
+	if (
+		cleaned.startsWith("/") ||
+		cleaned.startsWith("\\") ||
+		/^[a-zA-Z]:/.test(cleaned) ||
+		/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(cleaned)
+	) {
+		return null;
+	}
+
+	// Only allow a safe subset of characters commonly found in repo paths.
+	if (!/^[\w\s./\\\-+#@$%&()[\]{}]+$/.test(cleaned)) {
+		return null;
+	}
+
+	return cleaned;
 }
 
 function extractFilePath(...values: unknown[]): string | null {

@@ -87,7 +87,7 @@ export async function getAllSourceFiles(cwd: string): Promise<ChangedFile[]> {
 			seenPaths.add(filePath);
 			files.push({
 				path: filePath.replace(/\\/g, "/"),
-				status: "modified" as const,
+				status: "unchanged" as const,
 				language: detectLanguage(filePath),
 			});
 		}
