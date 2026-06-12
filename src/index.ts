@@ -106,7 +106,6 @@ export default function (pi: ExtensionAPI): void {
 			].join("|");
 			const cooldownMs = auto.cooldownMs ?? 60_000;
 			const now = Date.now();
-			autoreviewEditedFiles.clear();
 			if (
 				cooldownMs > 0 &&
 				signature === lastAutoreviewSignature &&
@@ -126,6 +125,7 @@ export default function (pi: ExtensionAPI): void {
 				if (!ok) return;
 			}
 
+			autoreviewEditedFiles.clear();
 			autoreviewRunning = true;
 			lastAutoreviewSignature = signature;
 			lastAutoreviewAt = now;

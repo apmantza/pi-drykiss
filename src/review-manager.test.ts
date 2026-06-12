@@ -50,16 +50,28 @@ vi.mock("./llm.js", () => ({
 	findModelByHint: vi.fn().mockReturnValue(undefined),
 }));
 
+vi.mock("./config.js", () => ({
+	loadConfig: vi.fn().mockResolvedValue({ autoroute: false }),
+}));
+
 // Import after mocks are set up
 const { ReviewManager } = await import("./review-manager.js");
 
 function makeMinimalCtx() {
+	const models = [
+		{ name: "mock", id: "mock", provider: "mock" },
+		{ name: "fallback", id: "fallback", provider: "mock" },
+	];
 	return {
 		cwd: "/tmp/test",
+		hasUI: true,
 		modelRegistry: {
-			getAvailable: vi
+			getAvailable: vi.fn().mockReturnValue(models),
+			find: vi
 				.fn()
-				.mockReturnValue([{ name: "mock", id: "mock", provider: "mock" }]),
+				.mockImplementation((provider: string, id: string) =>
+					models.find((m) => m.provider === provider && m.id === id),
+				),
 			getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true }),
 		},
 		ui: {
@@ -409,6 +421,77 @@ describe("ReviewManager", () => {
 		// The queued lens (clarity) was the one that proves the re-drain
 		// works — before the fix, it would never have been started.
 		expect(job.states.get("clarity")!.status).toBe("done");
+	});
+
+	it("retries a lens with a selected fallback model after stream termination", async () => {
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		const mockRun = vi.mocked(runLensSubagent);
+		mockRun.mockImplementation(async (...args: unknown[]) => {
+			const model = args[2] as { name: string };
+			const lens = args[5] as string;
+			if (lens === "security" && model.name === "mock-model") {
+				return {
+					lens,
+					text: "",
+					modelName: model.name,
+					durationMs: 1,
+					errorMessage: "terminated",
+					session: { dispose: vi.fn() },
+				} as any;
+			}
+			return {
+				lens,
+				text:
+					lens === "synthesis"
+						? '{"summary":"Clean after retry.","verdict":"Approve","findings":[]}'
+						: "[]",
+				modelName: model.name,
+				durationMs: 1,
+				session: { dispose: vi.fn() },
+			} as any;
+		});
+
+		const ctx = makeMinimalCtx();
+		ctx.ui.custom.mockResolvedValue("mock/fallback");
+		const pi = makeMinimalPi();
+		const files = [
+			{ path: "test.ts", status: "modified" as const, language: "TypeScript" },
+		];
+		const diffs = new Map([["test.ts", "diff"]]);
+
+		const result = await manager.runReview(
+			ctx,
+			pi,
+			"/tmp/test",
+			files,
+			diffs,
+			undefined,
+			undefined,
+			{
+				lenses: ["security"],
+				target: { mode: "local", label: "local" },
+				onProgress: vi.fn(),
+				progressIntervalMs: 0,
+			},
+		);
+
+		expect(result.clean).toBe(true);
+		expect(result.errors).toEqual([]);
+		expect(ctx.ui.custom).toHaveBeenCalled();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(
+			"Switching to fallback for security...",
+			"info",
+		);
+		expect(mockRun).toHaveBeenCalledWith(
+			ctx,
+			"/tmp/test",
+			expect.objectContaining({ id: "fallback" }),
+			expect.any(String),
+			expect.any(String),
+			"security",
+			expect.any(AbortSignal),
+			expect.any(Function),
+		);
 	});
 
 	it("handles runSynthesis error with fallback result", async () => {

@@ -53,15 +53,70 @@ vi.mock("./persist.js", () => ({
 }));
 
 // Import after mocks
-const { parseArgs, handleDrykissCommand, executeDrykissAutoreviewTool } =
-	await import("./review-command.js");
+const {
+	parseArgs,
+	parseFindingsJson,
+	handleDrykissCommand,
+	executeDrykissAutoreviewTool,
+} = await import("./review-command.js");
 
-// We need to test parseFindingsJson which is not exported.
-// Let's test it indirectly through the module or create a wrapper.
-// Actually, let's check if we can access it via the module internals.
+describe("parseFindingsJson", () => {
+	it("parses a valid JSON findings array", () => {
+		const result = parseFindingsJson(
+			'[{"file":"src/a.ts","line":1,"severity":"low","category":"Test","summary":"ok","detail":"d","suggestion":"s"}]',
+			"tests",
+		);
 
-// Since parseFindingsJson is not exported, we'll test it indirectly
-// through the review command handlers or create a test helper.
+		expect(result.parseError).toBeUndefined();
+		expect(result.findings).toHaveLength(1);
+		expect(result.findings[0].file).toBe("src/a.ts");
+	});
+
+	it("parses an array wrapped in markdown fences", () => {
+		const result = parseFindingsJson(
+			'```json\n[{"file":"src/a.ts","severity":"low","category":"Test","summary":"ok","detail":"d","suggestion":"s",}]\n```',
+			"tests",
+		);
+
+		expect(result.parseError).toBeUndefined();
+		expect(result.findings).toHaveLength(1);
+	});
+
+	it("does not truncate arrays when string values contain brackets", () => {
+		const result = parseFindingsJson(
+			'[{"file":"src/test[1].ts","severity":"medium","category":"Parser","summary":"bracket path","detail":"array literal contains ] inside a string","suggestion":"keep parsing"}]',
+			"clarity",
+		);
+
+		expect(result.parseError).toBeUndefined();
+		expect(result.findings).toHaveLength(1);
+		expect(result.findings[0].file).toBe("src/test[1].ts");
+	});
+
+	it("accepts object-shaped model output with a findings array", () => {
+		const result = parseFindingsJson(
+			'{"findings":[{"file":"src/a.ts","severity":"low","category":"Test","summary":"ok","detail":"d","suggestion":"s"}]}',
+			"simplicity",
+		);
+
+		expect(result.parseError).toBeUndefined();
+		expect(result.findings).toHaveLength(1);
+	});
+
+	it("returns a parse error for non-array JSON", () => {
+		const result = parseFindingsJson('{"summary":"not findings"}', "tests");
+
+		expect(result.findings).toEqual([]);
+		expect(result.parseError).toContain("Expected array");
+	});
+
+	it("returns a parse error for invalid JSON", () => {
+		const result = parseFindingsJson("not json", "tests");
+
+		expect(result.findings).toEqual([]);
+		expect(result.parseError).toContain("Failed to parse JSON");
+	});
+});
 
 describe("parseArgs", () => {
 	it("parses --all flag", () => {

@@ -119,6 +119,11 @@ describe("isServerError", () => {
 		);
 	});
 
+	it("detects provider stream termination errors", () => {
+		expect(isServerError(new Error("terminated"))).toBe(true);
+		expect(isServerError(new Error("stream terminated"))).toBe(true);
+	});
+
 	it("returns false for unrelated errors", () => {
 		expect(isServerError(new Error("Rate limit exceeded"))).toBe(false);
 		expect(isServerError(new Error("Invalid API key"))).toBe(false);

@@ -191,51 +191,75 @@ export interface ParseFindingsResult {
 	parseError?: string;
 }
 
-function parseFindingsJson(raw: string, lens: ReviewLens): ParseFindingsResult {
-	// First, try to extract JSON array from the output
-	// Use non-greedy match: lens findings never contain nested arrays,
-	// and greedy match would capture trailing Mermaid graph syntax (e.g. A[a.ts]).
-	const jsonMatch = raw.match(/\[[\s\S]*?\]/);
-	const jsonStr = jsonMatch ? jsonMatch[0] : raw;
+function extractBalancedJson(
+	input: string,
+	open: "[" | "{",
+	close: "]" | "}",
+): string | null {
+	const start = input.indexOf(open);
+	if (start === -1) return null;
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = start; i < input.length; i++) {
+		const ch = input[i];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\" && inString) {
+			escaped = true;
+			continue;
+		}
+		if (ch === '"') {
+			inString = !inString;
+			continue;
+		}
+		if (inString) continue;
+		if (ch === open) depth++;
+		if (ch === close) {
+			depth--;
+			if (depth === 0) return input.slice(start, i + 1);
+		}
+	}
+	return null;
+}
 
-	// Try parsing as-is first
+export function parseFindingsJson(
+	raw: string,
+	lens: ReviewLens,
+): ParseFindingsResult {
 	try {
-		const parsed = JSON.parse(jsonStr);
-		if (!Array.isArray(parsed)) {
+		const jsonText = extractBalancedJson(raw, "[", "]") ?? raw;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(jsonText);
+		} catch {
+			try {
+				parsed = JSON.parse(sanitizeJsonString(jsonText));
+			} catch {
+				parsed = lenientJsonParse(jsonText);
+			}
+		}
+		const findingsSource =
+			typeof parsed === "object" &&
+			parsed !== null &&
+			"findings" in parsed &&
+			Array.isArray((parsed as { findings?: unknown }).findings)
+				? (parsed as { findings: unknown[] }).findings
+				: parsed;
+
+		if (!Array.isArray(findingsSource)) {
 			return {
 				findings: [],
 				parseError: `Expected array, got ${typeof parsed}`,
 			};
 		}
+
 		return {
-			findings: parseFindingsArray(parsed, lens),
+			findings: parseFindingsArray(findingsSource, lens),
 		};
 	} catch {
-		// If initial parse fails, try sanitizing the JSON
-		try {
-			const sanitized = sanitizeJsonString(jsonStr);
-			const parsed = JSON.parse(sanitized);
-			if (Array.isArray(parsed)) {
-				return {
-					findings: parseFindingsArray(parsed, lens),
-				};
-			}
-		} catch (sanitizationErr) {
-			// Sanitization didn't help, fall through to error
-		}
-
-		// Both attempts failed — try lenient parse as last resort before giving up
-		try {
-			const lenient = lenientJsonParse<unknown[]>(jsonStr);
-			if (Array.isArray(lenient)) {
-				return {
-					findings: parseFindingsArray(lenient, lens),
-				};
-			}
-		} catch {
-			/* lenient parse also failed — fall through to error */
-		}
-
 		const msg = `Failed to parse JSON for ${lens} lens. The LLM output may contain unescaped characters.`;
 		return { findings: [], parseError: msg };
 	}
