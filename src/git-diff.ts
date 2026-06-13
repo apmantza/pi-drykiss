@@ -235,6 +235,19 @@ export async function getFileContent(
 		// original path and let the resolved-path guard handle any traversal.
 		decodedPath = filePath;
 	}
+	// Reject control characters and Windows absolute paths regardless of host
+	// OS. This keeps cross-platform tests deterministic and blocks paths that
+	// could bypass OS-level validation (e.g., NUL truncation, UNC shares).
+	if (/[\x00-\x1f\x7f]/.test(decodedPath)) {
+		console.error(
+			`${LOG_PREFIX} Rejected path with control characters: ${filePath}`,
+		);
+		return null;
+	}
+	if (/^\\|^[A-Za-z]:/.test(decodedPath)) {
+		console.error(`${LOG_PREFIX} Rejected Windows absolute path: ${filePath}`);
+		return null;
+	}
 	// Resolve symlinks and verify the real path stays within cwd. This
 	// prevents symlink attacks where a repo path points outside the project.
 	let resolved: string;
