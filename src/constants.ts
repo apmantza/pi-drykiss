@@ -62,3 +62,21 @@ export const SEVERITY_VALUES: ReadonlySet<string> = new Set([
 	"low",
 	"nit",
 ]);
+
+export function getNodeErrorCode(err: unknown): string | undefined {
+	return err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+}
+
+/**
+ * Validate that a user-supplied git ref/commit is safe to pass as a
+ * positional argument. Rejects values that start with `-` (which would
+ * be interpreted as git options) or contain control characters.
+ */
+export function assertSafeGitRef(ref: string): void {
+	if (ref.startsWith("-")) {
+		throw new Error(`Invalid git ref: cannot start with '-': ${ref}`);
+	}
+	if (/[\x00-\x1f\x7f]/.test(ref)) {
+		throw new Error(`Invalid git ref: contains control characters`);
+	}
+}

@@ -495,4 +495,44 @@ describe("prompt template management", () => {
 			});
 		});
 	});
+
+	describe("commands context", () => {
+		it("includes configured commands in the user prompt", async () => {
+			vi.mocked(composeLensPrompt).mockResolvedValue("system");
+			const result = await buildReviewPrompts(
+				"/cwd",
+				mockFiles,
+				mockDiffs,
+				"simplicity",
+				{
+					commands: { test: "npm test", lint: "npm run lint" },
+				},
+			);
+			expect(result[0].userPrompt).toContain("Test command: `npm test`");
+			expect(result[0].userPrompt).toContain("Lint command: `npm run lint`");
+		});
+
+		it("omits the commands block when no commands are provided", async () => {
+			vi.mocked(composeLensPrompt).mockResolvedValue("system");
+			const result = await buildReviewPrompts(
+				"/cwd",
+				mockFiles,
+				mockDiffs,
+				"simplicity",
+			);
+			expect(result[0].userPrompt).not.toContain("Configured Commands");
+		});
+
+		it("omits the commands block when commands object is empty", async () => {
+			vi.mocked(composeLensPrompt).mockResolvedValue("system");
+			const result = await buildReviewPrompts(
+				"/cwd",
+				mockFiles,
+				mockDiffs,
+				"simplicity",
+				{ commands: {} },
+			);
+			expect(result[0].userPrompt).not.toContain("Configured Commands");
+		});
+	});
 });

@@ -1,4 +1,11 @@
-import { lenientJsonParse } from "./json-utils.js";
+import { lenientJsonParse, isPlainObject } from "./json-utils.js";
+
+const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "nit"]);
+
+function normalizeSeverity(raw: unknown): Severity {
+	const s = typeof raw === "string" ? raw : "medium";
+	return VALID_SEVERITIES.has(s) ? (s as Severity) : "medium";
+}
 
 export interface ChangedFile {
 	readonly path: string;
@@ -78,6 +85,20 @@ export interface Finding {
 	 */
 	readonly riskCode?: string;
 	/**
+	 * Recommended action for the author.
+	 *   - fix: apply the suggested change (high-confidence, concrete).
+	 *   - discuss: challenge the author's intent or needs human judgment.
+	 *   - ignore: informational / nit, no action required.
+	 */
+	readonly action?: "fix" | "discuss" | "ignore";
+	/**
+	 * Aggregate risk level of the finding, independent of severity.
+	 *   - low: localized, easy to verify, limited blast radius.
+	 *   - medium: could affect correctness or maintainability if missed.
+	 *   - high: security, reliability, or architectural risk.
+	 */
+	readonly riskLevel?: "low" | "medium" | "high";
+	/**
 	 * Internal marker set by `applySuppressions` (Phase 3). Not part of
 	 * the LLM output contract — added post-hoc by the suppression engine.
 	 */
@@ -107,6 +128,43 @@ export interface SynthesisResult {
 	 * this when the project index is available.
 	 */
 	readonly mermaidGraph?: string;
+	/**
+	 * Files that played a role in the review (read, modified, referenced).
+	 * Optional; populated when the synthesis can provide a clean index.
+	 */
+	readonly files?: readonly ReviewedFile[];
+	/**
+	 * Follow-up actions the author should take after addressing findings.
+	 * Optional; populated when the review surfaces deferred work.
+	 */
+	readonly nextSteps?: readonly string[];
+	/**
+	 * Work that was intentionally not completed in this review and why.
+	 * Optional; populated when a lens or verification step could not finish.
+	 */
+	readonly notDone?: readonly NotDoneItem[];
+	/**
+	 * Extension point for lens-specific structured output.
+	 * Optional; e.g. { mermaidGraph: "..." } from the architecture lens.
+	 */
+	readonly extensions?: Record<string, unknown>;
+}
+
+/** A file referenced or inspected during the review. */
+export interface ReviewedFile {
+	readonly path: string;
+	readonly role?: "read" | "modified" | "referenced";
+	readonly description?: string;
+	readonly snippet?: string;
+	readonly ranges?: readonly { start: number; end: number; label?: string }[];
+}
+
+/** An item of unfinished work surfaced by the review. */
+export interface NotDoneItem {
+	readonly item: string;
+	readonly reason: string;
+	readonly blocker?: string;
+	readonly nextStep?: string;
 }
 
 /** Brooks-lint severity tiers for health-score computation. */
@@ -133,6 +191,8 @@ export function severityToTier(severity: Severity): SeverityTier {
 			return "warning";
 		case "low":
 		case "nit":
+			return "suggestion";
+		default:
 			return "suggestion";
 	}
 }
@@ -198,12 +258,14 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			confidence: undefined,
 			lens,
 			riskCode: undefined,
+			action: undefined,
+			riskLevel: undefined,
 		};
 	}
 	return {
 		file: String(raw.file ?? "unknown"),
 		line: typeof raw.line === "number" ? raw.line : undefined,
-		severity: String(raw.severity ?? "medium") as Severity,
+		severity: normalizeSeverity(raw.severity),
 		category: String(raw.category ?? ""),
 		summary: String(raw.summary ?? ""),
 		detail: String(raw.detail ?? raw.summary ?? ""),
@@ -218,6 +280,8 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			: undefined,
 		lens,
 		riskCode: raw.riskCode ? String(raw.riskCode) : undefined,
+		action: isValidAction(raw.action) ? raw.action : undefined,
+		riskLevel: isValidRiskLevel(raw.riskLevel) ? raw.riskLevel : undefined,
 	};
 }
 
@@ -228,6 +292,14 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 export function parseFindingsArray(raw: unknown, lens?: ReviewLens): Finding[] {
 	if (!Array.isArray(raw)) return [];
 	return raw.map((f) => mapRawToFinding(f, lens));
+}
+
+function isValidAction(value: unknown): value is Finding["action"] {
+	return value === "fix" || value === "discuss" || value === "ignore";
+}
+
+function isValidRiskLevel(value: unknown): value is Finding["riskLevel"] {
+	return value === "low" || value === "medium" || value === "high";
 }
 
 /** Create a fallback SynthesisResult for error cases. */
@@ -278,10 +350,34 @@ export function parseSynthesis(raw: string): SynthesisResult {
 			...(typeof parsed.mermaidGraph === "string" && parsed.mermaidGraph.trim()
 				? { mermaidGraph: String(parsed.mermaidGraph).trim() }
 				: {}),
+			...(Array.isArray(parsed.files)
+				? { files: parsed.files.filter(isReviewedFile) }
+				: {}),
+			...(Array.isArray(parsed.nextSteps)
+				? { nextSteps: parsed.nextSteps.filter((s) => typeof s === "string") }
+				: {}),
+			...(Array.isArray(parsed.notDone)
+				? { notDone: parsed.notDone.filter(isNotDoneItem) }
+				: {}),
+			...(isPlainObject(parsed.extensions)
+				? { extensions: parsed.extensions }
+				: {}),
 		};
 	} catch {
 		return createFallbackSynthesis(
 			"Synthesis returned non-JSON output. Raw response available in logs.",
 		);
 	}
+}
+
+function isReviewedFile(value: unknown): value is ReviewedFile {
+	return isPlainObject(value) && typeof value.path === "string";
+}
+
+function isNotDoneItem(value: unknown): value is NotDoneItem {
+	return (
+		isPlainObject(value) &&
+		typeof value.item === "string" &&
+		typeof value.reason === "string"
+	);
 }

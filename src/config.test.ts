@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, realpath, open } from "node:fs/promises";
 import {
 	loadConfig,
 	saveConfig,
@@ -10,15 +10,29 @@ import {
 	saveProjectConfig,
 } from "./config.js";
 
-vi.mock("node:fs/promises", () => ({
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	mkdir: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("node:fs/promises", () => {
+	const mockFileHandle = {
+		stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
+		close: vi.fn().mockResolvedValue(undefined),
+	};
+	return {
+		readFile: vi.fn(),
+		writeFile: vi.fn(),
+		mkdir: vi.fn().mockResolvedValue(undefined),
+		realpath: vi.fn(),
+		open: vi.fn().mockResolvedValue(mockFileHandle),
+	};
+});
 
 beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(mkdir).mockResolvedValue(undefined);
+	vi.mocked(realpath).mockImplementation((p) => Promise.resolve(p as string));
+	const handle = {
+		stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
+		close: vi.fn().mockResolvedValue(undefined),
+	};
+	vi.mocked(open).mockResolvedValue(handle as any);
 });
 
 describe("loadConfig", () => {

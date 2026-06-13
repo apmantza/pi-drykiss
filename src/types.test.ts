@@ -61,7 +61,7 @@ describe("mapRawToFinding", () => {
 
 	it("handles invalid severity with fallback to medium", () => {
 		const result = mapRawToFinding({ severity: "unknown" });
-		expect(result.severity).toBe("unknown");
+		expect(result.severity).toBe("medium");
 	});
 
 	it("passes lens parameter through", () => {
@@ -105,6 +105,26 @@ describe("mapRawToFinding — consequence/source/riskCode", () => {
 	it("defaults riskCode to undefined when not provided", () => {
 		const result = mapRawToFinding({ file: "src/a.ts" });
 		expect(result.riskCode).toBeUndefined();
+	});
+
+	it("passes through valid action and riskLevel", () => {
+		const result = mapRawToFinding({
+			file: "src/a.ts",
+			action: "discuss",
+			riskLevel: "high",
+		});
+		expect(result.action).toBe("discuss");
+		expect(result.riskLevel).toBe("high");
+	});
+
+	it("ignores invalid action and riskLevel values", () => {
+		const result = mapRawToFinding({
+			file: "src/a.ts",
+			action: "maybe",
+			riskLevel: "critical",
+		});
+		expect(result.action).toBeUndefined();
+		expect(result.riskLevel).toBeUndefined();
 	});
 });
 
@@ -361,5 +381,23 @@ describe("parseSynthesis", () => {
 		expect(result.mediumCount).toBe(1);
 		expect(result.lowCount).toBe(1);
 		expect(result.nitCount).toBe(1);
+	});
+
+	it("parses optional synthesis fields", () => {
+		const raw = JSON.stringify({
+			findings: [],
+			summary: "ok",
+			verdict: "Approve",
+			files: [{ path: "src/foo.ts", role: "read", description: "reviewed" }],
+			nextSteps: ["add integration test"],
+			notDone: [{ item: "bench", reason: "out of scope" }],
+			extensions: { mermaidGraph: "graph TD" },
+		});
+		const result = parseSynthesis(raw);
+		expect(result.files).toHaveLength(1);
+		expect(result.files?.[0].path).toBe("src/foo.ts");
+		expect(result.nextSteps).toEqual(["add integration test"]);
+		expect(result.notDone).toHaveLength(1);
+		expect(result.extensions).toEqual({ mermaidGraph: "graph TD" });
 	});
 });

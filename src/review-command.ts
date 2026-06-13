@@ -4,15 +4,10 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import {
-	getChangedFiles,
-	getFileDiff,
-	getFileContent,
-	getProjectIndex,
-} from "./git-diff.js";
+
 import { buildReviewPrompts, ensureDefaultPrompts } from "./prompt-builder.js";
 
-import { loadConfig, loadEffectiveConfig } from "./config.js";
+import { type loadConfig, loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
 import { findModelByHint } from "./llm.js";
 import type {
@@ -21,8 +16,8 @@ import type {
 	ChangedFile,
 	Finding,
 } from "./types.js";
-import { LENS_NAMES, parseFindingsArray } from "./types.js";
-import { lenientJsonParse, sanitizeJsonString } from "./json-utils.js";
+import { LENS_NAMES } from "./types.js";
+import { parseFindingsJson } from "./parse-findings.js";
 import { isPrReference, type PrInfo } from "./github-pr.js";
 import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
@@ -77,50 +72,6 @@ export function parseArgs(args: string): ParsedArgs {
 	return { files, ref, staged, all, model, pr };
 }
 
-async function gatherDiffs(
-	pi: ExtensionAPI,
-	cwd: string,
-	files: ChangedFile[],
-	options: ReviewOptions,
-): Promise<{ diffs: Map<string, string>; failedFiles: string[] }> {
-	const diffs = new Map<string, string>();
-	const failedFiles: string[] = [];
-	for (const file of files) {
-		try {
-			const diff = await getFileDiff(pi, cwd, file.path, options);
-			diffs.set(file.path, diff);
-		} catch {
-			diffs.set(file.path, "(diff unavailable)");
-			failedFiles.push(file.path);
-		}
-	}
-	return { diffs, failedFiles };
-}
-
-async function gatherContents(
-	cwd: string,
-	files: ChangedFile[],
-): Promise<
-	Map<string, { content: string; lineCount: number; truncated: boolean }>
-> {
-	const contents = new Map<
-		string,
-		{ content: string; lineCount: number; truncated: boolean }
-	>();
-	for (const file of files) {
-		try {
-			const result = await getFileContent(cwd, file.path);
-			if (result) contents.set(file.path, result);
-		} catch (e) {
-			// Skip unreadable files — warn so users know content was omitted
-			console.warn(
-				`${LOG_PREFIX} Skipping unreadable file ${file.path}: ${(e as Error).message}`,
-			);
-		}
-	}
-	return contents;
-}
-
 /**
  * Common review setup: parses args, gathers files, diffs, contents, and project index.
  * Shared between handleDrykissCommand and handleSingleLensCommand.
@@ -143,7 +94,10 @@ async function prepareReview(
 } | null> {
 	const options = parseArgs(args);
 	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig();
+	const { config, warnings } = await loadEffectiveConfig(ctx.cwd);
+	for (const warning of warnings) {
+		console.warn(`${LOG_PREFIX} ${warning}`);
+	}
 	const activeConstraints = buildActiveConstraints(config.riskTargeting);
 	const rawPr = options.pr as (PrInfo & { _raw: string }) | undefined;
 	const contextMode = options.all ? "full" : (config.contextMode ?? "full");
@@ -155,7 +109,11 @@ async function prepareReview(
 			...options,
 			pr: rawPr?._raw,
 		},
-		{ contextMode, needsProjectIndex },
+		{
+			contextMode,
+			needsProjectIndex,
+			ignorePatterns: config.ignorePatterns,
+		},
 	);
 	const { files, diffs, contents, projectIndex } = scope;
 
@@ -186,85 +144,6 @@ async function prepareReview(
 	};
 }
 
-export interface ParseFindingsResult {
-	findings: Finding[];
-	parseError?: string;
-}
-
-function extractBalancedJson(
-	input: string,
-	open: "[" | "{",
-	close: "]" | "}",
-): string | null {
-	const start = input.indexOf(open);
-	if (start === -1) return null;
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	for (let i = start; i < input.length; i++) {
-		const ch = input[i];
-		if (escaped) {
-			escaped = false;
-			continue;
-		}
-		if (ch === "\\" && inString) {
-			escaped = true;
-			continue;
-		}
-		if (ch === '"') {
-			inString = !inString;
-			continue;
-		}
-		if (inString) continue;
-		if (ch === open) depth++;
-		if (ch === close) {
-			depth--;
-			if (depth === 0) return input.slice(start, i + 1);
-		}
-	}
-	return null;
-}
-
-export function parseFindingsJson(
-	raw: string,
-	lens: ReviewLens,
-): ParseFindingsResult {
-	try {
-		const jsonText = extractBalancedJson(raw, "[", "]") ?? raw;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(jsonText);
-		} catch {
-			try {
-				parsed = JSON.parse(sanitizeJsonString(jsonText));
-			} catch {
-				parsed = lenientJsonParse(jsonText);
-			}
-		}
-		const findingsSource =
-			typeof parsed === "object" &&
-			parsed !== null &&
-			"findings" in parsed &&
-			Array.isArray((parsed as { findings?: unknown }).findings)
-				? (parsed as { findings: unknown[] }).findings
-				: parsed;
-
-		if (!Array.isArray(findingsSource)) {
-			return {
-				findings: [],
-				parseError: `Expected array, got ${typeof parsed}`,
-			};
-		}
-
-		return {
-			findings: parseFindingsArray(findingsSource, lens),
-		};
-	} catch {
-		const msg = `Failed to parse JSON for ${lens} lens. The LLM output may contain unescaped characters.`;
-		return { findings: [], parseError: msg };
-	}
-}
-
 async function runLensReview(
 	ctx: ExtensionContext,
 	cwd: string,
@@ -278,6 +157,7 @@ async function runLensReview(
 			{ content: string; lineCount: number; truncated: boolean }
 		>;
 		projectIndex?: import("./git-diff.js").ProjectIndexEntry[];
+		commands?: { test?: string; lint?: string };
 	} = {},
 ): Promise<{
 	lens: ReviewLens;
@@ -288,6 +168,7 @@ async function runLensReview(
 	const prompts = await buildReviewPrompts(cwd, files, diffs, lens, {
 		contents: options.contents,
 		projectIndex: options.projectIndex,
+		commands: options.commands,
 	});
 	const prompt = prompts[0];
 	if (!prompt) return { lens, findings: [], rawOutput: "", modelName: "none" };
@@ -389,7 +270,7 @@ export async function handleDrykissCommand(
 			diffs,
 			contents,
 			projectIndex,
-			{ ...options, activeConstraints },
+			{ ...options, activeConstraints, commands: config.commands },
 		);
 		ctx.ui.notify(
 			`DRYKISS review **${jobId}** started in background. Watch the widget above the editor for live progress. Results will appear here when complete.`,
@@ -419,8 +300,15 @@ async function handleSingleLensCommand(
 	);
 	if (!prepared) return;
 
-	const { options, files, diffs, contents, projectIndex, activeConstraints } =
-		prepared;
+	const {
+		options,
+		files,
+		diffs,
+		contents,
+		projectIndex,
+		config,
+		activeConstraints,
+	} = prepared;
 
 	try {
 		const jobId = await manager.startReview(
@@ -431,7 +319,12 @@ async function handleSingleLensCommand(
 			diffs,
 			contents,
 			projectIndex,
-			{ model: options.model, lenses: [lens], activeConstraints },
+			{
+				model: options.model,
+				lenses: [lens],
+				activeConstraints,
+				commands: config.commands,
+			},
 		);
 		ctx.ui.notify(
 			`${label} **${jobId}** started in background. Watch the widget for live progress.`,
@@ -705,10 +598,15 @@ export async function executeDrykissAutoreviewTool(
 	details: { result: ReviewResult };
 }> {
 	await ensureDefaultPrompts(ctx.cwd);
-	const config = await loadConfig();
-	const { config: effectiveConfig } = await loadEffectiveConfig(ctx.cwd);
+	const { config: effectiveConfig, warnings } = await loadEffectiveConfig(
+		ctx.cwd,
+	);
+	for (const warning of warnings) {
+		console.warn(`${LOG_PREFIX} ${warning}`);
+	}
 	const suppressions = effectiveConfig.suppressions ?? [];
-	const contextMode = params.contextMode ?? config.contextMode ?? "full";
+	const contextMode =
+		params.contextMode ?? effectiveConfig.contextMode ?? "full";
 	const lenses = normalizeAutoreviewLenses(params.lenses);
 	const scope = await resolveReviewScope(
 		pi,
@@ -724,6 +622,7 @@ export async function executeDrykissAutoreviewTool(
 			contextMode,
 			needsProjectIndex:
 				lenses.includes("deduplication") || lenses.includes("architecture"),
+			ignorePatterns: effectiveConfig.ignorePatterns,
 		},
 	);
 
@@ -762,8 +661,9 @@ export async function executeDrykissAutoreviewTool(
 				label: scope.label,
 				metadata: scope.metadata,
 			},
-			severityOverrides: config.riskTargeting?.severity,
+			severityOverrides: effectiveConfig.riskTargeting?.severity,
 			suppressions,
+			commands: effectiveConfig.commands,
 			onProgress: onUpdate
 				? (job) =>
 						onUpdate({
@@ -775,7 +675,7 @@ export async function executeDrykissAutoreviewTool(
 	);
 
 	// Apply ignore filter (Phase 2)
-	const ignorePatterns = config.riskTargeting?.ignore;
+	const ignorePatterns = effectiveConfig.riskTargeting?.ignore;
 	const filtered = ignorePatterns
 		? filterIgnored(result.findings, ignorePatterns)
 		: undefined;
@@ -810,7 +710,7 @@ export async function executeDrykissAutoreviewTool(
 			{
 				type: "text",
 				text: formatReviewResultForTool(finalResult, {
-					qualityGateThreshold: config.qualityGate,
+					qualityGateThreshold: effectiveConfig.qualityGate,
 				}),
 			},
 		],
@@ -928,43 +828,26 @@ export async function executeDrykissReviewTool(
 	content: Array<{ type: "text"; text: string }>;
 	details: { findings: Finding[] };
 }> {
-	const options: ReviewOptions = {
-		files: params.files,
-		ref: "HEAD",
-		staged: false,
-		all: false,
-	};
-
-	const changedFiles = await getChangedFiles(pi, ctx.cwd, options);
-	const filesToReview =
-		changedFiles.length > 0
-			? changedFiles
-			: params.files.map((p) => ({
-					path: p,
-					status: "modified" as const,
-					language: null,
-				}));
-
 	await ensureDefaultPrompts(ctx.cwd);
-	const { diffs, failedFiles } = await gatherDiffs(
+	const { config, warnings } = await loadEffectiveConfig(ctx.cwd);
+	for (const warning of warnings) {
+		console.warn(`${LOG_PREFIX} ${warning}`);
+	}
+	const contextMode = config.contextMode ?? "full";
+	const needsProjectIndex =
+		params.lens === "deduplication" || params.lens === "architecture";
+
+	const scope = await resolveReviewScope(
 		pi,
 		ctx.cwd,
-		filesToReview,
-		options,
+		{ mode: "files", files: params.files },
+		{
+			contextMode,
+			needsProjectIndex,
+			ignorePatterns: config.ignorePatterns,
+		},
 	);
-	if (failedFiles.length > 0) {
-		/* Diffs unavailable — continuing with placeholders */
-	}
-	const config = await loadConfig();
-	const contents =
-		config.contextMode !== "diff"
-			? await gatherContents(ctx.cwd, filesToReview)
-			: undefined;
-	const projectIndex =
-		config.contextMode !== "diff" &&
-		(params.lens === "deduplication" || params.lens === "architecture")
-			? await getProjectIndex(ctx.cwd)
-			: undefined;
+	const { files: filesToReview, diffs, contents, projectIndex } = scope;
 
 	const review = await runLensReview(
 		ctx,
@@ -976,6 +859,7 @@ export async function executeDrykissReviewTool(
 			modelHint: params.model,
 			contents,
 			projectIndex,
+			commands: config.commands,
 		},
 	);
 

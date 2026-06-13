@@ -53,12 +53,9 @@ vi.mock("./persist.js", () => ({
 }));
 
 // Import after mocks
-const {
-	parseArgs,
-	parseFindingsJson,
-	handleDrykissCommand,
-	executeDrykissAutoreviewTool,
-} = await import("./review-command.js");
+const { parseArgs, handleDrykissCommand, executeDrykissAutoreviewTool } =
+	await import("./review-command.js");
+const { parseFindingsJson } = await import("./parse-findings.js");
 
 describe("parseFindingsJson", () => {
 	it("parses a valid JSON findings array", () => {

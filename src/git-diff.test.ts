@@ -7,13 +7,14 @@ import {
 	getAllSourceFiles,
 } from "./git-diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFile, readdir, stat, lstat } from "node:fs/promises";
+import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({
 	readFile: vi.fn(),
 	readdir: vi.fn(),
 	stat: vi.fn(),
 	lstat: vi.fn(),
+	realpath: vi.fn(),
 }));
 
 function mockPi(stdout: string): ExtensionAPI {
@@ -44,6 +45,79 @@ describe("getChangedFiles", () => {
 			status: "modified",
 			language: "Python",
 		});
+	});
+
+	it("filters explicit files matching ignorePatterns", async () => {
+		const pi = mockPi("");
+		const files = await getChangedFiles(
+			pi,
+			"/cwd",
+			{
+				files: ["src/foo.ts", "src/foo.generated.ts", "lib/bar.py"],
+				ref: "HEAD",
+				staged: false,
+				all: false,
+			},
+			["**/*.generated.ts"],
+		);
+		expect(files.map((f) => f.path)).toEqual(["src/foo.ts", "lib/bar.py"]);
+	});
+
+	it("rejects refs that look like git options", async () => {
+		const pi = mockPi("");
+
+		await expect(
+			getChangedFiles(pi, "/cwd", {
+				files: [],
+				ref: "--output=/tmp/evil",
+				staged: false,
+				all: false,
+			}),
+		).rejects.toThrow("Invalid git ref");
+
+		expect(pi.exec).not.toHaveBeenCalled();
+	});
+
+	it("filters git diff output matching ignorePatterns", async () => {
+		const pi = mockPi("M\tsrc/index.ts\nA\tsrc/index.generated.ts\nD\told.js");
+		const files = await getChangedFiles(
+			pi,
+			"/cwd",
+			{
+				files: [],
+				ref: "HEAD",
+				staged: false,
+				all: false,
+			},
+			["**/*.generated.ts"],
+		);
+		expect(files.map((f) => f.path)).toEqual(["src/index.ts", "old.js"]);
+	});
+
+	it("filters all-source files matching ignorePatterns", async () => {
+		vi.mocked(readdir).mockResolvedValue([
+			{
+				name: "foo.ts",
+				isDirectory: () => false,
+				isFile: () => true,
+				isSymbolicLink: () => false,
+			},
+			{
+				name: "foo.generated.ts",
+				isDirectory: () => false,
+				isFile: () => true,
+				isSymbolicLink: () => false,
+			},
+		] as any);
+		vi.mocked(stat).mockResolvedValue({ isDirectory: () => true } as any);
+		const files = await getChangedFiles(
+			mockPi(""),
+			"/cwd",
+			{ files: [], ref: "HEAD", staged: false, all: true },
+			["**/*.generated.ts"],
+		);
+		expect(files.some((f) => f.path.endsWith(".generated.ts"))).toBe(false);
+		expect(files.some((f) => f.path.endsWith("foo.ts"))).toBe(true);
 	});
 
 	it("parses git diff --name-status output", async () => {
@@ -280,6 +354,7 @@ describe("getFileContent", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
 		vi.mocked(lstat).mockResolvedValue({ isFile: () => true } as any);
+		vi.mocked(realpath).mockImplementation((p) => Promise.resolve(p as string));
 	});
 
 	it("returns full content for small files", async () => {
@@ -349,10 +424,11 @@ describe("getFileContent", () => {
 		expect(readFile).not.toHaveBeenCalled();
 	});
 
-	it("returns null for path with tilde expansion", async () => {
+	it("does not expand tilde in path", async () => {
+		vi.mocked(readFile).mockResolvedValue("ok");
 		const result = await getFileContent("/cwd", "~/secret.txt");
-		expect(result).toBeNull();
-		expect(readFile).not.toHaveBeenCalled();
+		expect(result).not.toBeNull();
+		expect(readFile).toHaveBeenCalled();
 	});
 
 	it("returns null for nested parent directory traversal", async () => {
@@ -367,6 +443,32 @@ describe("getFileContent", () => {
 	it("allows filenames containing '..' when not a path segment", async () => {
 		vi.mocked(readFile).mockResolvedValue("ok");
 		const result = await getFileContent("/cwd", "src/range..10.ts");
+		expect(result).not.toBeNull();
+		expect(readFile).toHaveBeenCalled();
+	});
+
+	it("returns null for non-regular files (symlinks, directories)", async () => {
+		vi.mocked(lstat).mockResolvedValue({
+			isFile: () => false,
+			isSymbolicLink: () => true,
+		} as any);
+		const result = await getFileContent("/cwd", "src/symlink.ts");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null when realpath resolves outside cwd", async () => {
+		vi.mocked(realpath).mockImplementation(() =>
+			Promise.resolve("/etc/passwd"),
+		);
+		const result = await getFileContent("/cwd", "src/link");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("falls back to original path when filename contains a literal percent", async () => {
+		vi.mocked(readFile).mockResolvedValue("ok");
+		const result = await getFileContent("/cwd", "src/file%name.ts");
 		expect(result).not.toBeNull();
 		expect(readFile).toHaveBeenCalled();
 	});

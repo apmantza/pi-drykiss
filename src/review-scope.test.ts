@@ -92,9 +92,15 @@ describe("resolveReviewScope", () => {
 			pi,
 			"/repo",
 			expect.objectContaining({ ref: "main", staged: false, all: false }),
+			undefined,
 		);
 		expect(getFileDiff).toHaveBeenCalled();
-		expect(getProjectIndex).toHaveBeenCalledWith("/repo", 200, undefined);
+		expect(getProjectIndex).toHaveBeenCalledWith(
+			"/repo",
+			200,
+			undefined,
+			undefined,
+		);
 	});
 
 	it("resolves PR scopes with PR metadata and fetched contents", async () => {
@@ -139,6 +145,21 @@ describe("resolveReviewScope", () => {
 		]);
 	});
 
+	it("rejects commit refs that look like git options", async () => {
+		const pi = mockPi("M\tsrc/commit.ts\n");
+
+		await expect(
+			resolveReviewScope(
+				pi,
+				"/repo",
+				{ mode: "commit", commit: "--output=/tmp/evil" },
+				{ contextMode: "diff" },
+			),
+		).rejects.toThrow("Invalid git ref");
+
+		expect(pi.exec).not.toHaveBeenCalled();
+	});
+
 	it("resolves local scope by default when no request params", async () => {
 		const scope = await resolveReviewScope(
 			mockPi(),
@@ -168,6 +189,7 @@ describe("resolveReviewScope", () => {
 			expect.anything(),
 			expect.anything(),
 			expect.objectContaining({ staged: true }),
+			undefined,
 		);
 		// contextMode=diff so contents should be undefined
 		expect(scope.contents).toBeUndefined();
@@ -195,6 +217,6 @@ describe("resolveReviewScope", () => {
 		);
 		expect(scope.mode).toBe("full");
 		expect(scope.label).toBe("full codebase");
-		expect(getAllSourceFiles).toHaveBeenCalledWith("/repo");
+		expect(getAllSourceFiles).toHaveBeenCalledWith("/repo", undefined);
 	});
 });

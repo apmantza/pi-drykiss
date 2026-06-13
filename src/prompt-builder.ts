@@ -17,6 +17,7 @@ import type { ChangedFile, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
+import { getNodeErrorCode } from "./constants.js";
 import {
 	composeLensPrompt,
 	composeSynthesisPrompt,
@@ -100,7 +101,7 @@ const BUNDLED_SHARED_FILES = [
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "1"; // bump to force re-seed
+const CURRENT_SEED_VERSION = "2"; // bump to force re-seed
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);
@@ -111,10 +112,7 @@ async function isSeeded(dir: string): Promise<boolean> {
 		await readFile(sentinelPath(dir), "utf8");
 		return true;
 	} catch (err) {
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
+		if (getNodeErrorCode(err) === "ENOENT") {
 			return false;
 		}
 		throw err;
@@ -286,6 +284,19 @@ function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
 	return lines.join("\n");
 }
 
+function buildCommandsContext(
+	commands: { test?: string; lint?: string } | undefined,
+): string {
+	if (!commands || (!commands.test && !commands.lint)) return "";
+	const lines = ["\n### Configured Commands\n"];
+	if (commands.test) lines.push(`- Test command: \`${commands.test}\``);
+	if (commands.lint) lines.push(`- Lint command: \`${commands.lint}\``);
+	lines.push(
+		"Use these commands when validating findings, but only run safe read-only checks.",
+	);
+	return lines.join("\n");
+}
+
 const EXAMINE_CONTEXT_INSTRUCTION =
 	"Read the following context files COMPLETELY. For each finding, QUOTE specific line numbers and code. Do NOT report issues you cannot verify with exact code evidence. Output findings as JSON only.";
 
@@ -309,32 +320,35 @@ export async function buildReviewPrompts(
 		>;
 		projectIndex?: ProjectIndexEntry[];
 		activeConstraints?: string;
+		commands?: { test?: string; lint?: string };
 	},
 ): Promise<ReviewPrompt[]> {
 	const context = buildFileContext(files, diffs, options?.contents);
 	const indexBlock = options?.projectIndex
 		? buildProjectIndexContext(options.projectIndex)
 		: "";
+	const commandsBlock = buildCommandsContext(options?.commands);
 	const composeOpts: ComposeOptions = {
 		activeConstraints: options?.activeConstraints,
 	};
 
+	function buildUserPrompt(includeIndex: boolean): string {
+		let prompt = `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
+		if (commandsBlock) prompt += `\n${commandsBlock}`;
+		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
+		return prompt;
+	}
+
 	if (lens !== "all") {
 		const systemPrompt = await composeLensPrompt(lens, composeOpts);
-		const userPrompt =
-			lens === "deduplication" && indexBlock
-				? `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}\n${indexBlock}`
-				: `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
+		const userPrompt = buildUserPrompt(lens === "deduplication");
 		return [{ lens, systemPrompt, userPrompt }];
 	}
 
 	const prompts: ReviewPrompt[] = [];
 	for (const l of LENS_NAMES) {
 		const systemPrompt = await composeLensPrompt(l, composeOpts);
-		const userPrompt =
-			l === "deduplication" && indexBlock
-				? `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}\n${indexBlock}`
-				: `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
+		const userPrompt = buildUserPrompt(l === "deduplication");
 		prompts.push({ lens: l, systemPrompt, userPrompt });
 	}
 	return prompts;

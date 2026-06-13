@@ -10,7 +10,8 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import { LOG_PREFIX } from "./constants.js";
+import { LOG_PREFIX, assertSafeGitRef } from "./constants.js";
+import { matchesAnyGlob } from "./glob-utils.js";
 import {
 	fetchPrDiff,
 	fetchPrFileContents,
@@ -44,6 +45,8 @@ export interface ReviewScopeRequest {
 export interface ResolveReviewScopeOptions {
 	readonly contextMode?: "diff" | "full";
 	readonly needsProjectIndex?: boolean;
+	/** Glob patterns for files to exclude from the review scope. */
+	readonly ignorePatterns?: readonly string[];
 }
 
 export interface ReviewScope {
@@ -67,7 +70,13 @@ export async function resolveReviewScope(
 	const mode = inferMode(request);
 
 	if (mode === "pr") {
-		return resolvePrScope(cwd, request, contextMode, options.needsProjectIndex);
+		return resolvePrScope(
+			cwd,
+			request,
+			contextMode,
+			options.needsProjectIndex,
+			options.ignorePatterns,
+		);
 	}
 
 	if (mode === "commit") {
@@ -77,14 +86,15 @@ export async function resolveReviewScope(
 			request.commit ?? request.ref ?? "HEAD",
 			contextMode,
 			options.needsProjectIndex,
+			options.ignorePatterns,
 		);
 	}
 
 	const reviewOptions = toReviewOptions(mode, request);
 	const files =
 		mode === "full"
-			? await getAllSourceFiles(cwd)
-			: await getChangedFiles(pi, cwd, reviewOptions);
+			? await getAllSourceFiles(cwd, options.ignorePatterns)
+			: await getChangedFiles(pi, cwd, reviewOptions, options.ignorePatterns);
 	const diffs = await gatherDiffs(pi, cwd, files, reviewOptions);
 	const contents =
 		contextMode !== "diff" ? await gatherContents(cwd, files) : undefined;
@@ -94,6 +104,7 @@ export async function resolveReviewScope(
 					cwd,
 					200,
 					mode === "full" ? files.map((f) => f.path) : undefined,
+					options.ignorePatterns,
 				)
 			: undefined;
 
@@ -162,8 +173,13 @@ async function gatherContents(
 ): Promise<Map<string, FileContent>> {
 	const contents = new Map<string, FileContent>();
 	for (const file of files) {
-		const result = await getFileContent(cwd, file.path);
-		if (result) contents.set(file.path, result);
+		try {
+			const result = await getFileContent(cwd, file.path);
+			if (result) contents.set(file.path, result);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			console.warn(`${LOG_PREFIX} Skipping content for ${file.path}:`, msg);
+		}
 	}
 	return contents;
 }
@@ -173,6 +189,7 @@ async function resolvePrScope(
 	request: ReviewScopeRequest,
 	contextMode: "diff" | "full",
 	needsProjectIndex = false,
+	ignorePatterns?: readonly string[],
 ): Promise<ReviewScope> {
 	if (!(await isGhAvailable())) {
 		throw new Error(
@@ -198,6 +215,14 @@ async function resolvePrScope(
 		prInfo.repo,
 		prInfo.number,
 	);
+	const filteredFiles = ignorePatterns
+		? prDiff.files.filter((f) => !matchesAnyGlob(f.path, ignorePatterns))
+		: prDiff.files;
+	const filteredDiffs = new Map<string, string>();
+	for (const f of filteredFiles) {
+		const d = prDiff.diffs.get(f.path);
+		if (d !== undefined) filteredDiffs.set(f.path, d);
+	}
 	const contents =
 		contextMode !== "diff"
 			? await fetchPrFileContents(
@@ -205,19 +230,19 @@ async function resolvePrScope(
 					prInfo.owner,
 					prInfo.repo,
 					prDiff.headSha,
-					prDiff.files.map((f) => f.path),
+					filteredFiles.map((f) => f.path),
 				)
 			: undefined;
 	const projectIndex =
 		needsProjectIndex && contextMode !== "diff"
-			? await getProjectIndex(cwd)
+			? await getProjectIndex(cwd, 200, undefined, ignorePatterns)
 			: undefined;
 
 	return {
 		mode: "pr",
 		label: `${prInfo.owner}/${prInfo.repo}#${prInfo.number}`,
-		files: prDiff.files,
-		diffs: prDiff.diffs,
+		files: filteredFiles,
+		diffs: filteredDiffs,
 		contents,
 		projectIndex,
 		options: { files: [], ref: "HEAD", staged: false, all: false },
@@ -241,8 +266,13 @@ async function resolveCommitScope(
 	commit: string,
 	contextMode: "diff" | "full",
 	needsProjectIndex = false,
+	ignorePatterns?: readonly string[],
 ): Promise<ReviewScope> {
-	const files = await getCommitChangedFiles(pi, cwd, commit);
+	assertSafeGitRef(commit);
+	let files = await getCommitChangedFiles(pi, cwd, commit);
+	if (ignorePatterns) {
+		files = files.filter((f) => !matchesAnyGlob(f.path, ignorePatterns));
+	}
 	const diffs = new Map<string, string>();
 	for (const file of files) {
 		const result = await pi.exec("git", [
@@ -262,7 +292,7 @@ async function resolveCommitScope(
 		contextMode !== "diff" ? await gatherContents(cwd, files) : undefined;
 	const projectIndex =
 		needsProjectIndex && contextMode !== "diff"
-			? await getProjectIndex(cwd)
+			? await getProjectIndex(cwd, 200, undefined, ignorePatterns)
 			: undefined;
 
 	return {
@@ -282,6 +312,7 @@ async function getCommitChangedFiles(
 	cwd: string,
 	commit: string,
 ): Promise<ChangedFile[]> {
+	assertSafeGitRef(commit);
 	const result = await pi.exec("git", [
 		"-C",
 		cwd,

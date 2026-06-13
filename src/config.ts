@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile, realpath, open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { join, resolve } from "node:path";
 import {
 	getGlobalBaseDir,
 	getProjectBaseDir,
@@ -7,7 +8,10 @@ import {
 	CONFIG_FILE,
 	SEVERITY_VALUES,
 	LOG_PREFIX,
+	getNodeErrorCode,
 } from "./constants.js";
+import { assertPathInRoot } from "./path-utils.js";
+import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
@@ -44,6 +48,14 @@ export type RiskCode =
 
 /** A severity value, accepting all five DRYKISS levels. */
 export type SeverityOverride = "critical" | "high" | "medium" | "low" | "nit";
+
+/** Commands that the review pipeline can run to ground findings in reality. */
+export interface DrykissCommands {
+	/** Test command used by the tests lens to validate behavior. */
+	readonly test?: string;
+	/** Lint command used by the tests/clarity lens to check style. */
+	readonly lint?: string;
+}
 
 /** Severity override rule: when a finding's riskCode matches, override its severity. */
 export interface SeverityOverrideRule {
@@ -172,6 +184,17 @@ export interface DrykissConfig {
 	 * Default: 70.
 	 */
 	qualityGate?: number;
+	/**
+	 * Glob patterns for files that should be excluded from the review scope
+	 * entirely (e.g., generated files, vendored code). Same syntax as
+	 * gitignore (`**`, `*`, `?`). Matches against repo-relative paths.
+	 */
+	ignorePatterns?: readonly string[];
+	/**
+	 * Optional commands the review pipeline can use to validate findings.
+	 * The tests lens will prefer these when available.
+	 */
+	commands?: DrykissCommands;
 }
 
 export function getConfigPath(): string {
@@ -248,9 +271,6 @@ export async function loadEffectiveConfig(
 			};
 		}
 	}
-	if (!config.riskTargeting) {
-		return { config, warnings };
-	}
 	const rt = config.riskTargeting;
 	const cleaned: {
 		disable?: string[];
@@ -258,14 +278,14 @@ export async function loadEffectiveConfig(
 		ignore?: string[];
 		focus?: string[];
 	} = {};
-	if (rt.disable !== undefined) {
+	if (rt?.disable !== undefined) {
 		const { valid, dropped } = partitionByRiskCode(rt.disable);
 		cleaned.disable = valid;
 		for (const code of dropped) {
 			warnings.push(`Unknown risk code in disable: ${code}`);
 		}
 	}
-	if (rt.focus !== undefined) {
+	if (rt?.focus !== undefined) {
 		const { valid, dropped } = partitionByRiskCode(rt.focus);
 		cleaned.focus = valid;
 		for (const code of dropped) {
@@ -279,9 +299,9 @@ export async function loadEffectiveConfig(
 		cleaned.disable = undefined;
 		cleaned.focus = undefined;
 	}
-	if (rt.severity !== undefined) {
+	if (rt?.severity !== undefined) {
 		const validRules: SeverityOverrideRule[] = [];
-		for (const rule of rt.severity) {
+		for (const rule of rt?.severity ?? []) {
 			if (!VALID_RISK_CODES.has(rule.riskCode)) {
 				warnings.push(
 					`Unknown risk code in severity override: ${rule.riskCode}`,
@@ -298,23 +318,45 @@ export async function loadEffectiveConfig(
 		}
 		cleaned.severity = validRules;
 	}
-	if (rt.ignore !== undefined) {
+	if (rt?.ignore !== undefined) {
 		cleaned.ignore = rt.ignore.filter(
 			(p) => typeof p === "string" && p.length > 0,
 		);
 	}
+
+	const cleanedIgnorePatterns = Array.isArray(config.ignorePatterns)
+		? config.ignorePatterns.filter(isNonEmptyString)
+		: undefined;
+	const cleanedCommands = isPlainObject(config.commands)
+		? Object.fromEntries(
+				Object.entries(config.commands)
+					.filter(([, v]) => isNonEmptyString(v))
+					.filter(([k]) => k === "test" || k === "lint"),
+			)
+		: undefined;
+
 	return {
 		config: {
 			...config,
-			riskTargeting: {
-				...(cleaned.disable ? { disable: cleaned.disable } : {}),
-				...(cleaned.severity ? { severity: cleaned.severity } : {}),
-				...(cleaned.ignore ? { ignore: cleaned.ignore } : {}),
-				...(cleaned.focus ? { focus: cleaned.focus } : {}),
-			},
+			...(rt
+				? {
+						riskTargeting: {
+							...(cleaned.disable ? { disable: cleaned.disable } : {}),
+							...(cleaned.severity ? { severity: cleaned.severity } : {}),
+							...(cleaned.ignore ? { ignore: cleaned.ignore } : {}),
+							...(cleaned.focus ? { focus: cleaned.focus } : {}),
+						},
+					}
+				: {}),
+			ignorePatterns: cleanedIgnorePatterns,
+			commands: cleanedCommands,
 		},
 		warnings,
 	};
+}
+
+function isNonEmptyString(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0;
 }
 async function loadConfigFile(
 	path: string,
@@ -324,10 +366,7 @@ async function loadConfigFile(
 		const text = await readFile(path, "utf8");
 		return JSON.parse(text) as DrykissConfig;
 	} catch (err) {
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
+		if (getNodeErrorCode(err) === "ENOENT") {
 			return undefined;
 		}
 		if (err instanceof SyntaxError) {
@@ -371,12 +410,45 @@ export async function saveProjectConfig(
 ): Promise<void> {
 	const path = getProjectConfigPath(cwd);
 	const dir = getProjectBaseDir(cwd);
+
+	// Defensive: ensure the resolved path stays within the project directory.
+	// We create the directory, then open it with O_NOFOLLOW so a symlink swap
+	// after mkdir cannot be followed. fstat on the fd confirms it is a directory,
+	// and realpath+assertPathInRoot confirms the final resolved path stays in root.
+	const cwdResolved = await realpath(resolve(cwd));
 	await mkdir(dir, { recursive: true });
+
+	let fd: import("node:fs/promises").FileHandle | undefined;
+	try {
+		fd = await open(dir, constants.O_RDONLY | constants.O_NOFOLLOW);
+		const stats = await fd.stat();
+		if (!stats.isDirectory()) {
+			throw new Error(
+				`Project config directory is not a regular directory: ${dir}`,
+			);
+		}
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+			throw new Error(
+				`Project config directory is a symlink (possible attack): ${dir}`,
+			);
+		}
+		throw err;
+	} finally {
+		await fd?.close();
+	}
+
+	const resolvedDir = await realpath(dir);
+	assertPathInRoot(resolvedDir, cwdResolved);
+
 	// Read existing project config first to preserve other fields
 	let existing: DrykissConfig = {};
 	const warnings: string[] = [];
 	const loaded = await loadConfigFile(path, warnings);
 	if (loaded) existing = loaded;
+	for (const warning of warnings) {
+		console.warn(`${LOG_PREFIX} ${warning}`);
+	}
 	await writeFile(
 		path,
 		JSON.stringify(

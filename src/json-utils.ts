@@ -7,6 +7,13 @@
  * - Unterminated strings (best-effort)
  * - Markdown code fences around JSON
  */
+
+export function isPlainObject(
+	value: unknown,
+): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function stripJsonMarkdownFences(raw: string): string {
 	return raw.replace(/^```(?:json)?\s*\n?/gm, "").replace(/```\s*$/gm, "");
 }

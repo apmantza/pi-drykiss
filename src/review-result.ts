@@ -2,6 +2,8 @@ import type { ReviewJob } from "./review-manager.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
 import { computeHealthScore } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
+import { compileGlobMatchers, matchesAnyGlob } from "./glob-utils.js";
+import { LOG_PREFIX, SEVERITY_VALUES } from "./constants.js";
 
 export interface ReviewResultTarget {
 	readonly mode?: string;
@@ -76,14 +78,7 @@ export interface BuildReviewResultOptions {
 	readonly prevScore?: number;
 }
 
-const SEVERITIES: readonly Severity[] = [
-	"critical",
-	"high",
-	"medium",
-	"low",
-	"nit",
-];
-const SEVERITY_SET = new Set<Severity>(SEVERITIES);
+const SEVERITY_SET = SEVERITY_VALUES;
 
 export function buildReviewResult(
 	job: ReviewJob,
@@ -288,65 +283,16 @@ export function filterIgnored(
 	if (patterns.length === 0) {
 		return { findings: [...findings], dropped: 0 };
 	}
-	const matchers = compileGlobMatchers(patterns);
 	const passed: Finding[] = [];
 	let dropped = 0;
 	for (const f of findings) {
-		const file = f.file.replace(/\\/g, "/");
-		const match = matchers.some((r) => r.test(file));
-		if (match) {
+		if (matchesAnyGlob(f.file, patterns)) {
 			dropped++;
 		} else {
 			passed.push(f);
 		}
 	}
 	return { findings: passed, dropped };
-}
-
-/**
- * Compile a list of glob patterns into regex matchers.
- * Silently skips invalid patterns so a single bad pattern doesn't crash the review.
- */
-function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
-	const matchers: RegExp[] = [];
-	for (const p of patterns) {
-		try {
-			matchers.push(globToRegex(p));
-		} catch {
-			// Skip invalid patterns
-		}
-	}
-	return matchers;
-}
-
-/** Convert a simple glob pattern to a regex (supports **, *, ?). */
-function globToRegex(pattern: string): RegExp {
-	// Normalize backslashes to forward slashes for cross-platform support
-	const normalized = pattern.replace(/\\/g, "/");
-	let regex = "^";
-	for (let i = 0; i < normalized.length; i++) {
-		const ch = normalized[i];
-		if (ch === "*") {
-			// ** matches any number of path segments
-			if (normalized[i + 1] === "*") {
-				regex += ".*";
-				i++; // skip second *
-			} else {
-				regex += "[^/]*";
-			}
-		} else if (ch === "?") {
-			regex += "[^/]";
-		} else if (ch === ".") {
-			regex += "\\.";
-		} else if (/[.\\+^${}()|[\]\\/]/.test(ch)) {
-			// Escape any regex-special characters that aren't glob wildcards
-			regex += "\\" + ch;
-		} else {
-			regex += ch;
-		}
-	}
-	regex += "$";
-	return new RegExp(regex);
 }
 
 // ── Phase 3: Suppressions ───────────────────────────────────────────────
@@ -385,11 +331,18 @@ export function applySuppressions(
 	}> = [];
 	for (const s of suppressions) {
 		if (!s.pattern || !s.riskCode) {
-			// Skip invalid suppression entries
+			console.warn(
+				`${LOG_PREFIX} Skipping invalid suppression entry (missing pattern or riskCode): ${s.id}`,
+			);
 			continue;
 		}
 		const regexes = compileGlobMatchers([s.pattern]);
-		if (regexes.length === 0) continue;
+		if (regexes.length === 0) {
+			console.warn(
+				`${LOG_PREFIX} Skipping suppression entry with invalid pattern: ${s.id}`,
+			);
+			continue;
+		}
 		compiled.push({
 			...s,
 			regex: regexes[0],

@@ -214,4 +214,3 @@ describe("parseUnifiedDiff", () => {
 		expect(result.files[1].status).toBe("deleted");
 	});
 });
-

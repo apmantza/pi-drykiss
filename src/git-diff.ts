@@ -1,8 +1,10 @@
-import { readFile, readdir, stat, lstat } from "node:fs/promises";
+import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
-import { LOG_PREFIX } from "./constants.js";
+import { LOG_PREFIX, getNodeErrorCode, assertSafeGitRef } from "./constants.js";
+import { matchesAnyGlob } from "./glob-utils.js";
+import { assertPathInRoot } from "./path-utils.js";
 
 export const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	M: "modified",
@@ -75,7 +77,10 @@ export function parseDiffOutput(stdout: string): ChangedFile[] {
 	return files;
 }
 
-export async function getAllSourceFiles(cwd: string): Promise<ChangedFile[]> {
+export async function getAllSourceFiles(
+	cwd: string,
+	ignorePatterns?: readonly string[],
+): Promise<ChangedFile[]> {
 	const dirsToWalk = await getSourceDirs(cwd);
 
 	const files: ChangedFile[] = [];
@@ -84,9 +89,13 @@ export async function getAllSourceFiles(cwd: string): Promise<ChangedFile[]> {
 	for (const dir of dirsToWalk) {
 		for await (const filePath of walkDir(cwd, dir)) {
 			if (seenPaths.has(filePath)) continue;
+			const normalized = filePath.replace(/\\/g, "/");
+			if (ignorePatterns && matchesAnyGlob(normalized, ignorePatterns)) {
+				continue;
+			}
 			seenPaths.add(filePath);
 			files.push({
-				path: filePath.replace(/\\/g, "/"),
+				path: normalized,
 				status: "unchanged" as const,
 				language: detectLanguage(filePath),
 			});
@@ -100,17 +109,20 @@ export async function getChangedFiles(
 	pi: ExtensionAPI,
 	cwd: string,
 	options: ReviewOptions,
+	ignorePatterns?: readonly string[],
 ): Promise<ChangedFile[]> {
 	if (options.all) {
-		return getAllSourceFiles(cwd);
+		return getAllSourceFiles(cwd, ignorePatterns);
 	}
 
 	if (options.files.length > 0) {
-		return options.files.map((fp) => ({
-			path: fp,
-			status: "modified" as const,
-			language: detectLanguage(fp),
-		}));
+		return options.files
+			.filter((fp) => !ignorePatterns || !matchesAnyGlob(fp, ignorePatterns))
+			.map((fp) => ({
+				path: fp,
+				status: "modified" as const,
+				language: detectLanguage(fp),
+			}));
 	}
 
 	let diffCmd: string;
@@ -120,6 +132,7 @@ export async function getChangedFiles(
 		diffCmd = "git";
 		diffArgs = ["-C", cwd, "diff", "--cached", "--name-status"];
 	} else if (options.ref !== "HEAD") {
+		assertSafeGitRef(options.ref);
 		diffCmd = "git";
 		diffArgs = ["-C", cwd, "diff", "--name-status", `${options.ref}...HEAD`];
 	} else {
@@ -128,7 +141,10 @@ export async function getChangedFiles(
 	}
 
 	const result = await pi.exec(diffCmd, diffArgs);
-	return parseDiffOutput(result.stdout);
+	const files = parseDiffOutput(result.stdout);
+	return ignorePatterns
+		? files.filter((f) => !matchesAnyGlob(f.path, ignorePatterns))
+		: files;
 }
 
 export async function getFileDiff(
@@ -141,6 +157,7 @@ export async function getFileDiff(
 	if (options.staged) {
 		args = ["-C", cwd, "diff", "--cached", "--", filePath];
 	} else if (options.ref !== "HEAD") {
+		assertSafeGitRef(options.ref);
 		args = ["-C", cwd, "diff", `${options.ref}...HEAD`, "--", filePath];
 	} else {
 		args = ["-C", cwd, "diff", "HEAD", "--", filePath];
@@ -205,41 +222,26 @@ export async function getFileContent(
 	cwd: string,
 	filePath: string,
 ): Promise<FileContent | null> {
-	// Prevent path traversal: reject absolute paths and Windows drive letters
-	const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/.test(filePath);
-	if (
-		filePath.startsWith("/") ||
-		filePath.startsWith("\\") ||
-		isWindowsAbsolute
-	) {
-		console.error(`${LOG_PREFIX} Rejected absolute path: ${filePath}`);
-		return null;
-	}
 	// Decode URI-encoded sequences (handles %2e%2e etc.) and normalize.
 	// A single decode is sufficient: the path comes from git diff output,
 	// not a URL parameter. Double-encoded input stays encoded (the second
-	// layer is literal text, not encoding) — the forward check on both
-	// the original and decoded path catches smuggled sequences regardless.
+	// layer is literal text, not encoding).
 	let decodedPath: string;
 	try {
 		decodedPath = decodeURIComponent(filePath);
 	} catch {
-		console.error(`${LOG_PREFIX} Rejected malformed path: ${filePath}`);
-		return null;
+		// decodeURIComponent throws on literal '%' not followed by two hex
+		// digits. Git diff output is not URL-encoded, so fall back to the
+		// original path and let the resolved-path guard handle any traversal.
+		decodedPath = filePath;
 	}
-	// After decoding, reject literal dot-dot as a path segment and tilde anywhere.
-	const isDotDotSegment = /(?<=^|[\\/])\.\.(?=[\\/]|$)/.test(decodedPath);
-	if (isDotDotSegment || decodedPath.includes("~")) {
-		console.error(`${LOG_PREFIX} Rejected suspicious path: ${filePath}`);
-		return null;
-	}
-	// Verify resolved path stays within cwd (defense-in-depth for Unicode/other tricks)
-	const resolved = path.resolve(cwd, decodedPath);
-	const cwdResolved = path.resolve(cwd);
-	if (
-		!resolved.startsWith(cwdResolved + path.sep) &&
-		resolved !== cwdResolved
-	) {
+	// Resolve symlinks and verify the real path stays within cwd. This
+	// prevents symlink attacks where a repo path points outside the project.
+	let resolved: string;
+	try {
+		resolved = await realpath(assertPathInRoot(decodedPath, cwd));
+		assertPathInRoot(resolved, cwd);
+	} catch {
 		console.error(`${LOG_PREFIX} Rejected path escaping cwd: ${filePath}`);
 		return null;
 	}
@@ -265,8 +267,7 @@ export async function getFileContent(
 			: raw;
 		return { content, lineCount: lines.length, truncated };
 	} catch (err) {
-		const code =
-			err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+		const code = getNodeErrorCode(err);
 		// ENOENT is expected for missing files (e.g., deleted files in git status)
 		if (code === "ENOENT") {
 			return null;
@@ -293,8 +294,10 @@ async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
 	let entries: import("fs").Dirent[];
 	try {
 		entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
-	} catch {
+	} catch (err) {
 		// Skip unreadable directories to avoid blocking the entire file scan
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`${LOG_PREFIX} Skipping unreadable directory ${dir}: ${msg}`);
 		return;
 	}
 	for (const entry of entries) {
@@ -407,6 +410,7 @@ export async function getProjectIndex(
 	cwd: string,
 	maxFiles = 200,
 	paths?: readonly string[],
+	ignorePatterns?: readonly string[],
 ): Promise<ProjectIndexEntry[]> {
 	const entries: ProjectIndexEntry[] = [];
 	const seenPaths = new Set<string>();
@@ -415,6 +419,7 @@ export async function getProjectIndex(
 		const normalized = filePath.replace(/\\/g, "/");
 		if (seenPaths.has(normalized)) continue;
 		seenPaths.add(normalized);
+		if (ignorePatterns && matchesAnyGlob(normalized, ignorePatterns)) continue;
 		if (entries.length >= maxFiles) break;
 
 		try {
@@ -426,10 +431,12 @@ export async function getProjectIndex(
 			}
 		} catch (err) {
 			// skip unreadable files with a warning so the index is not silently incomplete
-			const code =
-				err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+			const code = getNodeErrorCode(err);
 			if (code === "EACCES" || code === "EPERM") {
 				console.warn(`${LOG_PREFIX} Skipping ${normalized}: permission denied`);
+			} else {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.warn(`${LOG_PREFIX} Skipping ${normalized}: ${msg}`);
 			}
 		}
 	}

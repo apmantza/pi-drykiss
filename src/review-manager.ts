@@ -9,9 +9,9 @@ import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
 import {
 	LENS_NAMES,
 	createFallbackSynthesis,
-	parseFindingsArray,
 	parseSynthesis,
 } from "./types.js";
+import { parseFindingsJson } from "./parse-findings.js";
 import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
 import {
 	saveReview,
@@ -21,7 +21,6 @@ import {
 } from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
 import { findModelByHint } from "./llm.js";
-import { lenientJsonParse } from "./json-utils.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
 
@@ -105,22 +104,19 @@ function applySuccessfulLensOutput(
 ): void {
 	state.status = "done";
 	const rawOutput = text || "[]";
-	try {
-		const parsed = lenientJsonParse(rawOutput);
-		const findingsSource =
-			typeof parsed === "object" &&
-			parsed !== null &&
-			"findings" in parsed &&
-			Array.isArray((parsed as { findings?: unknown }).findings)
-				? (parsed as { findings: unknown[] }).findings
-				: parsed;
-		const findings = parseFindingsArray(findingsSource, lens);
-		state.rawOutput = JSON.stringify(findings, null, 2);
-		state.findingsCount = findings.length;
-	} catch {
+	const { findings, parseError } = parseFindingsJson(rawOutput, lens);
+	if (parseError) {
+		console.warn(
+			`${LOG_PREFIX} ${parseError} Raw output preserved for inspection.`,
+		);
+		state.status = "error";
+		state.errorMessage = parseError;
 		state.rawOutput = rawOutput;
 		state.findingsCount = 0;
+		return;
 	}
+	state.rawOutput = JSON.stringify(findings, null, 2);
+	state.findingsCount = findings.length;
 }
 
 export class ReviewManager {
@@ -214,6 +210,7 @@ export class ReviewManager {
 			model?: string;
 			lenses?: ReviewLens[];
 			activeConstraints?: string;
+			commands?: { test?: string; lint?: string };
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
@@ -236,6 +233,7 @@ export class ReviewManager {
 			contents,
 			projectIndex,
 			activeConstraints: options.activeConstraints,
+			commands: options.commands,
 		});
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
 
@@ -324,16 +322,17 @@ export class ReviewManager {
 					const job = this.jobs.get(task.jobId);
 					if (job) {
 						const state = job.states.get(task.lens);
-						if (state && state.status === "running") {
+						if (state) {
 							state.status = "error";
 							state.errorMessage =
 								err instanceof Error ? err.message : String(err);
+							state.session = undefined;
 						}
-					}
-					try {
-						this.onUpdate?.(job!);
-					} catch {
-						/* don't let callback errors crash the loop */
+						try {
+							this.onUpdate?.(job);
+						} catch {
+							/* don't let callback errors crash the loop */
+						}
 					}
 				})
 				.finally(() => {
@@ -363,7 +362,6 @@ export class ReviewManager {
 			onStreamUpdate: () => void;
 		},
 	) {
-		const { runLensSubagent } = await import("./subagent-runner.js");
 		const job = this.jobs.get(task.jobId);
 		if (!job) return;
 
@@ -376,6 +374,7 @@ export class ReviewManager {
 			/* don't let callback errors crash the loop */
 		}
 
+		const { runLensSubagent } = await import("./subagent-runner.js");
 		const result = await runLensSubagent(
 			ctx,
 			cwd,
@@ -453,6 +452,7 @@ export class ReviewManager {
 					state.status = "error";
 					state.errorMessage = result.errorMessage;
 					state.rawOutput = `ERROR: ${result.errorMessage}`;
+					state.session = undefined;
 				}
 			} else {
 				// Not a model error or no UI - just record the error
@@ -477,12 +477,12 @@ export class ReviewManager {
 		});
 
 		// Atomic check-and-set: use a lock set to prevent concurrent synthesis runs
-		if (
-			allDone &&
-			job.synthesisStatus === "idle" &&
-			!this.synthesisLocks.has(job.id)
-		) {
+		if (allDone && !this.synthesisLocks.has(job.id)) {
 			this.synthesisLocks.add(job.id);
+			if (job.synthesisStatus !== "idle") {
+				this.synthesisLocks.delete(job.id);
+				return;
+			}
 			job.synthesisStatus = "running";
 			job.synthesisStartedAt = Date.now();
 			try {
@@ -500,12 +500,13 @@ export class ReviewManager {
 				);
 				job.overallStatus = "error";
 				job.completedAt = Date.now();
-				this.synthesisLocks.delete(job.id);
 				try {
 					this.onComplete?.(job);
 				} catch {
 					/* ignore */
 				}
+			} finally {
+				this.synthesisLocks.delete(job.id);
 			}
 		}
 
@@ -646,6 +647,7 @@ export class ReviewManager {
 				pattern: string;
 				id: string;
 			}>;
+			commands?: { test?: string; lint?: string };
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -657,7 +659,11 @@ export class ReviewManager {
 			diffs,
 			contents,
 			projectIndex,
-			{ model: options.model, lenses: options.lenses },
+			{
+				model: options.model,
+				lenses: options.lenses,
+				commands: options.commands,
+			},
 		);
 		const started = this.jobs.get(jobId);
 		if (started) safeProgress(options.onProgress, started);

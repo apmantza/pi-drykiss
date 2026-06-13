@@ -19,10 +19,20 @@ Example (do NOT include any surrounding text or fences):
       "source": "Which lens(es) flagged this: 'simplicity+clarity' or 'security'",
       "fixability": "quick-fix|guided|manual",
       "suggestion": "Specific fix",
-      "confidence": "confirmed|likely|suspect"
+      "confidence": "confirmed|likely|suspect",
+      "action": "fix|discuss|ignore",
+      "riskLevel": "low|medium|high"
     }
   ],
-  "mermaidGraph": "graph TD\n  subgraph src/\n    A[file.ts]\n  end"
+  "mermaidGraph": "graph TD\n  subgraph src/\n    A[file.ts]\n  end",
+  "files": [
+    { "path": "path/to/file.ts", "role": "read", "description": "why it matters" }
+  ],
+  "nextSteps": ["recommended follow-up action"],
+  "notDone": [
+    { "item": "unfinished work", "reason": "why it was not completed", "blocker": "blocking issue", "nextStep": "specific follow-up" }
+  ],
+  "extensions": { "mermaidGraph": "..." }
 }
 
 Rules:
@@ -34,4 +44,8 @@ Rules:
 - Down-rank broad maintainability, test coverage, and file-size concerns unless they identify a concrete broken behavior, security risk, or high-probability maintenance failure.
 - Never synthesize a critical finding from maintainability concerns alone. Critical requires exploitable security risk, data loss, or currently broken core functionality.
 - Preserve the per-lens `consequence` and `fixability` fields from the original findings when merging; only edit if a downstream lens added evidence.
+- Preserve or set `action` and `riskLevel` on each synthesized finding. Use `action: fix` for concrete high-confidence suggestions, `discuss` for intent-challenging issues, and `ignore` for informational nits.
+- Use `riskLevel` to signal blast radius: `high` for security/reliability/architecture, `medium` for correctness/maintainability, `low` for localized style/nit issues.
 - The `mermaidGraph` field is **optional**. Include a Mermaid `graph TD` string only when the architecture lens produced one or when you have enough structural context to draw meaningful file relationships. When absent, omit the field entirely.
+- The `files`, `nextSteps`, `notDone`, and `extensions` fields are **optional**. Include them only when they add value. `files` should list files actually inspected; `nextSteps` should list concrete follow-ups; `notDone` should surface incomplete lens work; `extensions` is for lens-specific structured data such as an architecture dependency graph.
+- When the architecture lens supplies a dependency graph, prefer placing it in `extensions.mermaidGraph` and only duplicate it at the top-level `mermaidGraph` if it is the most useful visualization for the report.
