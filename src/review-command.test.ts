@@ -450,6 +450,9 @@ describe("review command error handling", () => {
 			originId: "origin-1",
 		});
 		expect(mockManager.startReview).toHaveBeenCalled();
+		expect(mockCtx.ui.setWidget).toHaveBeenCalledWith("drykiss-review", [
+			"DRYKISS review in progress",
+		]);
 	});
 
 	it("cleans up an isolated review branch when review start fails", async () => {

@@ -48,7 +48,12 @@ function warnExtensionError(
 	err: unknown,
 	ctx?: ExtensionContext,
 ): void {
-	const text = `${LOG_PREFIX} Failed ${action}: ${toErrorMessage(err)}`;
+	let text: string;
+	try {
+		text = `${LOG_PREFIX} Failed ${action}: ${toErrorMessage(err)}`;
+	} catch {
+		text = `${LOG_PREFIX} Failed ${action}: <unprintable error>`;
+	}
 	console.warn(text);
 	try {
 		ctx?.ui.notify(text, "warning");
@@ -56,6 +61,57 @@ function warnExtensionError(
 		console.warn(
 			`${LOG_PREFIX} Failed to show warning notification: ${toErrorMessage(notifyErr)}`,
 		);
+	}
+}
+
+function getLensState(states: unknown, lens: string): any {
+	if (states instanceof Map) return states.get(lens);
+	if (states && typeof states === "object") {
+		return (states as Record<string, unknown>)[lens];
+	}
+	return undefined;
+}
+
+function lensStateEntries(states: unknown): Array<[string, any]> {
+	if (states instanceof Map) return [...states.entries()];
+	if (states && typeof states === "object") {
+		return Object.entries(states as Record<string, unknown>);
+	}
+	return [];
+}
+
+function safeFindings(result: any): any[] {
+	return Array.isArray(result?.findings) ? result.findings : [];
+}
+
+function safeNumber(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function safeString(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
+function safeLenses(job: any): string[] {
+	return Array.isArray(job?.lenses) ? job.lenses : [];
+}
+
+function safeTimestamp(value: unknown): string {
+	const ms = safeNumber(value);
+	return new Date(ms || Date.now()).toISOString();
+}
+
+async function sendMessageSafely(
+	pi: ExtensionAPI,
+	message: Parameters<ExtensionAPI["sendMessage"]>[0],
+	options: Parameters<ExtensionAPI["sendMessage"]>[1],
+	action: string,
+	ctx?: ExtensionContext,
+): Promise<void> {
+	try {
+		await Promise.resolve(pi.sendMessage(message, options));
+	} catch (err) {
+		warnExtensionError(action, err, ctx);
 	}
 }
 
@@ -72,19 +128,31 @@ export default function (pi: ExtensionAPI): void {
 			}
 		},
 		(job) => {
+			let hasRunningReview = false;
 			try {
-				widget.setJobs(manager.listJobs());
-				if (!manager.listJobs().some((j) => j.overallStatus === "running")) {
-					setReviewInProgress(false);
-					if (lastContext) applyReviewState(lastContext);
-				}
+				const jobs = manager.listJobs();
+				hasRunningReview = jobs.some((j) => j.overallStatus === "running");
+				widget.setJobs(jobs);
 				sendReviewNotification(pi, job);
 			} catch (err) {
 				warnExtensionError("handling completed review", err, lastContext);
+			} finally {
+				if (!hasRunningReview) {
+					try {
+						setReviewInProgress(false);
+						if (lastContext) applyReviewState(lastContext);
+					} catch (err) {
+						warnExtensionError("resetting review session state", err, lastContext);
+					}
+				}
 			}
 		},
 	);
-	manager.startCleanup();
+	try {
+		manager.startCleanup();
+	} catch (err) {
+		warnExtensionError("starting review cleanup timer", err, lastContext);
+	}
 	const editTracker = createEditTracker();
 	const autoreviewEditedFiles = new Map<
 		string,
@@ -106,29 +174,47 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("agent_start", () => {
-		autoreviewEditedFiles.clear();
+	pi.on("agent_start", (_event: any, ctx: any) => {
+		try {
+			autoreviewEditedFiles.clear();
+		} catch (err) {
+			warnExtensionError("clearing autoreview edit state", err, ctx);
+		}
 	});
 
-	pi.on("tool_execution_end", (event: any) => {
-		if (event.isError) return;
-		const edited = editTracker.trackEdit(
-			event.toolName,
-			event.result,
-			event.args ?? event.input,
-		);
-		if (edited) autoreviewEditedFiles.set(edited.path, edited);
+	pi.on("tool_execution_end", (event: any, ctx: any) => {
+		try {
+			if (event.isError) return;
+			const edited = editTracker.trackEdit(
+				event.toolName,
+				event.result,
+				event.args ?? event.input,
+			);
+			if (edited) autoreviewEditedFiles.set(edited.path, edited);
+		} catch (err) {
+			warnExtensionError("tracking edited file for autoreview", err, ctx);
+		}
 	});
 
-	pi.on("turn_end", (event: any) => {
-		editTracker.onTurnEnd(event.turnIndex ?? 0);
+	pi.on("turn_end", (event: any, ctx: any) => {
+		try {
+			editTracker.onTurnEnd(event.turnIndex ?? 0);
+		} catch (err) {
+			warnExtensionError("finalizing edit tracking for turn", err, ctx);
+		}
 	});
 
-	pi.on("before_agent_start", (event: any) => {
-		const edits = editTracker.getLastTurnEdits();
-		if (!edits) return undefined;
-		editTracker.clearLastTurnEdits();
-		return { systemPrompt: event.systemPrompt + buildAutoInjectBlock(edits) };
+	pi.on("before_agent_start", (event: any, ctx: any) => {
+		try {
+			const edits = editTracker.getLastTurnEdits();
+			if (!edits) return undefined;
+			const autoInject = buildAutoInjectBlock(edits);
+			editTracker.clearLastTurnEdits();
+			return { systemPrompt: event.systemPrompt + autoInject };
+		} catch (err) {
+			warnExtensionError("building auto-inject prompt", err, ctx);
+			return undefined;
+		}
 	});
 
 	pi.on("agent_end", async (_event: any, ctx: any) => {
@@ -166,10 +252,7 @@ export default function (pi: ExtensionAPI): void {
 				if (!ok) return;
 			}
 
-			autoreviewEditedFiles.clear();
 			autoreviewRunning = true;
-			lastAutoreviewSignature = signature;
-			lastAutoreviewAt = now;
 			const result = await executeDrykissAutoreviewTool(
 				{
 					mode: auto.mode ?? "local",
@@ -192,22 +275,23 @@ export default function (pi: ExtensionAPI): void {
 					),
 			);
 			const review = result.details.result;
-			await Promise.resolve(
-				pi.sendMessage(
-					{
-						customType: "drykiss-autoreview-complete",
-						content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
-						display: true,
-						details: review,
-					},
-					{ deliverAs: "followUp", triggerTurn: !review.clean },
-				),
+			autoreviewEditedFiles.clear();
+			lastAutoreviewSignature = signature;
+			lastAutoreviewAt = now;
+			await sendMessageSafely(
+				pi,
+				{
+					customType: "drykiss-autoreview-complete",
+					content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
+					display: true,
+					details: review,
+				},
+				{ deliverAs: "followUp", triggerTurn: !review.clean },
+				"sending autoreview completion notification",
+				ctx,
 			);
 		} catch (err) {
-			ctx.ui.notify(
-				`DRYKISS autoreview failed: ${toErrorMessage(err)}`,
-				"error",
-			);
+			warnExtensionError("running DRYKISS autoreview", err, ctx);
 		} finally {
 			autoreviewRunning = false;
 		}
@@ -242,11 +326,13 @@ export default function (pi: ExtensionAPI): void {
 			if (!job) return undefined;
 
 			const s = job.synthesisResult;
+			const lenses = safeLenses(job);
 			const hasError =
 				job.overallStatus === "error" ||
-				job.lenses.some((l: string) => job.states.get(l)?.status === "error");
-			const hasCritical = s && s.criticalCount > 0;
-			const hasHigh = s && s.highCount > 0;
+				lenses.some((l: string) => getLensState(job.states, l)?.status === "error");
+			const findings = safeFindings(s);
+			const hasCritical = safeNumber(s?.criticalCount) > 0;
+			const hasHigh = safeNumber(s?.highCount) > 0;
 
 			const icon = hasCritical
 				? theme.fg("error", "✗")
@@ -264,12 +350,16 @@ export default function (pi: ExtensionAPI): void {
 			// Stats line
 			const parts: string[] = [];
 			if (s) {
-				parts.push(`${s.findings.length} findings`);
-				if (s.criticalCount > 0) parts.push(`${s.criticalCount} critical`);
-				if (s.highCount > 0) parts.push(`${s.highCount} high`);
+				parts.push(`${findings.length} findings`);
+				if (safeNumber(s.criticalCount) > 0)
+					parts.push(`${safeNumber(s.criticalCount)} critical`);
+				if (safeNumber(s.highCount) > 0)
+					parts.push(`${safeNumber(s.highCount)} high`);
 			}
-			if (job.completedAt) {
-				parts.push(`${((job.completedAt - job.startedAt) / 1000).toFixed(1)}s`);
+			const completedAt = safeNumber(job.completedAt);
+			const startedAt = safeNumber(job.startedAt);
+			if (completedAt > 0 && startedAt > 0) {
+				parts.push(`${((completedAt - startedAt) / 1000).toFixed(1)}s`);
 			}
 			if (parts.length) {
 				line +=
@@ -280,38 +370,49 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			// Verdict
-			if (s?.verdict) {
-				line += `\n  ${theme.fg("accent", `Verdict: ${s.verdict}`)}`;
+			const verdict = safeString(s?.verdict);
+			if (verdict) {
+				line += `\n  ${theme.fg("accent", `Verdict: ${verdict}`)}`;
 			}
 
 			// Result preview (collapsed) or full report (expanded)
 			if (expanded && s) {
-				const suppressedCount = s.findings.filter(
-					(f: any) => f._suppressed === true,
-				).length;
-				const reportLines = formatReviewForDisplay({
-					timestamp: new Date(job.startedAt).toISOString(),
-					files: job.files,
-					findings: s.findings,
-					summary: s.summary,
-					verdict: s.verdict,
-					criticalCount: s.criticalCount,
-					highCount: s.highCount,
-					mediumCount: s.mediumCount,
-					lowCount: s.lowCount,
-					nitCount: s.nitCount,
-					suppressedCount,
-				}).split("\n");
-				for (const rl of reportLines.slice(0, 40)) {
-					line += "\n" + theme.fg("dim", `  ${rl}`);
+				try {
+					const suppressedCount = findings.filter(
+						(f: any) => f._suppressed === true,
+					).length;
+					const reportLines = formatReviewForDisplay({
+						timestamp: safeTimestamp(job.startedAt),
+						files: Array.isArray(job.files) ? job.files : [],
+						findings,
+						summary: safeString(s.summary),
+						verdict,
+						criticalCount: safeNumber(s.criticalCount),
+						highCount: safeNumber(s.highCount),
+						mediumCount: safeNumber(s.mediumCount),
+						lowCount: safeNumber(s.lowCount),
+						nitCount: safeNumber(s.nitCount),
+						suppressedCount,
+					}).split("\n");
+					for (const rl of reportLines.slice(0, 40)) {
+						line += "\n" + theme.fg("dim", `  ${rl}`);
+					}
+					if (reportLines.length > 40) {
+						line +=
+							"\n" +
+							theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
+					}
+				} catch (err) {
+					console.warn(
+						`${LOG_PREFIX} Failed rendering expanded review report: ${toErrorMessage(err)}`,
+					);
+					line += "\n  " + theme.fg("dim", "Review report could not be rendered.");
 				}
-				if (reportLines.length > 40) {
-					line +=
-						"\n" +
-						theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
+			} else {
+				const summary = safeString(s?.summary);
+				if (summary) {
+					line += "\n  " + theme.fg("dim", `⎿  ${summary.slice(0, 80)}`);
 				}
-			} else if (s?.summary) {
-				line += "\n  " + theme.fg("dim", `⎿  ${s.summary.slice(0, 80)}`);
 			}
 
 			return new Text(line, 0, 0);
@@ -320,26 +421,34 @@ export default function (pi: ExtensionAPI): void {
 
 	function sendReviewNotification(piRef: ExtensionAPI, job: ReviewJob) {
 		const s = job.synthesisResult;
-		const suppressedCount =
-			s?.findings?.filter((f: any) => f._suppressed === true).length ?? 0;
-		let report = s
-			? formatReviewForDisplay({
-					timestamp: new Date(job.startedAt).toISOString(),
-					files: job.files,
-					findings: s.findings,
-					summary: s.summary,
-					verdict: s.verdict,
-					criticalCount: s.criticalCount,
-					highCount: s.highCount,
-					mediumCount: s.mediumCount,
-					lowCount: s.lowCount,
-					nitCount: s.nitCount,
+		const findings = safeFindings(s);
+		const suppressedCount = findings.filter(
+			(f: any) => f._suppressed === true,
+		).length;
+		let report = "Review completed but synthesis produced no output.";
+		if (s) {
+			try {
+				report = formatReviewForDisplay({
+					timestamp: safeTimestamp(job.startedAt),
+					files: Array.isArray(job.files) ? job.files : [],
+					findings,
+					summary: safeString(s.summary),
+					verdict: safeString(s.verdict),
+					criticalCount: safeNumber(s.criticalCount),
+					highCount: safeNumber(s.highCount),
+					mediumCount: safeNumber(s.mediumCount),
+					lowCount: safeNumber(s.lowCount),
+					nitCount: safeNumber(s.nitCount),
 					suppressedCount,
-				})
-			: "Review completed but synthesis produced no output.";
-		const lensErrors = job.lenses
+				});
+			} catch (err) {
+				warnExtensionError("formatting review notification", err, lastContext);
+				report = `Review completed, but report formatting failed: ${toErrorMessage(err)}`;
+			}
+		}
+		const lensErrors = safeLenses(job)
 			.map((lens) => {
-				const state = job.states.get(lens);
+				const state = getLensState(job.states, lens);
 				return state?.status === "error"
 					? `- ${lens}: ${state.errorMessage ?? "lens failed"}`
 					: undefined;
@@ -354,7 +463,7 @@ export default function (pi: ExtensionAPI): void {
 		const serializableJob = {
 			...job,
 			states: Object.fromEntries(
-				[...job.states.entries()].map(([lens, state]) => [
+				lensStateEntries(job.states).map(([lens, state]) => [
 					lens,
 					{ ...state, session: undefined },
 				]),
@@ -362,17 +471,18 @@ export default function (pi: ExtensionAPI): void {
 			synthesisSession: undefined,
 		};
 
-		void Promise.resolve(
-			piRef.sendMessage<ReviewJob>(
-				{
-					customType: "drykiss-review-complete",
-					content: report,
-					display: true,
-					details: serializableJob as unknown as ReviewJob,
-				},
-				{ deliverAs: "followUp", triggerTurn: true },
-			),
-		).catch((err) => warnExtensionError("sending review notification", err));
+		void sendMessageSafely(
+			piRef,
+			{
+				customType: "drykiss-review-complete",
+				content: report,
+				display: true,
+				details: serializableJob as unknown as ReviewJob,
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+			"sending review notification",
+			lastContext,
+		);
 	}
 
 	// ── /drykiss — Full multi-lens KISS/DRY review ─────────

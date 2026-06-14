@@ -324,6 +324,29 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].userPrompt).toContain("Project Review Guidelines");
 		expect(prompts[0].userPrompt).toContain("Prefer small focused changes.");
 	});
+
+	it("automatically loads project review guidelines from the filesystem", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
+		try {
+			await mkdir(join(dir, ".pi", "drykiss"), { recursive: true });
+			await writeFile(
+				join(dir, ".pi", "drykiss", "review-guidelines.md"),
+				"Use project idioms.",
+			);
+
+			const prompts = await buildReviewPrompts(
+				dir,
+				mockFiles,
+				mockDiffs,
+				"simplicity",
+			);
+
+			expect(prompts[0].userPrompt).toContain("Project Review Guidelines");
+			expect(prompts[0].userPrompt).toContain("Use project idioms.");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ── project guidelines ─────────────────────────────────────────────────
