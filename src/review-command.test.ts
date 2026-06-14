@@ -421,6 +421,16 @@ describe("review command error handling", () => {
 		);
 	});
 
+	it("reports parse errors without starting a review", async () => {
+		await handleDrykissCommand('"unterminated', mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Invalid arguments"),
+			"error",
+		);
+		expect(mockManager.startReview).not.toHaveBeenCalled();
+	});
+
 	it("starts an isolated review branch when requested", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([
@@ -440,6 +450,48 @@ describe("review command error handling", () => {
 			originId: "origin-1",
 		});
 		expect(mockManager.startReview).toHaveBeenCalled();
+	});
+
+	it("cleans up an isolated review branch when review start fails", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "test.ts", status: "modified", language: "TypeScript" },
+		]);
+		mockCtx.sessionManager = makeReviewSessionManager();
+		mockCtx.navigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+		mockManager.startReview.mockRejectedValue(new Error("Model not found"));
+
+		await handleDrykissCommand("--branch", mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.navigateTree).toHaveBeenCalledWith("origin-1", {
+			summarize: false,
+		});
+		expect(mockPi.appendEntry).toHaveBeenCalledWith("drykiss-review-session", {
+			active: false,
+			originId: undefined,
+		});
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("DRYKISS review failed: Model not found"),
+			"error",
+		);
+	});
+
+	it("cleans up an isolated review branch when confirmation is declined", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "test.ts", status: "modified", language: "TypeScript" },
+		]);
+		mockCtx.sessionManager = makeReviewSessionManager();
+		mockCtx.navigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+		mockCtx.ui.confirm.mockResolvedValue(false);
+
+		await handleDrykissCommand("--branch", mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.navigateTree).toHaveBeenCalledWith("origin-1", {
+			summarize: false,
+		});
+		expect(mockManager.startReview).not.toHaveBeenCalled();
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith("Review cancelled.", "info");
 	});
 
 	it("ends an isolated review branch", async () => {

@@ -25,11 +25,13 @@ import {
 	setReviewInProgress,
 	startReviewSession,
 } from "./review-session.js";
+import { resolveSmartDefault } from "./smart-default.js";
 import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
 import { filterIgnored } from "./review-result.js";
 import { LOG_PREFIX } from "./constants.js";
+import { toErrorMessage } from "./error-utils.js";
 
 export const COMMAND_NAME = "drykiss";
 export const KISS_COMMAND_NAME = "drykiss-kiss";
@@ -158,66 +160,12 @@ export function parseArgs(args: string): ParsedArgs {
 	return { files, ref, staged, all, model, pr, branch, explicitRef };
 }
 
-async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
-	const result = await pi.exec("git", ["status", "--porcelain"]);
-	return result.code === 0 && result.stdout.trim().length > 0;
-}
-
-async function getCurrentBranch(pi: ExtensionAPI): Promise<string | null> {
-	const result = await pi.exec("git", ["branch", "--show-current"]);
-	if (result.code === 0 && result.stdout.trim()) {
-		return result.stdout.trim();
-	}
-	return null;
-}
-
-async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
-	const result = await pi.exec("git", [
-		"symbolic-ref",
-		"refs/remotes/origin/HEAD",
-		"--short",
-	]);
-	if (result.code === 0 && result.stdout.trim()) {
-		return result.stdout.trim().replace("origin/", "");
-	}
-	const branches = await pi.exec("git", [
-		"branch",
-		"--format=%(refname:short)",
-	]);
-	if (branches.code === 0) {
-		const list = branches.stdout
-			.trim()
-			.split("\n")
-			.filter((b) => b.trim());
-		if (list.includes("main")) return "main";
-		if (list.includes("master")) return "master";
-	}
-	return "main";
-}
-
-async function resolveSmartDefault(
-	pi: ExtensionAPI,
-): Promise<{ ref: string; label: string }> {
-	if (await hasUncommittedChanges(pi)) {
-		return { ref: "HEAD", label: "uncommitted changes" };
-	}
-	const current = await getCurrentBranch(pi);
-	const defaultBranch = await getDefaultBranch(pi);
-	if (current && current !== defaultBranch) {
-		return {
-			ref: defaultBranch,
-			label: `branch diff against ${defaultBranch}`,
-		};
-	}
-	return { ref: "HEAD", label: "local changes" };
-}
-
 /**
  * Common review setup: parses args, gathers files, diffs, contents, and project index.
  * Shared between handleDrykissCommand and handleSingleLensCommand.
  */
 async function prepareReview(
-	args: string,
+	argsOrOptions: string | ParsedArgs,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
 	needsProjectIndex: boolean,
@@ -232,7 +180,8 @@ async function prepareReview(
 	config: Awaited<ReturnType<typeof loadConfig>>;
 	activeConstraints: string;
 } | null> {
-	let options = parseArgs(args);
+	let options =
+		typeof argsOrOptions === "string" ? parseArgs(argsOrOptions) : argsOrOptions;
 
 	// Apply smart default scope when no explicit review target is given.
 	const hasExplicitReviewTarget = Boolean(
@@ -366,22 +315,30 @@ async function runLensReview(
 }
 
 async function prepareReviewOrNotify(
-	args: string,
+	argsOrOptions: string | ParsedArgs,
 	ctx: ExtensionCommandContext,
 	pi: ExtensionAPI,
 	needsProjectIndex: boolean,
 ): Promise<NonNullable<Awaited<ReturnType<typeof prepareReview>>> | null> {
 	try {
-		return await prepareReview(args, ctx, pi, needsProjectIndex);
+		return await prepareReview(argsOrOptions, ctx, pi, needsProjectIndex);
 	} catch (err) {
-		const msg = errorMessage(err);
+		const msg = toErrorMessage(err);
 		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
 		return null;
 	}
 }
 
-function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
+function parseArgsOrNotify(
+	args: string,
+	ctx: ExtensionCommandContext,
+): ParsedArgs | null {
+	try {
+		return parseArgs(args);
+	} catch (err) {
+		ctx.ui.notify(`${LOG_PREFIX} Invalid arguments: ${toErrorMessage(err)}`, "error");
+		return null;
+	}
 }
 
 async function startReviewSessionOrNotify(
@@ -397,7 +354,7 @@ async function startReviewSessionOrNotify(
 		return true;
 	} catch (err) {
 		ctx.ui.notify(
-			`${LOG_PREFIX} Failed to start review session: ${errorMessage(err)}`,
+			`${LOG_PREFIX} Failed to start review session: ${toErrorMessage(err)}`,
 			"error",
 		);
 		return false;
@@ -418,7 +375,7 @@ async function cleanupReviewSessionQuietly(
 		}
 	} catch (err) {
 		ctx.ui.notify(
-			`${LOG_PREFIX} Failed to clean up review session: ${errorMessage(err)}`,
+			`${LOG_PREFIX} Failed to clean up review session: ${toErrorMessage(err)}`,
 			"warning",
 		);
 	}
@@ -430,7 +387,8 @@ export async function handleDrykissCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
-	const parsed = parseArgs(args);
+	const parsed = parseArgsOrNotify(args, ctx);
+	if (!parsed) return;
 	let branchStarted = false;
 
 	if (parsed.branch) {
@@ -438,7 +396,7 @@ export async function handleDrykissCommand(
 		branchStarted = true;
 	}
 
-	const prepared = await prepareReviewOrNotify(args, ctx, pi, true);
+	const prepared = await prepareReviewOrNotify(parsed, ctx, pi, true);
 	if (!prepared) {
 		if (branchStarted) await cleanupReviewSessionQuietly(pi, ctx);
 		return;
@@ -492,13 +450,13 @@ export async function handleDrykissCommand(
 			applyReviewState(ctx);
 		} catch (err) {
 			ctx.ui.notify(
-				`${LOG_PREFIX} Review started, but failed to update session widget: ${errorMessage(err)}`,
+				`${LOG_PREFIX} Review started, but failed to update session widget: ${toErrorMessage(err)}`,
 				"warning",
 			);
 		}
 	} catch (err) {
 		if (branchStarted) await cleanupReviewSessionQuietly(pi, ctx);
-		ctx.ui.notify(`DRYKISS review failed: ${errorMessage(err)}`, "error");
+		ctx.ui.notify(`DRYKISS review failed: ${toErrorMessage(err)}`, "error");
 	}
 }
 
@@ -521,7 +479,7 @@ export async function handleEndReviewCommand(
 		}
 	} catch (err) {
 		ctx.ui.notify(
-			`${LOG_PREFIX} Failed to end review session: ${errorMessage(err)}`,
+			`${LOG_PREFIX} Failed to end review session: ${toErrorMessage(err)}`,
 			"error",
 		);
 	}

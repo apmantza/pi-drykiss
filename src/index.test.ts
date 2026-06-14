@@ -50,6 +50,13 @@ describe("parseArgs", () => {
 		expect(opts.files).toEqual([]);
 	});
 
+	it("parses isolated review branch flag with other targets", () => {
+		const opts = parseArgs("--staged --branch src/a.ts");
+		expect(opts.staged).toBe(true);
+		expect(opts.branch).toBe(true);
+		expect(opts.files).toEqual(["src/a.ts"]);
+	});
+
 	it("parses all flags together", () => {
 		const opts = parseArgs(
 			"--staged --ref=main --model=haiku src/a.ts src/b.ts",

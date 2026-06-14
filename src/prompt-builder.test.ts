@@ -367,6 +367,24 @@ describe("loadProjectReviewGuidelines", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
+
+	it("warns and returns null when a guidelines path cannot be read", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			await mkdir(join(dir, ".pi", "drykiss", "review-guidelines.md"), {
+				recursive: true,
+			});
+
+			await expect(loadProjectReviewGuidelines(dir)).resolves.toBeNull();
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("Could not read review guidelines"),
+			);
+		} finally {
+			warn.mockRestore();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ── buildSynthesisPrompt ────────────────────────────────────────────────

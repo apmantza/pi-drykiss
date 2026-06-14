@@ -325,8 +325,7 @@ export async function loadProjectReviewGuidelines(
 			const content = await readFile(p, "utf8");
 			return content.trim() || null;
 		} catch (err) {
-			const code = getNodeErrorCode(err);
-			if (code !== "ENOENT" && code !== "EISDIR") {
+			if (getNodeErrorCode(err) !== "ENOENT") {
 				console.warn(`${LOG_PREFIX} Could not read review guidelines: ${p}`);
 			}
 		}

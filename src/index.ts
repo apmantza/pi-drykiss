@@ -41,21 +41,21 @@ import { ReviewManager } from "./review-manager.js";
 import { ReviewProgressWidget } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
 import { LOG_PREFIX } from "./constants.js";
+import { toErrorMessage } from "./error-utils.js";
 
 function warnExtensionError(
 	action: string,
 	err: unknown,
 	ctx?: ExtensionContext,
 ): void {
-	const msg = err instanceof Error ? err.message : String(err);
-	const text = `${LOG_PREFIX} Failed ${action}: ${msg}`;
+	const text = `${LOG_PREFIX} Failed ${action}: ${toErrorMessage(err)}`;
 	console.warn(text);
 	try {
 		ctx?.ui.notify(text, "warning");
 	} catch (notifyErr) {
-		const notifyMsg =
-			notifyErr instanceof Error ? notifyErr.message : String(notifyErr);
-		console.warn(`${LOG_PREFIX} Failed to show warning notification: ${notifyMsg}`);
+		console.warn(
+			`${LOG_PREFIX} Failed to show warning notification: ${toErrorMessage(notifyErr)}`,
+		);
 	}
 }
 
@@ -204,8 +204,10 @@ export default function (pi: ExtensionAPI): void {
 				),
 			);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			ctx.ui.notify(`DRYKISS autoreview failed: ${msg}`, "error");
+			ctx.ui.notify(
+				`DRYKISS autoreview failed: ${toErrorMessage(err)}`,
+				"error",
+			);
 		} finally {
 			autoreviewRunning = false;
 		}
@@ -516,7 +518,7 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(lines.join("\n"), "info");
 			} catch (err) {
 				ctx.ui.notify(
-					`${LOG_PREFIX} Failed to load review history: ${err instanceof Error ? err.message : String(err)}`,
+					`${LOG_PREFIX} Failed to load review history: ${toErrorMessage(err)}`,
 					"error",
 				);
 			}
