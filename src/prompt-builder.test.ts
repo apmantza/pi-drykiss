@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ChangedFile } from "./types.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtemp, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import {
+	mkdtemp,
+	writeFile,
+	readFile,
+	readdir,
+	rm,
+	mkdir,
+} from "node:fs/promises";
 
 // ── Mocks ───────────────────────────────────────────────────────────────
 
@@ -32,6 +39,7 @@ import {
 	loadLensSystemPrompt,
 	loadSynthesisSystemPrompt,
 	getPromptPath,
+	loadProjectReviewGuidelines,
 } from "./prompt-builder.js";
 import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
 import {
@@ -302,6 +310,62 @@ describe("buildReviewPrompts", () => {
 			"simplicity",
 			expect.objectContaining({ activeConstraints: "disable: [K1]" }),
 		);
+	});
+
+	it("includes project review guidelines when provided", async () => {
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"simplicity",
+			{ guidelines: "Prefer small focused changes." },
+		);
+
+		expect(prompts[0].userPrompt).toContain("Project Review Guidelines");
+		expect(prompts[0].userPrompt).toContain("Prefer small focused changes.");
+	});
+});
+
+// ── project guidelines ─────────────────────────────────────────────────
+
+describe("loadProjectReviewGuidelines", () => {
+	it("loads preferred .pi/drykiss review guidelines", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
+		try {
+			await mkdir(join(dir, ".pi", "drykiss"), { recursive: true });
+			await writeFile(
+				join(dir, ".pi", "drykiss", "review-guidelines.md"),
+				"\nPrefer small focused changes.\n",
+			);
+
+			await expect(loadProjectReviewGuidelines(dir)).resolves.toBe(
+				"Prefer small focused changes.",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("falls back to REVIEW_GUIDELINES.md", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
+		try {
+			await writeFile(join(dir, "REVIEW_GUIDELINES.md"), "Use project idioms.\n");
+
+			await expect(loadProjectReviewGuidelines(dir)).resolves.toBe(
+				"Use project idioms.",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("returns null when no guidelines file exists", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
+		try {
+			await expect(loadProjectReviewGuidelines(dir)).resolves.toBeNull();
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
 	});
 });
 

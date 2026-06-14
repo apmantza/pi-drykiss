@@ -19,6 +19,12 @@ import type {
 import { LENS_NAMES } from "./types.js";
 import { parseFindingsJson } from "./parse-findings.js";
 import { isPrReference, type PrInfo } from "./github-pr.js";
+import {
+	applyReviewState,
+	returnFromReviewSession,
+	setReviewInProgress,
+	startReviewSession,
+} from "./review-session.js";
 import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
@@ -39,16 +45,67 @@ export interface ParsedArgs extends ReviewOptions {
 	readonly model?: string;
 	/** PR reference if reviewing a GitHub PR */
 	readonly pr?: PrInfo;
+	/** Whether to start an isolated review branch */
+	readonly branch?: boolean;
+	/** Whether --ref was explicitly provided */
+	readonly explicitRef?: boolean;
+}
+
+export function tokenizeArgs(value: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let quote: '"' | "'" | null = null;
+
+	for (let i = 0; i < value.length; i++) {
+		const char = value[i];
+
+		if (quote) {
+			if (char === "\\" && i + 1 < value.length) {
+				current += value[i + 1];
+				i += 1;
+				continue;
+			}
+			if (char === quote) {
+				quote = null;
+				continue;
+			}
+			current += char;
+			continue;
+		}
+
+		if (char === '"' || char === "'") {
+			quote = char;
+			continue;
+		}
+
+		if (/\s/.test(char)) {
+			if (current.length > 0) {
+				tokens.push(current);
+				current = "";
+			}
+			continue;
+		}
+
+		current += char;
+	}
+
+	if (current.length > 0) {
+		tokens.push(current);
+	}
+
+	return tokens;
 }
 
 export function parseArgs(args: string): ParsedArgs {
-	const tokens = args.trim().split(/\s+/).filter(Boolean);
+	const tokens = tokenizeArgs(args.trim());
 	const files: string[] = [];
 	let ref = "HEAD";
 	let staged = false;
 	let all = false;
 	let model: string | undefined;
 	let pr: PrInfo | undefined;
+	let branch = false;
+	let explicitRef = false;
 
 	for (const token of tokens) {
 		if (token === "--staged") {
@@ -56,9 +113,12 @@ export function parseArgs(args: string): ParsedArgs {
 		} else if (token === "--all") {
 			all = true;
 		} else if (token.startsWith("--ref=")) {
+			explicitRef = true;
 			ref = token.slice("--ref=".length);
 		} else if (token.startsWith("--model=")) {
 			model = token.slice("--model=".length);
+		} else if (token === "--branch") {
+			branch = true;
 		} else if (isPrReference(token)) {
 			// Will be resolved in prepareReview after we get the git remote
 			pr = { owner: "", repo: "", number: 0, _raw: token } as PrInfo & {
@@ -69,7 +129,61 @@ export function parseArgs(args: string): ParsedArgs {
 		}
 	}
 
-	return { files, ref, staged, all, model, pr };
+	return { files, ref, staged, all, model, pr, branch, explicitRef };
+}
+
+async function hasUncommittedChanges(pi: ExtensionAPI): Promise<boolean> {
+	const result = await pi.exec("git", ["status", "--porcelain"]);
+	return result.code === 0 && result.stdout.trim().length > 0;
+}
+
+async function getCurrentBranch(pi: ExtensionAPI): Promise<string | null> {
+	const result = await pi.exec("git", ["branch", "--show-current"]);
+	if (result.code === 0 && result.stdout.trim()) {
+		return result.stdout.trim();
+	}
+	return null;
+}
+
+async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
+	const result = await pi.exec("git", [
+		"symbolic-ref",
+		"refs/remotes/origin/HEAD",
+		"--short",
+	]);
+	if (result.code === 0 && result.stdout.trim()) {
+		return result.stdout.trim().replace("origin/", "");
+	}
+	const branches = await pi.exec("git", [
+		"branch",
+		"--format=%(refname:short)",
+	]);
+	if (branches.code === 0) {
+		const list = branches.stdout
+			.trim()
+			.split("\n")
+			.filter((b) => b.trim());
+		if (list.includes("main")) return "main";
+		if (list.includes("master")) return "master";
+	}
+	return "main";
+}
+
+async function resolveSmartDefault(
+	pi: ExtensionAPI,
+): Promise<{ ref: string; label: string }> {
+	if (await hasUncommittedChanges(pi)) {
+		return { ref: "HEAD", label: "uncommitted changes" };
+	}
+	const current = await getCurrentBranch(pi);
+	const defaultBranch = await getDefaultBranch(pi);
+	if (current && current !== defaultBranch) {
+		return {
+			ref: defaultBranch,
+			label: `branch diff against ${defaultBranch}`,
+		};
+	}
+	return { ref: "HEAD", label: "local changes" };
 }
 
 /**
@@ -92,7 +206,22 @@ async function prepareReview(
 	config: Awaited<ReturnType<typeof loadConfig>>;
 	activeConstraints: string;
 } | null> {
-	const options = parseArgs(args);
+	let options = parseArgs(args);
+
+	// Apply smart default scope when no explicit review target is given.
+	const hasExplicitReviewTarget = Boolean(
+		options.files.length > 0 ||
+			options.staged ||
+			options.all ||
+			options.pr ||
+			options.explicitRef,
+	);
+	if (!hasExplicitReviewTarget) {
+		const smart = await resolveSmartDefault(pi);
+		options = { ...options, ref: smart.ref };
+		ctx.ui.notify(`Reviewing ${smart.label}`, "info");
+	}
+
 	await ensureDefaultPrompts(ctx.cwd);
 	const { config, warnings } = await loadEffectiveConfig(ctx.cwd);
 	for (const warning of warnings) {
@@ -219,9 +348,53 @@ async function prepareReviewOrNotify(
 	try {
 		return await prepareReview(args, ctx, pi, needsProjectIndex);
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
+		const msg = errorMessage(err);
 		ctx.ui.notify(`${LOG_PREFIX} Failed to prepare review: ${msg}`, "error");
 		return null;
+	}
+}
+
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+async function startReviewSessionOrNotify(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+): Promise<boolean> {
+	try {
+		const session = await startReviewSession(pi, ctx);
+		if (!session.success) {
+			ctx.ui.notify(session.error, "warning");
+			return false;
+		}
+		return true;
+	} catch (err) {
+		ctx.ui.notify(
+			`${LOG_PREFIX} Failed to start review session: ${errorMessage(err)}`,
+			"error",
+		);
+		return false;
+	}
+}
+
+async function cleanupReviewSessionQuietly(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	try {
+		const result = await returnFromReviewSession(pi, ctx);
+		if (!result.success) {
+			ctx.ui.notify(
+				result.error ?? `${LOG_PREFIX} Failed to clean up review session.`,
+				"warning",
+			);
+		}
+	} catch (err) {
+		ctx.ui.notify(
+			`${LOG_PREFIX} Failed to clean up review session: ${errorMessage(err)}`,
+			"warning",
+		);
 	}
 }
 
@@ -231,8 +404,19 @@ export async function handleDrykissCommand(
 	pi: ExtensionAPI,
 	manager: import("./review-manager.js").ReviewManager,
 ): Promise<void> {
+	const parsed = parseArgs(args);
+	let branchStarted = false;
+
+	if (parsed.branch) {
+		if (!(await startReviewSessionOrNotify(pi, ctx))) return;
+		branchStarted = true;
+	}
+
 	const prepared = await prepareReviewOrNotify(args, ctx, pi, true);
-	if (!prepared) return;
+	if (!prepared) {
+		if (branchStarted) await cleanupReviewSessionQuietly(pi, ctx);
+		return;
+	}
 
 	const {
 		options,
@@ -256,6 +440,7 @@ export async function handleDrykissCommand(
 			`Review ${files.length} file(s) (${scopeLabel}) with 7 parallel lens reviews + synthesis.\nContext: ${contextLabel}\n\nFiles: ${fileList}\n\nProceed?`,
 		);
 		if (!ok) {
+			if (branchStarted) await cleanupReviewSessionQuietly(pi, ctx);
 			ctx.ui.notify("Review cancelled.", "info");
 			return;
 		}
@@ -276,8 +461,43 @@ export async function handleDrykissCommand(
 			`DRYKISS review **${jobId}** started in background. Watch the widget above the editor for live progress. Results will appear here when complete.`,
 			"info",
 		);
-	} catch (err: any) {
-		ctx.ui.notify(`DRYKISS review failed: ${err.message}`, "error");
+		try {
+			setReviewInProgress(true);
+			applyReviewState(ctx);
+		} catch (err) {
+			ctx.ui.notify(
+				`${LOG_PREFIX} Review started, but failed to update session widget: ${errorMessage(err)}`,
+				"warning",
+			);
+		}
+	} catch (err) {
+		if (branchStarted) await cleanupReviewSessionQuietly(pi, ctx);
+		ctx.ui.notify(`DRYKISS review failed: ${errorMessage(err)}`, "error");
+	}
+}
+
+// ── /drykiss-end — Return from isolated review branch ────
+
+export async function handleEndReviewCommand(
+	_args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+): Promise<void> {
+	try {
+		const result = await returnFromReviewSession(pi, ctx);
+		if (result.success) {
+			ctx.ui.notify(
+				"DRYKISS review session ended. Returned to original position.",
+				"info",
+			);
+		} else {
+			ctx.ui.notify(result.error ?? "Failed to end review session.", "warning");
+		}
+	} catch (err) {
+		ctx.ui.notify(
+			`${LOG_PREFIX} Failed to end review session: ${errorMessage(err)}`,
+			"error",
+		);
 	}
 }
 

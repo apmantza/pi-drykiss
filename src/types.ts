@@ -7,6 +7,17 @@ function normalizeSeverity(raw: unknown): Severity {
 	return VALID_SEVERITIES.has(s) ? (s as Severity) : "medium";
 }
 
+const VALID_PRIORITIES = new Set(["P0", "P1", "P2", "P3"]);
+
+function normalizePriority(
+	raw: unknown,
+): "P0" | "P1" | "P2" | "P3" | undefined {
+	const p = typeof raw === "string" ? raw.toUpperCase() : undefined;
+	return p && VALID_PRIORITIES.has(p)
+		? (p as "P0" | "P1" | "P2" | "P3")
+		: undefined;
+}
+
 export interface ChangedFile {
 	readonly path: string;
 	readonly status:
@@ -59,6 +70,15 @@ export interface Finding {
 	readonly file: string;
 	readonly line?: number;
 	readonly severity: Severity;
+	/**
+	 * Review priority tag, independent of severity. Mirrors Codex-style
+	 * priority levels:
+	 *   - P0: drop everything to fix (blocking release/operations).
+	 *   - P1: urgent, should be addressed in the next cycle.
+	 *   - P2: normal, to be fixed eventually.
+	 *   - P3: low, nice to have.
+	 */
+	readonly priority?: "P0" | "P1" | "P2" | "P3";
 	readonly category: string;
 	readonly summary: string;
 	readonly detail: string;
@@ -260,6 +280,7 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 			riskCode: undefined,
 			action: undefined,
 			riskLevel: undefined,
+			priority: undefined,
 		};
 	}
 	return {
@@ -282,6 +303,7 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
 		riskCode: raw.riskCode ? String(raw.riskCode) : undefined,
 		action: isValidAction(raw.action) ? raw.action : undefined,
 		riskLevel: isValidRiskLevel(raw.riskLevel) ? raw.riskLevel : undefined,
+		priority: normalizePriority(raw.priority),
 	};
 }
 

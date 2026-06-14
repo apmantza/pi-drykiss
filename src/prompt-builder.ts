@@ -17,7 +17,7 @@ import type { ChangedFile, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
-import { getNodeErrorCode } from "./constants.js";
+import { getNodeErrorCode, LOG_PREFIX } from "./constants.js";
 import {
 	composeLensPrompt,
 	composeSynthesisPrompt,
@@ -308,8 +308,35 @@ export interface ReviewPrompt {
 	readonly userPrompt: string;
 }
 
+/**
+ * Load project-specific review guidelines if present.
+ * Looks for `.pi/drykiss/review-guidelines.md` (preferred) or
+ * `REVIEW_GUIDELINES.md` next to `.pi` and returns the trimmed contents,
+ * or `null` if no file exists.
+ */
+export async function loadProjectReviewGuidelines(
+	cwd: string,
+): Promise<string | null> {
+	const drykissPath = join(cwd, ".pi", "drykiss", "review-guidelines.md");
+	const legacyPath = join(cwd, "REVIEW_GUIDELINES.md");
+
+	for (const p of [drykissPath, legacyPath]) {
+		try {
+			const content = await readFile(p, "utf8");
+			return content.trim() || null;
+		} catch (err) {
+			const code = getNodeErrorCode(err);
+			if (code !== "ENOENT" && code !== "EISDIR") {
+				console.warn(`${LOG_PREFIX} Could not read review guidelines: ${p}`);
+			}
+		}
+	}
+
+	return null;
+}
+
 export async function buildReviewPrompts(
-	_cwd: string,
+	cwd: string,
 	files: ChangedFile[],
 	diffs: Map<string, string>,
 	lens: ReviewLens,
@@ -321,6 +348,7 @@ export async function buildReviewPrompts(
 		projectIndex?: ProjectIndexEntry[];
 		activeConstraints?: string;
 		commands?: { test?: string; lint?: string };
+		guidelines?: string | null;
 	},
 ): Promise<ReviewPrompt[]> {
 	const context = buildFileContext(files, diffs, options?.contents);
@@ -331,11 +359,18 @@ export async function buildReviewPrompts(
 	const composeOpts: ComposeOptions = {
 		activeConstraints: options?.activeConstraints,
 	};
+	const guidelines =
+		options?.guidelines === undefined
+			? await loadProjectReviewGuidelines(cwd)
+			: options.guidelines;
 
 	function buildUserPrompt(includeIndex: boolean): string {
 		let prompt = `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
 		if (commandsBlock) prompt += `\n${commandsBlock}`;
 		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
+		if (guidelines) {
+			prompt += `\n\n## Project Review Guidelines\n\n${guidelines}`;
+		}
 		return prompt;
 	}
 

@@ -53,9 +53,30 @@ vi.mock("./persist.js", () => ({
 }));
 
 // Import after mocks
-const { parseArgs, handleDrykissCommand, executeDrykissAutoreviewTool } =
-	await import("./review-command.js");
+const {
+	parseArgs,
+	handleDrykissCommand,
+	handleEndReviewCommand,
+	executeDrykissAutoreviewTool,
+} = await import("./review-command.js");
+const { clearReviewSession } = await import("./review-session.js");
 const { parseFindingsJson } = await import("./parse-findings.js");
+
+function makeReviewSessionManager() {
+	return {
+		getLeafId: vi.fn().mockReturnValue("origin-1"),
+		getEntries: vi.fn().mockReturnValue([
+			{ id: "user-1", type: "message", message: { role: "user" } },
+		]),
+		getBranch: vi.fn().mockReturnValue([
+			{
+				type: "custom",
+				customType: "drykiss-review-session",
+				data: { active: true, originId: "origin-1" },
+			},
+		]),
+	};
+}
 
 describe("parseFindingsJson", () => {
 	it("parses a valid JSON findings array", () => {
@@ -135,6 +156,24 @@ describe("parseArgs", () => {
 		expect(opts.ref).toBe("develop");
 		expect(opts.model).toBe("sonnet");
 		expect(opts.files).toEqual(["src/a.ts", "src/b.ts"]);
+	});
+
+	it("handles quoted file paths with spaces", () => {
+		const opts = parseArgs('"src/my file.ts" "src/another file.ts"');
+		expect(opts.files).toEqual(["src/my file.ts", "src/another file.ts"]);
+	});
+
+	it("preserves values inside quotes", () => {
+		const opts = parseArgs('--ref="feature branch"');
+		expect(opts.ref).toBe("feature branch");
+		expect(opts.explicitRef).toBe(true);
+	});
+
+	it("parses isolated branch flag without treating it as a file", () => {
+		const opts = parseArgs("--branch --model=sonnet");
+		expect(opts.branch).toBe(true);
+		expect(opts.model).toBe("sonnet");
+		expect(opts.files).toEqual([]);
 	});
 });
 
@@ -232,18 +271,25 @@ describe("review command error handling", () => {
 				notify: vi.fn(),
 				confirm: vi.fn().mockResolvedValue(true),
 				select: vi.fn(),
+				setWidget: vi.fn(),
+				setEditorText: vi.fn(),
 			},
 			modelRegistry: {
 				getAvailable: vi
 					.fn()
 					.mockReturnValue([{ name: "mock", id: "mock", provider: "mock" }]),
 			},
+			sessionManager: {
+				getBranch: vi.fn().mockReturnValue([]),
+			},
 			hasUI: true,
 		};
 
 		mockPi = {
 			exec: vi.fn().mockResolvedValue({ stdout: "" }),
+			appendEntry: vi.fn(),
 		};
+		clearReviewSession(mockPi, mockCtx);
 
 		mockManager = {
 			startReview: vi.fn().mockResolvedValue("job-123"),
@@ -331,6 +377,76 @@ describe("review command error handling", () => {
 
 		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
 			expect.stringContaining("DRYKISS review failed: Model not found"),
+			"error",
+		);
+	});
+
+	it("starts an isolated review branch when requested", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "test.ts", status: "modified", language: "TypeScript" },
+		]);
+		mockCtx.sessionManager = makeReviewSessionManager();
+		mockCtx.navigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+
+		await handleDrykissCommand("--branch", mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.navigateTree).toHaveBeenCalledWith("user-1", {
+			summarize: false,
+			label: "drykiss-review",
+		});
+		expect(mockPi.appendEntry).toHaveBeenCalledWith("drykiss-review-session", {
+			active: true,
+			originId: "origin-1",
+		});
+		expect(mockManager.startReview).toHaveBeenCalled();
+	});
+
+	it("ends an isolated review branch", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "test.ts", status: "modified", language: "TypeScript" },
+		]);
+		mockCtx.sessionManager = makeReviewSessionManager();
+		mockCtx.navigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+		await handleDrykissCommand("--branch", mockCtx, mockPi, mockManager);
+		vi.clearAllMocks();
+
+		await handleEndReviewCommand("", mockCtx, mockPi);
+
+		expect(mockCtx.navigateTree).toHaveBeenCalledWith("origin-1", {
+			summarize: false,
+		});
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			"DRYKISS review session ended. Returned to original position.",
+			"info",
+		);
+	});
+
+	it("warns when ending a review branch but none is active", async () => {
+		await handleEndReviewCommand("", mockCtx, mockPi);
+
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Not in a DRYKISS review session"),
+			"warning",
+		);
+	});
+
+	it("reports navigation errors while ending a review branch", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "test.ts", status: "modified", language: "TypeScript" },
+		]);
+		mockCtx.sessionManager = makeReviewSessionManager();
+		mockCtx.navigateTree = vi.fn().mockResolvedValue({ cancelled: false });
+		await handleDrykissCommand("--branch", mockCtx, mockPi, mockManager);
+		mockCtx.navigateTree.mockRejectedValueOnce(new Error("nav failed"));
+		vi.clearAllMocks();
+
+		await handleEndReviewCommand("", mockCtx, mockPi);
+
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to end review session: nav failed"),
 			"error",
 		);
 	});

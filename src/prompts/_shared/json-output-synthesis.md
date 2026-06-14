@@ -21,7 +21,8 @@ Example (do NOT include any surrounding text or fences):
       "suggestion": "Specific fix",
       "confidence": "confirmed|likely|suspect",
       "action": "fix|discuss|ignore",
-      "riskLevel": "low|medium|high"
+      "riskLevel": "low|medium|high",
+      "priority": "P0|P1|P2|P3"
     }
   ],
   "mermaidGraph": "graph TD\n  subgraph src/\n    A[file.ts]\n  end",
@@ -46,6 +47,7 @@ Rules:
 - Preserve the per-lens `consequence` and `fixability` fields from the original findings when merging; only edit if a downstream lens added evidence.
 - Preserve or set `action` and `riskLevel` on each synthesized finding. Use `action: fix` for concrete high-confidence suggestions, `discuss` for intent-challenging issues, and `ignore` for informational nits.
 - Use `riskLevel` to signal blast radius: `high` for security/reliability/architecture, `medium` for correctness/maintainability, `low` for localized style/nit issues.
+- Optionally set `priority` (P0–P3) on synthesized findings. If individual lens findings include priority tags, propagate the highest priority. If omitted, the UI will infer it from severity.
 - The `mermaidGraph` field is **optional**. Include a Mermaid `graph TD` string only when the architecture lens produced one or when you have enough structural context to draw meaningful file relationships. When absent, omit the field entirely.
 - The `files`, `nextSteps`, `notDone`, and `extensions` fields are **optional**. Include them only when they add value. `files` should list files actually inspected; `nextSteps` should list concrete follow-ups; `notDone` should surface incomplete lens work; `extensions` is for lens-specific structured data such as an architecture dependency graph.
 - When the architecture lens supplies a dependency graph, prefer placing it in `extensions.mermaidGraph` and only duplicate it at the top-level `mermaidGraph` if it is the most useful visualization for the report.

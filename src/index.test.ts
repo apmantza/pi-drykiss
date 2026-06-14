@@ -18,6 +18,7 @@ describe("parseArgs", () => {
 	it("parses --ref", () => {
 		const opts = parseArgs("--ref=main");
 		expect(opts.ref).toBe("main");
+		expect(opts.explicitRef).toBe(true);
 	});
 
 	it("parses file paths", () => {
@@ -41,6 +42,12 @@ describe("parseArgs", () => {
 	it("parses full provider/id model", () => {
 		const opts = parseArgs("--model=anthropic/claude-sonnet-4-5");
 		expect(opts.model).toBe("anthropic/claude-sonnet-4-5");
+	});
+
+	it("parses isolated review branch flag", () => {
+		const opts = parseArgs("--branch");
+		expect(opts.branch).toBe(true);
+		expect(opts.files).toEqual([]);
 	});
 
 	it("parses all flags together", () => {

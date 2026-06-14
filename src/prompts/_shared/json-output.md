@@ -14,7 +14,8 @@ Output findings as a single JSON array. Each finding is an object with these exa
     "fixability": "quick-fix|guided|manual",
     "suggestion": "Specific fix or alternative approach",
     "action": "fix|discuss|ignore",
-    "riskLevel": "low|medium|high"
+    "riskLevel": "low|medium|high",
+    "priority": "P0|P1|P2|P3"
   }
 ]
 
@@ -30,5 +31,6 @@ Rules:
 - `fixability` describes the *size* of the fix: `quick-fix` (one-line, mechanical), `guided` (touches a few lines, requires the author to follow the suggestion), `manual` (requires design judgment, may not be appropriate to apply directly).
 - `action` describes the *recommended response*: `fix` (apply the suggestion), `discuss` (challenges intent or needs human judgment), `ignore` (informational / nit).
 - `riskLevel` describes the *blast radius* independent of severity: `low` (localized), `medium` (correctness/maintainability), `high` (security, reliability, architecture).
+- `priority` is an optional Codex-style tag: `P0` (drop everything), `P1` (urgent), `P2` (normal), `P3` (nice to have). If omitted, synthesis will infer it from severity.
 - Default `action` to `fix` when the finding is concrete and high-confidence; use `discuss` for intent-challenging issues; use `ignore` only for informational nits.
 - Default `riskLevel` from the lens domain: security/architecture/resilience findings trend `high`; clarity/simplicity trends `low` to `medium`; tests trend `medium`.

@@ -64,6 +64,15 @@ describe("mapRawToFinding", () => {
 		expect(result.severity).toBe("medium");
 	});
 
+	it("normalizes priority tags", () => {
+		expect(mapRawToFinding({ priority: "p1" }).priority).toBe("P1");
+		expect(mapRawToFinding({ priority: "P0" }).priority).toBe("P0");
+	});
+
+	it("drops invalid priority values", () => {
+		expect(mapRawToFinding({ priority: "urgent" }).priority).toBeUndefined();
+	});
+
 	it("passes lens parameter through", () => {
 		const result = mapRawToFinding({}, "simplicity" as ReviewLens);
 		expect(result.lens).toBe("simplicity");

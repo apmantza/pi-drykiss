@@ -1,6 +1,7 @@
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
@@ -12,6 +13,7 @@ import {
 	handleTestsCommand,
 	handleSecurityCommand,
 	handleJobsCommand,
+	handleEndReviewCommand,
 	executeDrykissReviewTool,
 	executeDrykissAutoreviewTool,
 	DrykissReviewParams,
@@ -24,6 +26,7 @@ import {
 	TESTS_COMMAND_NAME,
 	SECURITY_COMMAND_NAME,
 } from "./review-command.js";
+import { applyReviewState, setReviewInProgress } from "./review-session.js";
 import {
 	handleConfigCommand,
 	handleSuppressCommand,
@@ -37,15 +40,48 @@ import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
 import { ReviewProgressWidget } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
+import { LOG_PREFIX } from "./constants.js";
+
+function warnExtensionError(
+	action: string,
+	err: unknown,
+	ctx?: ExtensionContext,
+): void {
+	const msg = err instanceof Error ? err.message : String(err);
+	const text = `${LOG_PREFIX} Failed ${action}: ${msg}`;
+	console.warn(text);
+	try {
+		ctx?.ui.notify(text, "warning");
+	} catch (notifyErr) {
+		const notifyMsg =
+			notifyErr instanceof Error ? notifyErr.message : String(notifyErr);
+		console.warn(`${LOG_PREFIX} Failed to show warning notification: ${notifyMsg}`);
+	}
+}
 
 export default function (pi: ExtensionAPI): void {
 	// ── Background review manager + live widget ────────────
 	const widget = new ReviewProgressWidget();
+	let lastContext: ExtensionContext | undefined;
 	const manager = new ReviewManager(
-		(_job) => widget.setJobs(manager.listJobs()),
+		(_job) => {
+			try {
+				widget.setJobs(manager.listJobs());
+			} catch (err) {
+				warnExtensionError("updating review widget", err, lastContext);
+			}
+		},
 		(job) => {
-			widget.setJobs(manager.listJobs());
-			sendReviewNotification(pi, job);
+			try {
+				widget.setJobs(manager.listJobs());
+				if (!manager.listJobs().some((j) => j.overallStatus === "running")) {
+					setReviewInProgress(false);
+					if (lastContext) applyReviewState(lastContext);
+				}
+				sendReviewNotification(pi, job);
+			} catch (err) {
+				warnExtensionError("handling completed review", err, lastContext);
+			}
 		},
 	);
 	manager.startCleanup();
@@ -61,8 +97,13 @@ export default function (pi: ExtensionAPI): void {
 	// Grab UI context from tool executions so widget renders even when no
 	// command is active (matches pi-subagents pattern).
 	pi.on("tool_execution_start", (_event: any, ctx: any) => {
-		widget.attach(ctx.ui);
-		widget.setJobs(manager.listJobs());
+		try {
+			lastContext = ctx;
+			widget.attach(ctx.ui);
+			widget.setJobs(manager.listJobs());
+		} catch (err) {
+			warnExtensionError("updating review widget on tool start", err, ctx);
+		}
 	});
 
 	pi.on("agent_start", () => {
@@ -151,14 +192,16 @@ export default function (pi: ExtensionAPI): void {
 					),
 			);
 			const review = result.details.result;
-			pi.sendMessage(
-				{
-					customType: "drykiss-autoreview-complete",
-					content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
-					display: true,
-					details: review,
-				},
-				{ deliverAs: "followUp", triggerTurn: !review.clean },
+			await Promise.resolve(
+				pi.sendMessage(
+					{
+						customType: "drykiss-autoreview-complete",
+						content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
+						display: true,
+						details: review,
+					},
+					{ deliverAs: "followUp", triggerTurn: !review.clean },
+				),
 			);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -168,9 +211,25 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	// Also grab UI context on session start so commands can show the widget
+	// Also grab UI context on session changes so commands can show widgets
+	// and DRYKISS can restore isolated review-session state after reload/navigation.
 	pi.on("session_start", (_event: any, ctx: any) => {
-		widget.attach(ctx.ui);
+		try {
+			lastContext = ctx;
+			widget.attach(ctx.ui);
+			applyReviewState(ctx);
+		} catch (err) {
+			warnExtensionError("restoring review state on session start", err, ctx);
+		}
+	});
+
+	pi.on("session_tree", (_event: any, ctx: any) => {
+		try {
+			lastContext = ctx;
+			applyReviewState(ctx);
+		} catch (err) {
+			warnExtensionError("restoring review state on session tree change", err, ctx);
+		}
 	});
 
 	// ── Custom notification renderer for completed reviews ─
@@ -301,21 +360,23 @@ export default function (pi: ExtensionAPI): void {
 			synthesisSession: undefined,
 		};
 
-		piRef.sendMessage<ReviewJob>(
-			{
-				customType: "drykiss-review-complete",
-				content: report,
-				display: true,
-				details: serializableJob as unknown as ReviewJob,
-			},
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
+		void Promise.resolve(
+			piRef.sendMessage<ReviewJob>(
+				{
+					customType: "drykiss-review-complete",
+					content: report,
+					display: true,
+					details: serializableJob as unknown as ReviewJob,
+				},
+				{ deliverAs: "followUp", triggerTurn: true },
+			),
+		).catch((err) => warnExtensionError("sending review notification", err));
 	}
 
 	// ── /drykiss — Full multi-lens KISS/DRY review ─────────
 	pi.registerCommand(COMMAND_NAME, {
 		description:
-			"Run a full KISS/DRY review on changed files using 7 parallel lens reviews + synthesis. Supports --all, --staged, --ref=branch, --model=hint. Configure defaults with /drykiss-config.",
+			"Run a full KISS/DRY review on changed files using 7 parallel lens reviews + synthesis. Supports --all, --staged, --ref=branch, --model=hint, --branch. Configure defaults with /drykiss-config.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
 			handleDrykissCommand(args, ctx, pi, manager),
 	});
@@ -400,6 +461,14 @@ export default function (pi: ExtensionAPI): void {
 			handleUnsuppressCommand(args, ctx, ctx.cwd ?? ""),
 	});
 
+	// ── /drykiss-end — Return from isolated review branch ───
+	pi.registerCommand("drykiss-end", {
+		description:
+			"End an isolated DRYKISS review session created with /drykiss --branch and return to the original conversation position.",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleEndReviewCommand(args, ctx, pi),
+	});
+
 	// ── /drykiss-jobs — Inspect running/completed reviews ──
 	pi.registerCommand("drykiss-jobs", {
 		description:
@@ -413,30 +482,44 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Show past KISS/DRY review results persisted to ~/.pi/drykiss/reviews/",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			const reviews = await listReviews();
-			if (reviews.length === 0) {
-				ctx.ui.notify("No past reviews found.", "info");
-				return;
-			}
+			try {
+				const reviews = await listReviews();
+				if (reviews.length === 0) {
+					ctx.ui.notify("No past reviews found.", "info");
+					return;
+				}
 
-			const lines: string[] = [`## Past Reviews (${reviews.length} total)`, ""];
-			for (const r of reviews.slice(0, 10)) {
-				const total = r.findings.length;
-				const badge =
-					r.criticalCount > 0 ? "critical" : r.highCount > 0 ? "high" : "ok";
+				const lines: string[] = [
+					`## Past Reviews (${reviews.length} total)`,
+					"",
+				];
+				for (const r of reviews.slice(0, 10)) {
+					const total = r.findings.length;
+					const badge =
+						r.criticalCount > 0
+							? "critical"
+							: r.highCount > 0
+								? "high"
+								: "ok";
+					lines.push(
+						`- **${r.timestamp}** — ${total} findings (${r.criticalCount} critical, ${r.highCount} high, ${r.mediumCount} medium) — verdict: ${r.verdict} ${badge === "critical" ? "(critical issues!)" : ""}`,
+					);
+				}
+
+				if (reviews.length > 10) {
+					lines.push(`\n... and ${reviews.length - 10} more`);
+				}
+
 				lines.push(
-					`- **${r.timestamp}** — ${total} findings (${r.criticalCount} critical, ${r.highCount} high, ${r.mediumCount} medium) — verdict: ${r.verdict} ${badge === "critical" ? "(critical issues!)" : ""}`,
+					"\nRun `/drykiss-history` with a timestamp to view the full report.",
+				);
+				ctx.ui.notify(lines.join("\n"), "info");
+			} catch (err) {
+				ctx.ui.notify(
+					`${LOG_PREFIX} Failed to load review history: ${err instanceof Error ? err.message : String(err)}`,
+					"error",
 				);
 			}
-
-			if (reviews.length > 10) {
-				lines.push(`\n... and ${reviews.length - 10} more`);
-			}
-
-			lines.push(
-				"\nRun `/drykiss-history` with a timestamp to view the full report.",
-			);
-			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
 
