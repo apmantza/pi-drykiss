@@ -55,6 +55,7 @@ vi.mock("./persist.js", () => ({
 // Import after mocks
 const {
 	parseArgs,
+	tokenizeArgs,
 	handleDrykissCommand,
 	handleEndReviewCommand,
 	executeDrykissAutoreviewTool,
@@ -174,6 +175,45 @@ describe("parseArgs", () => {
 		expect(opts.branch).toBe(true);
 		expect(opts.model).toBe("sonnet");
 		expect(opts.files).toEqual([]);
+	});
+
+	it("accepts bare --ref and --model values", () => {
+		const opts = parseArgs("--ref develop --model sonnet src/a.ts");
+		expect(opts.ref).toBe("develop");
+		expect(opts.explicitRef).toBe(true);
+		expect(opts.model).toBe("sonnet");
+		expect(opts.files).toEqual(["src/a.ts"]);
+	});
+
+	it("throws for bare --ref without a value", () => {
+		expect(() => parseArgs("--ref --staged")).toThrow(
+			"--ref requires a value",
+		);
+	});
+});
+
+describe("tokenizeArgs", () => {
+	it("returns an empty array for blank input", () => {
+		expect(tokenizeArgs("   ")).toEqual([]);
+	});
+
+	it("handles single quotes and consecutive spaces", () => {
+		expect(tokenizeArgs("--ref  'feature branch'   src/a.ts")).toEqual([
+			"--ref",
+			"feature branch",
+			"src/a.ts",
+		]);
+	});
+
+	it("handles backslash escapes outside and inside quotes", () => {
+		expect(tokenizeArgs('src/my\\ file.ts "a\\"b"')).toEqual([
+			"src/my file.ts",
+			'a"b',
+		]);
+	});
+
+	it("throws on unmatched quotes", () => {
+		expect(() => tokenizeArgs('"src/a.ts')).toThrow("Unmatched");
 	});
 });
 

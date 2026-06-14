@@ -78,6 +78,12 @@ export function tokenizeArgs(value: string): string[] {
 			continue;
 		}
 
+		if (char === "\\" && i + 1 < value.length) {
+			current += value[i + 1];
+			i += 1;
+			continue;
+		}
+
 		if (/\s/.test(char)) {
 			if (current.length > 0) {
 				tokens.push(current);
@@ -87,6 +93,10 @@ export function tokenizeArgs(value: string): string[] {
 		}
 
 		current += char;
+	}
+
+	if (quote) {
+		throw new Error(`Unmatched ${quote} quote in arguments.`);
 	}
 
 	if (current.length > 0) {
@@ -107,14 +117,30 @@ export function parseArgs(args: string): ParsedArgs {
 	let branch = false;
 	let explicitRef = false;
 
-	for (const token of tokens) {
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i];
 		if (token === "--staged") {
 			staged = true;
 		} else if (token === "--all") {
 			all = true;
+		} else if (token === "--ref") {
+			const value = tokens[i + 1];
+			if (!value || value.startsWith("--")) {
+				throw new Error("--ref requires a value.");
+			}
+			explicitRef = true;
+			ref = value;
+			i += 1;
 		} else if (token.startsWith("--ref=")) {
 			explicitRef = true;
 			ref = token.slice("--ref=".length);
+		} else if (token === "--model") {
+			const value = tokens[i + 1];
+			if (!value || value.startsWith("--")) {
+				throw new Error("--model requires a value.");
+			}
+			model = value;
+			i += 1;
 		} else if (token.startsWith("--model=")) {
 			model = token.slice("--model=".length);
 		} else if (token === "--branch") {
