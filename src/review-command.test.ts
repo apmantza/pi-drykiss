@@ -284,7 +284,9 @@ describe("drykiss_autoreview tool", () => {
 			undefined,
 		);
 		expect(result.details.result.clean).toBe(true);
-		expect(result.content[0].text).toContain("DRYKISS autoreview clean");
+		// Default format is "compact": one-line header, kiss-style.
+		expect(result.content[0].text).toMatch(/^DRYKISS clean /m);
+		expect(result.content[0].text).toContain("local changes");
 	});
 
 	it("enforces maxFiles before running the manager", async () => {
@@ -662,6 +664,7 @@ describe("review command error handling", () => {
 				files: ["src/a.ts"],
 				lenses: ["architecture"],
 				maxFiles: 5,
+				format: "structured",
 			},
 			mockCtx,
 			mockPi,
@@ -671,6 +674,9 @@ describe("review command error handling", () => {
 		);
 
 		const text = result.content[0].text;
+		// The Mermaid graph is included in the structured format only.
+		// The compact format (the default) intentionally omits it —
+		// it's still in `details.result.mermaidGraph` for callers.
 		expect(text).toContain("=== Dependency Graph ===");
 		expect(text).toContain("graph TD");
 	});

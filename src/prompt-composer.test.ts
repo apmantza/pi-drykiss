@@ -97,3 +97,83 @@ describe("composeSynthesisPrompt", () => {
 		expect(result).not.toContain("Active Constraints");
 	});
 });
+
+/**
+ * Prompt-structure tests. These read the *real* bundled .md
+ * files and assert on the *shape* of the lens bodies — what's
+ * present, what isn't. They catch the kind of regression where
+ * the cross-cutting rules (already in shared fragments) get
+ * re-stated in a lens body, or where a lens body grows to
+ * duplicate what the composer already stitches in.
+ */
+describe("simplicity lens body (bundled prompt structure)", () => {
+	it("is loaded from the bundled src/prompts/simplicity.md", async () => {
+		// The test runner runs from the project root, so a relative
+		// path of "src/prompts/simplicity.md" resolves correctly.
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		expect(content.length).toBeGreaterThan(500);
+	});
+
+	it("opens with the role statement in the same one-line style as the other lenses", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		expect(content.split("\n")[0]).toBe(
+			"You are a Simplicity Auditor. Your ONLY job is to find unnecessary complexity in code. Be AMBITIOUS — don't just suggest cleanup, look for dramatic simplifications.",
+		);
+	});
+
+	it("defines the decision procedure (the ladder) as a numbered list of rungs", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		// The ladder is the core of the new shape; six rungs, numbered.
+		expect(content).toMatch(/## The Decision Procedure/);
+		for (const n of [1, 2, 3, 4, 5, 6]) {
+			expect(content).toContain(`${n}. **`);
+		}
+	});
+
+	it("does not duplicate cross-cutting content from shared fragments", async () => {
+		// The composer stitches iron-law, grounding-rules, and
+		// kiss-dry-checklist into every lens. The lens body should
+		// NOT re-state their content. This test catches a common
+		// regression where the lens prompt grows to duplicate the
+		// shared fragments and the prompt balloons.
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		// Iron Law: "NEVER suggest fixes before completing risk diagnosis"
+		expect(content).not.toContain("NEVER suggest fixes before completing");
+		// Grounding: "Code Examination Protocol"
+		expect(content).not.toContain("Code Examination Protocol");
+		// Grounding: the severity calibration table
+		expect(content).not.toMatch(/Critical.*only for exploitable/);
+		// Anti-noise rules
+		expect(content).not.toContain('Do not flag "missing tests"');
+	});
+
+	it("does not re-define the severity tiers (those live in grounding-rules)", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		// Old version had a "Severity Labels" section. The new
+		// version defers to the shared grounding-rules fragment.
+		expect(content).not.toMatch(/## Severity Labels/);
+	});
+
+	it("keeps the lens-specific pattern catalog", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		// These are simplicity-specific catalogs; the shared
+		// fragments don't have them. They're the *content* the
+		// ladder points to, not a duplication of shared rules.
+		expect(content).toContain("Single-use abstractions");
+		expect(content).toContain("Spaghetti conditionals");
+		expect(content).toContain("Cleverness");
+		expect(content).toContain("Surgical Change Check");
+	});
+
+	it("ends with output discipline (three questions for a high-signal finding)", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile("src/prompts/simplicity.md", "utf8");
+		expect(content).toMatch(/## Output Discipline/);
+	});
+});

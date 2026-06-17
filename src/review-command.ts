@@ -35,6 +35,7 @@ import {
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
 import { filterIgnored } from "./review-result.js";
+import { formatReviewResultCompact } from "./compact-format.js";
 import { LOG_PREFIX } from "./constants.js";
 import { toErrorMessage } from "./error-utils.js";
 
@@ -784,6 +785,19 @@ export const DrykissAutoreviewParams = Type.Object({
 	contextMode: Type.Optional(
 		Type.Union([Type.Literal("diff"), Type.Literal("full")]),
 	),
+	/**
+	 * Output format for the tool's text content. The compact format
+	 * (default) emits one line per finding in kiss-check style and
+	 * is dramatically smaller than the structured format, which
+	 * is useful for agents with limited context budgets. The
+	 * structured format includes the full markdown report + JSON
+	 * dump of all findings, suitable for human review or
+	 * post-processing. Either way, the structured `details` payload
+	 * is always populated.
+	 */
+	format: Type.Optional(
+		Type.Union([Type.Literal("compact"), Type.Literal("structured")]),
+	),
 	maxFiles: Type.Optional(
 		Type.Number({
 			description: "Maximum files to review. Defaults to 20.",
@@ -848,6 +862,11 @@ export async function executeDrykissAutoreviewTool(
 		deepMinVotes?: number;
 		/** When false, skip the deep-mode validator pass. Default true. */
 		deepValidate?: boolean;
+		/**
+		 * Output format for the tool's text content. See schema doc
+		 * above. Default "compact".
+		 */
+		format?: "compact" | "structured";
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -920,6 +939,7 @@ export async function executeDrykissAutoreviewTool(
 				deepMinVotes: params.deepMinVotes,
 				deepValidate: params.deepValidate,
 				model: params.model,
+				format: params.format,
 			},
 			onUpdate,
 			signal,
@@ -1002,15 +1022,18 @@ export async function executeDrykissAutoreviewTool(
 				}
 			: result;
 
-	return {
-		content: [
-			{
-				type: "text",
-				text: formatReviewResultForTool(finalResult, {
+	const formatMode = params.format ?? "compact";
+	const text =
+		formatMode === "compact"
+			? formatReviewResultCompact(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
-				}),
-			},
-		],
+				})
+			: formatReviewResultForTool(finalResult, {
+					qualityGateThreshold: effectiveConfig.qualityGate,
+				});
+
+	return {
+		content: [{ type: "text", text }],
 		details: { result: finalResult },
 	};
 }
@@ -1192,6 +1215,7 @@ async function runDeepAutoreview(
 		deepMinVotes?: number;
 		deepValidate?: boolean;
 		model?: string;
+		format?: "compact" | "structured";
 	},
 	onUpdate:
 		| ((result: { content: Array<{ type: "text"; text: string }> }) => void)
@@ -1353,15 +1377,14 @@ async function runDeepAutoreview(
 		scoreBreakdown,
 	};
 
+	const formatMode = params.format ?? "compact";
+	const text =
+		formatMode === "compact"
+			? formatReviewResultCompact(reviewResult, { qualityGateThreshold: 70 })
+			: formatReviewResultForTool(reviewResult, { qualityGateThreshold: 70 });
+
 	return {
-		content: [
-			{
-				type: "text",
-				text: formatReviewResultForTool(reviewResult, {
-					qualityGateThreshold: 70,
-				}),
-			},
-		],
+		content: [{ type: "text", text }],
 		details: { result: reviewResult },
 	};
 }
