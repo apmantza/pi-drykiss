@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	getDefaultBranch,
-	resolveSmartDefault,
-} from "./smart-default.js";
+import { getDefaultBranch, resolveSmartDefault } from "./smart-default.js";
 
 function makePiExec(results: Array<{ code: number; stdout: string }>) {
 	return {

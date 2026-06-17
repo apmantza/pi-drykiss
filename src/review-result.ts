@@ -4,6 +4,7 @@ import { computeHealthScore } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
 import { compileGlobMatchers, matchesAnyGlob } from "./glob-utils.js";
 import { LOG_PREFIX, SEVERITY_VALUES } from "./constants.js";
+import { applyRejections, type RejectionRecord } from "./rejections.js";
 
 export interface ReviewResultTarget {
 	readonly mode?: string;
@@ -19,6 +20,29 @@ export interface ReviewResultCounts {
 	readonly low: number;
 	readonly nit: number;
 	readonly suppressed: number;
+	/**
+	 * Findings that matched a previously-recorded rejection. They are
+	 * surfaced (never hidden) but downranked to the bottom of the
+	 * rendered list and excluded from `total` and the health score.
+	 */
+	readonly previouslyRejected: number;
+	/**
+	 * Validator stage output. Populated only when the review ran with
+	 * `validate: true`; otherwise all three are 0 / undefined.
+	 *
+	 * `validatorReal` = number of findings the validator confirmed.
+	 * `validatorFalsePositive` = number of findings the validator
+	 *   refuted (still surfaced, never hidden — see validator.ts).
+	 * `validatorUnverified` = number of findings left untagged because
+	 *   the validator was unavailable, errored, or could not conclude.
+	 *
+	 * The validator never drops a finding; false-positives are still
+	 * rendered (with a tag) so the user can see and override the
+	 * validator's judgment.
+	 */
+	readonly validatorReal?: number;
+	readonly validatorFalsePositive?: number;
+	readonly validatorUnverified?: number;
 }
 
 export interface ReviewValidationIssue {
@@ -74,6 +98,14 @@ export interface BuildReviewResultOptions {
 		pattern: string;
 		id: string;
 	}>;
+	/**
+	 * Recorded-rejection store for the project. Findings that match a
+	 * past rejection (same file + co-located/paraphrased message) are
+	 * tagged `_previouslyRejected: true` and downranked to the bottom
+	 * of the rendered list — never hidden, never counted toward the
+	 * health score.
+	 */
+	readonly rejections?: readonly RejectionRecord[];
 	/** Health score from the previous run in the same mode (for trend delta). */
 	readonly prevScore?: number;
 }
@@ -93,16 +125,33 @@ export function buildReviewResult(
 	const { suppressed, active } = options.suppressions
 		? applySuppressions(overridden, options.suppressions)
 		: { suppressed: [], active: overridden };
-	const counts = countFindings(active);
+	// applyRejections runs AFTER suppressions so a suppressed+rejected
+	// finding is just suppressed (the rejection is moot once it's gone).
+	// A rejection only downranks an *active* finding, never a suppressed
+	// one. Pure reorder — never hides input.
+	const reordered = options.rejections
+		? applyRejections(active, options.rejections)
+		: active;
+	const activeFresh = reordered.filter(
+		(f) => !(f as Finding & { _previouslyRejected?: true })._previouslyRejected,
+	);
+	const previouslyRejected = reordered.filter(
+		(f) => (f as Finding & { _previouslyRejected?: true })._previouslyRejected,
+	);
+	const counts = countFindings(
+		activeFresh,
+		suppressed.length,
+		previouslyRejected.length,
+	);
 	const errors = collectErrors(job);
 	const verdict = synthesis?.verdict ?? "Request changes";
 	const status = job.overallStatus;
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&
-		active.length === 0 &&
+		activeFresh.length === 0 &&
 		verdict === "Approve";
-	const hs = computeHealthScore(active);
+	const hs = computeHealthScore(activeFresh);
 
 	return {
 		jobId: job.id,
@@ -112,11 +161,11 @@ export function buildReviewResult(
 		...(options.target ? { target: options.target } : {}),
 		...(job.reviewPath ? { reportPath: job.reviewPath } : {}),
 		files: [...job.files],
-		counts: {
-			...counts,
-			suppressed: suppressed.length,
-		},
-		findings: [...active, ...suppressed],
+		counts,
+		// Render order: fresh active → suppressed → previously-rejected.
+		// The last bucket is the "downrank" — same visual treatment as
+		// suppressed (collapsed under its own section in the widget).
+		findings: [...activeFresh, ...suppressed, ...previouslyRejected],
 		summary: synthesis?.summary ?? "Review did not produce a synthesis result.",
 		errors,
 		validationIssues: validation.issues,
@@ -203,7 +252,11 @@ function issue(
 	return { findingIndex, reason, finding };
 }
 
-function countFindings(findings: readonly Finding[]): ReviewResultCounts {
+function countFindings(
+	findings: readonly Finding[],
+	suppressedCount: number,
+	previouslyRejectedCount: number,
+): ReviewResultCounts {
 	return {
 		total: findings.length,
 		critical: findings.filter((f) => f.severity === "critical").length,
@@ -211,7 +264,15 @@ function countFindings(findings: readonly Finding[]): ReviewResultCounts {
 		medium: findings.filter((f) => f.severity === "medium").length,
 		low: findings.filter((f) => f.severity === "low").length,
 		nit: findings.filter((f) => f.severity === "nit").length,
-		suppressed: 0,
+		suppressed: suppressedCount,
+		previouslyRejected: previouslyRejectedCount,
+		// Validator counts default to 0 here and get overwritten by
+		// `runReview` when the validator stage runs. The type uses
+		// optional `?` so reviews that didn't run the validator can
+		// still serialize cleanly.
+		validatorReal: 0,
+		validatorFalsePositive: 0,
+		validatorUnverified: 0,
 	};
 }
 

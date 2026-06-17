@@ -13,7 +13,7 @@
 
 import { readFile, mkdir, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ChangedFile, ReviewLens } from "./types.js";
+import type { ChangedFile, Finding, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
@@ -407,6 +407,98 @@ export async function buildSynthesisPrompt(
 	}
 	userPrompt +=
 		'\nSynthesize these findings into the final JSON report. If there are no findings, output {"summary": "No issues found", "verdict": "Approve", "findings": []}. Output ONLY valid JSON — no markdown fences, no commentary.';
+
+	return { systemPrompt, userPrompt };
+}
+
+/**
+ * Bucketing-aware synthesis prompt: cluster findings from all lenses into
+ * candidate groups (file + line proximity + Jaccard), then present them
+ * to the synthesis LLM as a numbered list of buckets with vote counts
+ * and contributing lens names. The LLM still does the final semantic
+ * merge — it can override the cluster boundaries — but starts from a
+ * pre-deduplicated view that is dramatically smaller than the raw
+ * N-lens output.
+ *
+ * Compared to `buildSynthesisPrompt` (which feeds raw JSON arrays to
+ * the synthesizer), this version:
+ *   - Cuts prompt size by collapsing obvious duplicates up front.
+ *   - Surfaces vote count + contributing lenses as a confidence signal.
+ *   - Preserves the LLM's authority: cluster boundaries are
+ *     advisory, not authoritative. The LLM can merge across buckets
+ *     when it sees a real semantic match.
+ *
+ * Fail-open: if a lens's raw output can't be parsed, its findings are
+ * dropped from the bucketing step but the lens is still mentioned in
+ * the prompt so the synthesizer knows that lens ran.
+ */
+export async function buildBucketedSynthesisPrompt(
+	lensReviews: Array<{ lens: string; rawOutput: string }>,
+	options?: { activeConstraints?: string },
+): Promise<{ systemPrompt: string; userPrompt: string }> {
+	const { clusterAndFlatten } = await import("./bucketing.js");
+	const { parseFindingsJson } = await import("./parse-findings.js");
+	const { formatBucketsForPrompt } = await import("./bucketing.js");
+	const { LENS_DISPLAY_NAMES } = await import("./constants.js");
+	const systemPrompt = await composeSynthesisPrompt({
+		activeConstraints: options?.activeConstraints,
+	});
+
+	// Parse each lens's raw output and accumulate its findings, tagging
+	// the source lens so the bucketer can count distinct contributors.
+	const allFindings: Finding[] = [];
+	const lensStatuses: Array<{ lens: string; ok: boolean; error?: string }> = [];
+	for (const review of lensReviews) {
+		if (review.rawOutput.startsWith("ERROR:")) {
+			lensStatuses.push({
+				lens: review.lens,
+				ok: false,
+				error: review.rawOutput,
+			});
+			continue;
+		}
+		const { findings, parseError } = parseFindingsJson(
+			review.rawOutput,
+			review.lens as ReviewLens,
+		);
+		if (parseError) {
+			lensStatuses.push({ lens: review.lens, ok: false, error: parseError });
+			continue;
+		}
+		lensStatuses.push({ lens: review.lens, ok: true });
+		allFindings.push(...findings);
+	}
+
+	const buckets = clusterAndFlatten(allFindings);
+
+	let userPrompt = "# Clustered Reviewer Findings\n\n";
+	userPrompt +=
+		"Below are findings from all lenses, clustered by file + line proximity + textual similarity. ";
+	userPrompt +=
+		"Each bucket is a candidate 'same defect' group with a vote count and the list of contributing lenses. ";
+	userPrompt +=
+		"You may merge across buckets when you see a real semantic match; cluster boundaries are advisory.\n\n";
+
+	// Lens status line so the synthesizer knows which lenses ran.
+	userPrompt += "## Lens Status\n\n";
+	for (const status of lensStatuses) {
+		const name = LENS_DISPLAY_NAMES[status.lens] ?? status.lens;
+		if (status.ok) {
+			userPrompt += `- ${name}: ok\n`;
+		} else {
+			userPrompt += `- ${name}: error (${status.error ?? "unknown"})\n`;
+		}
+	}
+	userPrompt += "\n";
+
+	if (buckets.length === 0) {
+		userPrompt += "## Buckets\n\n(no findings)\n\n";
+	} else {
+		userPrompt += `## Buckets (${buckets.length})\n\n${formatBucketsForPrompt(buckets)}\n\n`;
+	}
+
+	userPrompt +=
+		'\nSynthesize these clusters into the final JSON report. Each bucket represents a candidate finding; assign the final severity, category, summary, and suggestion yourself. If a cluster spans two distinct issues, you may split it. If there are no findings, output {"summary": "No issues found", "verdict": "Approve", "findings": []}. Output ONLY valid JSON — no markdown fences, no commentary.';
 
 	return { systemPrompt, userPrompt };
 }

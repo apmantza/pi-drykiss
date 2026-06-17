@@ -128,6 +128,49 @@ export interface Finding {
 	 * Populated alongside `_suppressed`.
 	 */
 	readonly _suppressionRef?: string;
+	/**
+	 * Internal marker set by `applyRejections` in `./rejections.ts`. A
+	 * finding matches a past rejection (same file + co-located/paraphrased
+	 * message); it is downranked to the bottom of the rendered list but
+	 * never hidden. Not part of the LLM output contract.
+	 */
+	readonly _previouslyRejected?: true;
+	/**
+	 * Number of DISTINCT lenses that contributed to this bucket (1 for a
+	 * singleton). Populated by `clusterAndFlatten` in `./bucketing.ts`
+	 * before the synthesis prompt is built, so the LLM can see which
+	 * findings were flagged by multiple independent reviewers.
+	 * Not part of the LLM output contract.
+	 */
+	readonly _bucketVotes?: number;
+	/**
+	 * Distinct lens names that contributed to this bucket, sorted
+	 * alphabetically. Populated alongside `_bucketVotes` by
+	 * `clusterAndFlatten`. Empty for singletons.
+	 * Not part of the LLM output contract.
+	 */
+	readonly _bucketLenses?: ReviewLens[];
+	/**
+	 * Internal marker set by the validator stage (see
+	 * `./validator.ts`). Reflects whether an independent LLM pass tried
+	 * to falsify this finding:
+	 *   - "real": validator confirmed the finding is triggered by a
+	 *     concrete input or execution path.
+	 *   - "false-positive": validator refuted the finding — the defect
+	 *     is not present in the shown code.
+	 *   - "unverified": validator was unavailable, errored, or could
+	 *     not conclude from the truncated context. Findings are
+	 *     surfaced unchanged and never silently dropped.
+	 * Not part of the LLM output contract — added post-hoc.
+	 */
+	readonly _validatorVerdict?: "real" | "false-positive" | "unverified";
+	/**
+	 * Optional one-sentence justification recorded alongside
+	 * `_validatorVerdict`. Names the concrete trigger (for "real")
+	 * or the reason the defect cannot occur (for "false-positive").
+	 * Optional: only populated when the validator returned a verdict.
+	 */
+	readonly _validatorJustification?: string;
 }
 
 export interface SynthesisResult {

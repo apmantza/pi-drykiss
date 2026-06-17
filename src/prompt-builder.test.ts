@@ -31,6 +31,7 @@ vi.mock("./prompt-composer.js", () => ({
 }));
 
 import {
+	buildBucketedSynthesisPrompt,
 	buildReviewPrompts,
 	buildSynthesisPrompt,
 	buildAutoInjectBlock,
@@ -372,7 +373,10 @@ describe("loadProjectReviewGuidelines", () => {
 	it("falls back to REVIEW_GUIDELINES.md", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
 		try {
-			await writeFile(join(dir, "REVIEW_GUIDELINES.md"), "Use project idioms.\n");
+			await writeFile(
+				join(dir, "REVIEW_GUIDELINES.md"),
+				"Use project idioms.\n",
+			);
 
 			await expect(loadProjectReviewGuidelines(dir)).resolves.toBe(
 				"Use project idioms.",
@@ -435,6 +439,83 @@ describe("buildSynthesisPrompt", () => {
 	it("passes activeConstraints to the synthesis composer", async () => {
 		await buildSynthesisPrompt(
 			"/cwd",
+			[{ lens: "simplicity", rawOutput: "[]" }],
+			{ activeConstraints: "ignore: [src/legacy/**]" },
+		);
+		expect(composeSynthesisPrompt).toHaveBeenCalledWith(
+			expect.objectContaining({ activeConstraints: "ignore: [src/legacy/**]" }),
+		);
+	});
+});
+
+// ── buildBucketedSynthesisPrompt ─────────────────────────────────────
+
+describe("buildBucketedSynthesisPrompt", () => {
+	it("returns system and user prompts", async () => {
+		const result = await buildBucketedSynthesisPrompt([
+			{ lens: "simplicity", rawOutput: '[{"file":"a.ts","severity":"high"}]' },
+			{ lens: "deduplication", rawOutput: "[]" },
+		]);
+		expect(result.systemPrompt).toContain("Senior Engineer Synthesizer");
+		expect(result.userPrompt).toContain("Clustered Reviewer Findings");
+	});
+
+	it("clusters duplicate findings across lenses into a single bucket", async () => {
+		// Same file, co-located lines, paraphrased text — should
+		// cluster into ONE bucket, not two.
+		const result = await buildBucketedSynthesisPrompt([
+			{
+				lens: "simplicity",
+				rawOutput:
+					'[{ "file":"src/a.ts","line":10,"severity":"medium","category":"X","summary":"Duplicated parsing logic across two modules","detail":"d","suggestion":"s" }]',
+			},
+			{
+				lens: "deduplication",
+				rawOutput:
+					'[{ "file":"src/a.ts","line":12,"severity":"high","category":"Y","summary":"Duplicated parsing logic across three modules","detail":"d","suggestion":"s" }]',
+			},
+		]);
+		// Bucket count should appear in the "Buckets (N)" header.
+		const match = result.userPrompt.match(/## Buckets \((\d+)\)/);
+		expect(match).not.toBeNull();
+		const bucketCount = Number(match?.[1]);
+		expect(bucketCount).toBe(1);
+		// The cluster should expose both contributing lenses.
+		expect(result.userPrompt).toContain("lenses=");
+		expect(result.userPrompt).toContain("simplicity");
+		expect(result.userPrompt).toContain("deduplication");
+	});
+
+	it("preserves per-lens error notices instead of dropping them silently", async () => {
+		const result = await buildBucketedSynthesisPrompt([
+			{ lens: "simplicity", rawOutput: "ERROR: model failed" },
+			{ lens: "deduplication", rawOutput: "[]" },
+		]);
+		// The Lens Status section uses display names (KISS for simplicity).
+		expect(result.userPrompt).toContain("Lens Status");
+		expect(result.userPrompt).toContain("KISS");
+		expect(result.userPrompt).toContain("DRY");
+		expect(result.userPrompt).toContain("error");
+	});
+
+	it("reports lens status as 'ok' when parsing succeeded", async () => {
+		const result = await buildBucketedSynthesisPrompt([
+			{ lens: "simplicity", rawOutput: "[]" },
+		]);
+		// KISS is the display name for simplicity.
+		expect(result.userPrompt).toMatch(/KISS.*ok/);
+	});
+
+	it("falls back gracefully when every lens produced no findings", async () => {
+		const result = await buildBucketedSynthesisPrompt([
+			{ lens: "simplicity", rawOutput: "[]" },
+			{ lens: "deduplication", rawOutput: "[]" },
+		]);
+		expect(result.userPrompt).toContain("(no findings)");
+	});
+
+	it("passes activeConstraints to the synthesis composer", async () => {
+		await buildBucketedSynthesisPrompt(
 			[{ lens: "simplicity", rawOutput: "[]" }],
 			{ activeConstraints: "ignore: [src/legacy/**]" },
 		);

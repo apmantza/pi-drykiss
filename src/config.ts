@@ -195,6 +195,15 @@ export interface DrykissConfig {
 	 * The tests lens will prefer these when available.
 	 */
 	commands?: DrykissCommands;
+	/**
+	 * When true, run the validator stage (see ./validator.ts) over the
+	 * synthesized findings. The validator is a separate LLM call that
+	 * tries to falsify each finding; findings are tagged "real" or
+	 * "false-positive" (or "unverified" if the validator is
+	 * unavailable). Default false to preserve the existing
+	 * cost/latency budget. CLI flag `--validate` overrides this.
+	 */
+	validate?: boolean;
 }
 
 export function getConfigPath(): string {

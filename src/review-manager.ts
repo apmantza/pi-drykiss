@@ -12,7 +12,11 @@ import {
 	parseSynthesis,
 } from "./types.js";
 import { parseFindingsJson } from "./parse-findings.js";
-import { buildReviewPrompts, buildSynthesisPrompt } from "./prompt-builder.js";
+import {
+	buildReviewPrompts,
+	buildBucketedSynthesisPrompt,
+	buildSynthesisPrompt,
+} from "./prompt-builder.js";
 import {
 	saveReview,
 	saveSessionLog,
@@ -42,6 +46,8 @@ import {
 	type ReviewResult,
 	type ReviewResultTarget,
 } from "./review-result.js";
+import { loadRejections } from "./rejections.js";
+import { runValidator } from "./validator.js";
 
 const CONCURRENCY = 3;
 const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
@@ -95,6 +101,36 @@ function safeProgress(
 	} catch {
 		/* progress callbacks must not affect review execution */
 	}
+}
+
+/**
+ * Format a Map<file, diff> for the validator's user prompt. The
+ * validator needs to see the actual code that was reviewed, not just
+ * the findings, so it can verify whether a defect is triggered by a
+ * concrete input or path. Pure; truncates each file's diff to keep
+ * the prompt within the validator's context window.
+ */
+const VALIDATOR_DIFF_PER_FILE_BUDGET = 8_000;
+
+function formatDiffsForValidator(diffs: Map<string, string>): string {
+	if (diffs.size === 0) return "";
+	const blocks: string[] = [];
+	let total = 0;
+	for (const [file, diff] of diffs) {
+		const truncated =
+			diff.length > VALIDATOR_DIFF_PER_FILE_BUDGET
+				? `${diff.slice(0, VALIDATOR_DIFF_PER_FILE_BUDGET)}\n... (truncated)`
+				: diff;
+		blocks.push(`### ${file}\n\n${truncated}`);
+		total += truncated.length;
+		if (total > VALIDATOR_DIFF_PER_FILE_BUDGET * 3) {
+			blocks.push(
+				`\n... (remaining ${diffs.size - blocks.length} files omitted for context budget)`,
+			);
+			break;
+		}
+	}
+	return `# Diff Under Review\n\n${blocks.join("\n\n")}`;
 }
 
 function applySuccessfulLensOutput(
@@ -529,10 +565,29 @@ export class ReviewManager {
 			rawOutput: job.states.get(l)!.rawOutput,
 		}));
 
-		const { systemPrompt, userPrompt } = await buildSynthesisPrompt(
-			cwd,
-			lensReviews,
-		);
+		// Cluster lens findings by file + line proximity + Jaccard before
+		// the synthesis prompt is built. The LLM still does the final
+		// semantic merge — cluster boundaries are advisory — but it
+		// reasons over a pre-deduplicated view that's dramatically
+		// smaller and more reliable than the raw N-lens output.
+		// Fall back to the raw prompt builder if the bucketed one fails
+		// (shouldn't happen, but the synthesis must never break on a
+		// bucketing glitch).
+		let systemPrompt: string;
+		let userPrompt: string;
+		try {
+			({ systemPrompt, userPrompt } =
+				await buildBucketedSynthesisPrompt(lensReviews));
+		} catch (err) {
+			console.warn(
+				`${LOG_PREFIX} Bucketed synthesis prompt failed, falling back to raw:`,
+				err,
+			);
+			({ systemPrompt, userPrompt } = await buildSynthesisPrompt(
+				cwd,
+				lensReviews,
+			));
+		}
 
 		const model = await resolveModel(ctx, "synthesis");
 
@@ -648,6 +703,15 @@ export class ReviewManager {
 				id: string;
 			}>;
 			commands?: { test?: string; lint?: string };
+			/**
+			 * Opt-in: run the validator stage over the synthesized
+			 * findings. The validator is a separate LLM call whose
+			 * system prompt is in `_shared/validator.md`; it tries to
+			 * falsify each finding and tags it "real" or
+			 * "false-positive". Default false to preserve the existing
+			 * cost/latency budget.
+			 */
+			validate?: boolean;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -673,12 +737,42 @@ export class ReviewManager {
 			options.onProgress,
 			options.progressIntervalMs,
 		);
-		const result = buildReviewResult(job, {
+		// Load the project's recorded-rejection store before building the
+		// result so previously-rejected findings can be downranked.
+		// loadRejections is best-effort: a missing or garbled file
+		// degrades to [], so a broken store never breaks a review.
+		const rejections = await loadRejections(cwd);
+		let result = buildReviewResult(job, {
 			target: options.target,
 			severityOverrides: options.severityOverrides,
 			suppressions: options.suppressions,
+			rejections,
 			prevScore: await computePrevScore(options.target?.label),
 		});
+		// Optional validator stage — opt-in via `options.validate`.
+		// Runs an adversarial LLM call that tries to falsify each
+		// synthesized finding. Fail-open: a flaky validator surfaces
+		// findings unchanged, never silently drops them. The diff
+		// block is included so the validator can see the actual code.
+		if (options.validate && result.findings.length > 0) {
+			const diffBlock = formatDiffsForValidator(diffs);
+			const validation = await runValidator(ctx, result.findings, diffBlock, {
+				signal,
+			});
+			// Build a new result with the validator-annotated findings
+			// + extra counts. The base `findings` and `counts` are
+			// read-only on ReviewResult, so we spread.
+			result = {
+				...result,
+				findings: validation.findings,
+				counts: {
+					...result.counts,
+					validatorReal: validation.confirmedReal,
+					validatorFalsePositive: validation.droppedFalsePositives,
+					validatorUnverified: validation.unverified,
+				},
+			};
+		}
 		// Fire-and-forget persist history
 		appendHistory({
 			date: new Date().toISOString(),

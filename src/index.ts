@@ -142,7 +142,11 @@ export default function (pi: ExtensionAPI): void {
 						setReviewInProgress(false);
 						if (lastContext) applyReviewState(lastContext);
 					} catch (err) {
-						warnExtensionError("resetting review session state", err, lastContext);
+						warnExtensionError(
+							"resetting review session state",
+							err,
+							lastContext,
+						);
 					}
 				}
 			}
@@ -278,18 +282,17 @@ export default function (pi: ExtensionAPI): void {
 			autoreviewEditedFiles.clear();
 			lastAutoreviewSignature = signature;
 			lastAutoreviewAt = now;
-			await sendMessageSafely(
-				pi,
-				{
-					customType: "drykiss-autoreview-complete",
-					content: result.content[0]?.text ?? "DRYKISS autoreview completed.",
-					display: true,
-					details: review,
-				},
-				{ deliverAs: "followUp", triggerTurn: !review.clean },
-				"sending autoreview completion notification",
-				ctx,
-			);
+			// Note: we intentionally do NOT post the autoreview result as
+			// a follow-up message. Doing so re-injects the full review
+			// report into the conversation on every agent_end, which
+			// (a) pollutes the chat with stale results when the user
+			// was working on unrelated tasks and (b) can trigger another
+			// turn via `triggerTurn: !review.clean`, creating a noisy
+			// feedback loop. Users get the result via the widget,
+			// `/drykiss-history`, or the persisted review file. The
+			// lightweight checklist auto-injection (turn_end → next
+			// system prompt) is the in-conversation surface; the
+			// autoreview itself stays a background process.
 		} catch (err) {
 			warnExtensionError("running DRYKISS autoreview", err, ctx);
 		} finally {
@@ -314,7 +317,11 @@ export default function (pi: ExtensionAPI): void {
 			lastContext = ctx;
 			applyReviewState(ctx);
 		} catch (err) {
-			warnExtensionError("restoring review state on session tree change", err, ctx);
+			warnExtensionError(
+				"restoring review state on session tree change",
+				err,
+				ctx,
+			);
 		}
 	});
 
@@ -329,7 +336,9 @@ export default function (pi: ExtensionAPI): void {
 			const lenses = safeLenses(job);
 			const hasError =
 				job.overallStatus === "error" ||
-				lenses.some((l: string) => getLensState(job.states, l)?.status === "error");
+				lenses.some(
+					(l: string) => getLensState(job.states, l)?.status === "error",
+				);
 			const findings = safeFindings(s);
 			const hasCritical = safeNumber(s?.criticalCount) > 0;
 			const hasHigh = safeNumber(s?.highCount) > 0;
@@ -406,7 +415,8 @@ export default function (pi: ExtensionAPI): void {
 					console.warn(
 						`${LOG_PREFIX} Failed rendering expanded review report: ${toErrorMessage(err)}`,
 					);
-					line += "\n  " + theme.fg("dim", "Review report could not be rendered.");
+					line +=
+						"\n  " + theme.fg("dim", "Review report could not be rendered.");
 				}
 			} else {
 				const summary = safeString(s?.summary);
@@ -608,11 +618,7 @@ export default function (pi: ExtensionAPI): void {
 				for (const r of reviews.slice(0, 10)) {
 					const total = r.findings.length;
 					const badge =
-						r.criticalCount > 0
-							? "critical"
-							: r.highCount > 0
-								? "high"
-								: "ok";
+						r.criticalCount > 0 ? "critical" : r.highCount > 0 ? "high" : "ok";
 					lines.push(
 						`- **${r.timestamp}** — ${total} findings (${r.criticalCount} critical, ${r.highCount} high, ${r.mediumCount} medium) — verdict: ${r.verdict} ${badge === "critical" ? "(critical issues!)" : ""}`,
 					);

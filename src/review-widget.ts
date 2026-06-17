@@ -100,8 +100,16 @@ export function formatFinding(
 	const suppressedTag = finding._suppressed
 		? ` ${theme.fg("dim", "[suppressed]")}`
 		: "";
+	const previouslyRejectedTag = finding._previouslyRejected
+		? ` ${theme.fg("dim", "[⟲ previously rejected]")}`
+		: "";
+	const validatorTag = finding._validatorVerdict
+		? ` ${validatorTagStyle(finding._validatorVerdict, theme)}`
+		: "";
 
-	const lines: string[] = [`${heading}${suppressedTag}`];
+	const lines: string[] = [
+		`${heading}${suppressedTag}${previouslyRejectedTag}${validatorTag}`,
+	];
 	const indent = "   ";
 	if (finding.detail) {
 		lines.push(`${indent}Symptom: ${stripAnsi(finding.detail)}`);
@@ -131,7 +139,27 @@ export function formatFinding(
 			`${indent}${theme.fg("dim", `[riskCode: ${finding.riskCode}]`)}`,
 		);
 	}
+	if (finding._validatorJustification) {
+		lines.push(
+			`${indent}${theme.fg("dim", `Validator: ${stripAnsi(finding._validatorJustification)}`)}`,
+		);
+	}
 	return lines.join("\n");
+}
+
+/** Render a colored tag for a validator verdict. Distinct from suppression / rejection. */
+function validatorTagStyle(
+	verdict: NonNullable<Finding["_validatorVerdict"]>,
+	theme: FindingTheme,
+): string {
+	switch (verdict) {
+		case "real":
+			return theme.fg("success", "[✓ validator: real]");
+		case "false-positive":
+			return theme.fg("warning", "[✗ validator: false-positive]");
+		case "unverified":
+			return theme.fg("dim", "[? validator: unverified]");
+	}
 }
 
 const defaultTheme: FindingTheme = {

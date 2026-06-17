@@ -176,7 +176,10 @@ describe("extension event wiring", () => {
 		const { pi, handlers } = makePi();
 		registerDrykiss(pi as any);
 		const ctx = makeCtx();
-		trackerTrackEdit.mockReturnValue({ path: "src/a.ts", language: "TypeScript" });
+		trackerTrackEdit.mockReturnValue({
+			path: "src/a.ts",
+			language: "TypeScript",
+		});
 
 		handlers.get("tool_execution_end")?.(
 			{
@@ -306,7 +309,10 @@ describe("extension event wiring", () => {
 		const { pi, handlers } = makePi();
 		registerDrykiss(pi as any);
 		const ctx = makeCtx();
-		trackerTrackEdit.mockReturnValue({ path: "src/a.ts", language: "TypeScript" });
+		trackerTrackEdit.mockReturnValue({
+			path: "src/a.ts",
+			language: "TypeScript",
+		});
 		loadConfig.mockResolvedValue({
 			autoreview: {
 				enabled: true,
@@ -324,11 +330,14 @@ describe("extension event wiring", () => {
 		await handlers.get("agent_end")?.({}, ctx);
 		await handlers.get("agent_end")?.({}, ctx);
 
-		expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(1);
-		expect(pi.sendMessage).toHaveBeenCalledWith(
-			expect.objectContaining({ customType: "drykiss-autoreview-complete" }),
-			expect.objectContaining({ deliverAs: "followUp" }),
+		expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
+			1,
 		);
+		// We intentionally do NOT post the autoreview result as a
+		// follow-up message — see the comment in the agent_end hook
+		// for the rationale. The result is still visible via the
+		// widget, /drykiss-history, and the persisted review file.
+		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("keeps edited files when autoreview fails so the next agent end can retry", async () => {
@@ -337,7 +346,10 @@ describe("extension event wiring", () => {
 			const { pi, handlers } = makePi();
 			registerDrykiss(pi as any);
 			const ctx = makeCtx();
-			trackerTrackEdit.mockReturnValue({ path: "src/a.ts", language: "TypeScript" });
+			trackerTrackEdit.mockReturnValue({
+				path: "src/a.ts",
+				language: "TypeScript",
+			});
 			loadConfig.mockResolvedValue({
 				autoreview: {
 					enabled: true,
@@ -356,7 +368,9 @@ describe("extension event wiring", () => {
 			await handlers.get("agent_end")?.({}, ctx);
 			await handlers.get("agent_end")?.({}, ctx);
 
-			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(2);
+			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
+				2,
+			);
 			expect(ctx.ui.notify).toHaveBeenCalledWith(
 				expect.stringContaining("Failed running DRYKISS autoreview"),
 				"warning",
@@ -366,13 +380,21 @@ describe("extension event wiring", () => {
 		}
 	});
 
-	it("clears successful autoreview edits even when completion notification fails", async () => {
+	it("clears successful autoreview edits even when post-run logging fails", async () => {
+		// Replaces the old "completion notification fails" test: the
+		// autoreview no longer posts a follow-up message, so we
+		// exercise the next realistic failure path — a warn-style
+		// error inside the hook — and confirm edits are still cleared
+		// on a successful review.
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 		try {
 			const { pi, handlers } = makePi();
 			registerDrykiss(pi as any);
 			const ctx = makeCtx();
-			trackerTrackEdit.mockReturnValue({ path: "src/a.ts", language: "TypeScript" });
+			trackerTrackEdit.mockReturnValue({
+				path: "src/a.ts",
+				language: "TypeScript",
+			});
 			loadConfig.mockResolvedValue({
 				autoreview: {
 					enabled: true,
@@ -385,19 +407,16 @@ describe("extension event wiring", () => {
 				content: [{ text: "done" }],
 				details: { result: { clean: true } },
 			});
-			pi.sendMessage.mockImplementationOnce(() => {
-				throw new Error("send failed");
-			});
 			handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx);
 
 			await handlers.get("agent_end")?.({}, ctx);
 			await handlers.get("agent_end")?.({}, ctx);
 
-			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(1);
-			expect(ctx.ui.notify).toHaveBeenCalledWith(
-				expect.stringContaining("Failed sending autoreview completion notification"),
-				"warning",
+			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
+				1,
 			);
+			// The result is intentionally NOT posted as a follow-up.
+			expect(pi.sendMessage).not.toHaveBeenCalled();
 		} finally {
 			warn.mockRestore();
 		}
@@ -407,7 +426,10 @@ describe("extension event wiring", () => {
 		const { pi, handlers } = makePi();
 		registerDrykiss(pi as any);
 		const ctx = makeCtx();
-		trackerTrackEdit.mockReturnValue({ path: "src/a.ts", language: "TypeScript" });
+		trackerTrackEdit.mockReturnValue({
+			path: "src/a.ts",
+			language: "TypeScript",
+		});
 		loadConfig.mockResolvedValue({
 			autoreview: { enabled: true, confirmBeforeRun: false, mode: "files" },
 		});

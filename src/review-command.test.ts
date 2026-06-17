@@ -66,9 +66,11 @@ const { parseFindingsJson } = await import("./parse-findings.js");
 function makeReviewSessionManager() {
 	return {
 		getLeafId: vi.fn().mockReturnValue("origin-1"),
-		getEntries: vi.fn().mockReturnValue([
-			{ id: "user-1", type: "message", message: { role: "user" } },
-		]),
+		getEntries: vi
+			.fn()
+			.mockReturnValue([
+				{ id: "user-1", type: "message", message: { role: "user" } },
+			]),
 		getBranch: vi.fn().mockReturnValue([
 			{
 				type: "custom",
@@ -186,9 +188,17 @@ describe("parseArgs", () => {
 	});
 
 	it("throws for bare --ref without a value", () => {
-		expect(() => parseArgs("--ref --staged")).toThrow(
-			"--ref requires a value",
-		);
+		expect(() => parseArgs("--ref --staged")).toThrow("--ref requires a value");
+	});
+
+	it("accepts --validate to opt into the validator stage", () => {
+		const opts = parseArgs("--validate");
+		expect(opts.validate).toBe(true);
+	});
+
+	it("defaults validate to false when not passed", () => {
+		const opts = parseArgs("--all");
+		expect(opts.validate).toBe(false);
 	});
 });
 

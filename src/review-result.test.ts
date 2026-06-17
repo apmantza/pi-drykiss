@@ -478,3 +478,189 @@ describe("buildReviewResult — mermaidGraph", () => {
 		expect(result.mermaidGraph).toBeUndefined();
 	});
 });
+
+describe("buildReviewResult — rejections", () => {
+	const rejection = {
+		file: "src/a.ts",
+		line: 10,
+		severity: "high" as const,
+		message: "Duplicated parsing logic across two modules",
+		recorded_at: "2026-01-01T00:00:00.000Z",
+	};
+
+	function jobWithFinding(f: Finding): ReviewJob {
+		return job({
+			synthesisResult: {
+				findings: [f],
+				summary: "x",
+				verdict: "Request changes",
+				criticalCount: 0,
+				highCount: f.severity === "high" ? 1 : 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 95,
+				scoreBreakdown: { critical: 0, warning: 1, suggestion: 0 },
+			},
+		});
+	}
+
+	it("downranks matching findings to the end of the rendered list", () => {
+		const f = finding({
+			file: "src/a.ts",
+			line: 10,
+			severity: "high",
+			summary: "Duplicated parsing logic across two modules",
+		});
+		const r = buildReviewResult(jobWithFinding(f), { rejections: [rejection] });
+		expect(r.findings).toHaveLength(1);
+		expect(
+			(r.findings[0] as Finding & { _previouslyRejected?: true })
+				._previouslyRejected,
+		).toBe(true);
+		expect(r.counts.previouslyRejected).toBe(1);
+	});
+
+	it("never hides findings — count is preserved across all buckets", () => {
+		const a = finding({
+			file: "src/a.ts",
+			line: 10,
+			severity: "high",
+			summary: "Duplicated parsing logic across two modules",
+		});
+		const b = finding({
+			file: "src/b.ts",
+			line: 1,
+			severity: "low",
+			summary: "Unrelated finding in another file",
+		});
+		const job2 = job({
+			synthesisResult: {
+				findings: [a, b],
+				summary: "x",
+				verdict: "Request changes",
+				criticalCount: 0,
+				highCount: 1,
+				mediumCount: 0,
+				lowCount: 1,
+				nitCount: 0,
+				healthScore: 90,
+				scoreBreakdown: { critical: 0, warning: 1, suggestion: 1 },
+			},
+		});
+		const r2 = buildReviewResult(job2, { rejections: [rejection] });
+		expect(r2.findings).toHaveLength(2);
+		// active (b) first, then previously-rejected (a)
+		expect(r2.findings[0].file).toBe("src/b.ts");
+		expect(
+			(r2.findings[1] as Finding & { _previouslyRejected?: true })
+				._previouslyRejected,
+		).toBe(true);
+		expect(r2.findings[1].file).toBe("src/a.ts");
+	});
+
+	it("does not count previously-rejected findings in total or health score", () => {
+		const a = finding({
+			file: "src/a.ts",
+			line: 10,
+			severity: "critical",
+			summary: "Duplicated parsing logic across two modules",
+		});
+		const b = finding({
+			file: "src/b.ts",
+			line: 1,
+			severity: "low",
+			summary: "Unrelated finding in another file",
+		});
+		const job2 = job({
+			synthesisResult: {
+				findings: [a, b],
+				summary: "x",
+				verdict: "Request changes",
+				criticalCount: 1,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 1,
+				nitCount: 0,
+				healthScore: 84,
+				scoreBreakdown: { critical: 1, warning: 0, suggestion: 1 },
+			},
+		});
+		const r = buildReviewResult(job2, { rejections: [rejection] });
+		expect(r.counts.total).toBe(1); // b only
+		expect(r.counts.critical).toBe(0);
+		expect(r.counts.previouslyRejected).toBe(1);
+		// health score is computed from active findings only:
+		// b is 'low' → suggestion tier (1 pt). 100 - 1 = 99.
+		expect(r.healthScore).toBe(99);
+	});
+
+	it("treats suppressed-then-rejected findings as suppressed only", () => {
+		const a = finding({
+			file: "src/a.ts",
+			line: 10,
+			severity: "high",
+			riskCode: "K1",
+			summary: "Duplicated parsing logic across two modules",
+		});
+		const r = buildReviewResult(jobWithFinding(a), {
+			suppressions: [{ id: "s1", riskCode: "K1", pattern: "src/a.ts" }],
+			rejections: [rejection],
+		});
+		expect(r.findings).toHaveLength(1);
+		// a is suppressed, so it's not also previously-rejected
+		expect(
+			(r.findings[0] as Finding & { _suppressed?: true })._suppressed,
+		).toBe(true);
+		expect(
+			(r.findings[0] as Finding & { _previouslyRejected?: true })
+				._previouslyRejected,
+		).toBeUndefined();
+		expect(r.counts.suppressed).toBe(1);
+		expect(r.counts.previouslyRejected).toBe(0);
+	});
+
+	it("is a no-op when rejections list is empty", () => {
+		const f = finding({ file: "src/a.ts", line: 10, severity: "high" });
+		const r = buildReviewResult(jobWithFinding(f), { rejections: [] });
+		expect(r.findings).toHaveLength(1);
+		expect(
+			(r.findings[0] as Finding & { _previouslyRejected?: true })
+				._previouslyRejected,
+		).toBe(undefined);
+		expect(r.counts.previouslyRejected).toBe(0);
+	});
+
+	it("keeps previously-rejected findings ordered after fresh ones", () => {
+		const fresh = finding({
+			file: "src/x.ts",
+			line: 1,
+			severity: "low",
+			summary: "Unrelated finding in another file",
+		});
+		const rejected = finding({
+			file: "src/a.ts",
+			line: 10,
+			severity: "high",
+			summary: "Duplicated parsing logic across two modules",
+		});
+		const job2 = job({
+			files: ["src/a.ts", "src/b.ts", "src/x.ts"],
+			synthesisResult: {
+				findings: [fresh, rejected],
+				summary: "x",
+				verdict: "Request changes",
+				criticalCount: 0,
+				highCount: 1,
+				mediumCount: 0,
+				lowCount: 1,
+				nitCount: 0,
+				healthScore: 94,
+				scoreBreakdown: { critical: 0, warning: 1, suggestion: 1 },
+			},
+		});
+		const r = buildReviewResult(job2, { rejections: [rejection] });
+		expect(r.findings[0].file).toBe("src/x.ts");
+		expect(r.findings[1].file).toBe("src/a.ts");
+	});
+});

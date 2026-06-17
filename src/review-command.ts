@@ -15,6 +15,7 @@ import type {
 	ReviewOptions,
 	ChangedFile,
 	Finding,
+	Severity,
 } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import { parseFindingsJson } from "./parse-findings.js";
@@ -26,7 +27,11 @@ import {
 	startReviewSession,
 } from "./review-session.js";
 import { resolveSmartDefault } from "./smart-default.js";
-import { resolveReviewScope, type ReviewMode } from "./review-scope.js";
+import {
+	resolveReviewScope,
+	type ReviewMode,
+	type ReviewScope,
+} from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
 import { filterIgnored } from "./review-result.js";
@@ -51,6 +56,8 @@ export interface ParsedArgs extends ReviewOptions {
 	readonly branch?: boolean;
 	/** Whether --ref was explicitly provided */
 	readonly explicitRef?: boolean;
+	/** Run the validator stage (default: false; see config.validate) */
+	readonly validate?: boolean;
 }
 
 export function tokenizeArgs(value: string): string[] {
@@ -118,6 +125,7 @@ export function parseArgs(args: string): ParsedArgs {
 	let pr: PrInfo | undefined;
 	let branch = false;
 	let explicitRef = false;
+	let validate = false;
 
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i];
@@ -125,6 +133,8 @@ export function parseArgs(args: string): ParsedArgs {
 			staged = true;
 		} else if (token === "--all") {
 			all = true;
+		} else if (token === "--validate") {
+			validate = true;
 		} else if (token === "--ref") {
 			const value = tokens[i + 1];
 			if (!value || value.startsWith("--")) {
@@ -157,7 +167,7 @@ export function parseArgs(args: string): ParsedArgs {
 		}
 	}
 
-	return { files, ref, staged, all, model, pr, branch, explicitRef };
+	return { files, ref, staged, all, model, pr, branch, explicitRef, validate };
 }
 
 /**
@@ -181,7 +191,9 @@ async function prepareReview(
 	activeConstraints: string;
 } | null> {
 	let options =
-		typeof argsOrOptions === "string" ? parseArgs(argsOrOptions) : argsOrOptions;
+		typeof argsOrOptions === "string"
+			? parseArgs(argsOrOptions)
+			: argsOrOptions;
 
 	// Apply smart default scope when no explicit review target is given.
 	const hasExplicitReviewTarget = Boolean(
@@ -336,7 +348,10 @@ function parseArgsOrNotify(
 	try {
 		return parseArgs(args);
 	} catch (err) {
-		ctx.ui.notify(`${LOG_PREFIX} Invalid arguments: ${toErrorMessage(err)}`, "error");
+		ctx.ui.notify(
+			`${LOG_PREFIX} Invalid arguments: ${toErrorMessage(err)}`,
+			"error",
+		);
 		return null;
 	}
 }
@@ -776,6 +791,31 @@ export const DrykissAutoreviewParams = Type.Object({
 			maximum: 100,
 		}),
 	),
+	/**
+	 * Opt-in: run the Bugbot deep-review pipeline (passes → bucket →
+	 * vote → validator) for a single lens instead of the standard
+	 * flat multi-lens flow. Set to one of the lens names
+	 * ('simplicity', 'deduplication', 'clarity', 'resilience',
+	 * 'architecture', 'tests', 'security'). Returns the deep-mode
+	 * findings directly in the result.
+	 */
+	deep: Type.Optional(
+		Type.Union([
+			Type.Literal("simplicity"),
+			Type.Literal("deduplication"),
+			Type.Literal("clarity"),
+			Type.Literal("resilience"),
+			Type.Literal("architecture"),
+			Type.Literal("tests"),
+			Type.Literal("security"),
+		]),
+	),
+	/** Number of parallel adversarial passes in deep mode. Default 5. */
+	deepPasses: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
+	/** Min votes for a `note` finding to survive the low-signal filter. */
+	deepMinVotes: Type.Optional(Type.Number({ minimum: 1, maximum: 10 })),
+	/** When false, skip the deep-mode validator pass (candidates surface unvalidated). */
+	deepValidate: Type.Optional(Type.Boolean()),
 });
 
 export async function executeDrykissAutoreviewTool(
@@ -789,6 +829,25 @@ export async function executeDrykissAutoreviewTool(
 		model?: string;
 		contextMode?: "diff" | "full";
 		maxFiles?: number;
+		/**
+		 * Opt-in: run the validator stage over the synthesized
+		 * findings. The validator is a separate LLM call that tries
+		 * to falsify each finding. Default false.
+		 */
+		validate?: boolean;
+		/**
+		 * Opt-in: run the Bugbot deep-review pipeline (passes → bucket
+		 * → vote → validator) for a single lens instead of the standard
+		 * flat multi-lens flow. Skips synthesis and returns the deep
+		 * findings directly.
+		 */
+		deep?: ReviewLens;
+		/** Number of parallel adversarial passes in deep mode. Default 5. */
+		deepPasses?: number;
+		/** Min votes for a `note` finding to survive the low-signal filter. */
+		deepMinVotes?: number;
+		/** When false, skip the deep-mode validator pass. Default true. */
+		deepValidate?: boolean;
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -840,6 +899,33 @@ export async function executeDrykissAutoreviewTool(
 		);
 	}
 
+	// Deep mode: Bugbot-style pipeline for a single lens. Skips the
+	// standard multi-lens flow and synthesis entirely; returns the
+	// deep findings directly so the agent can act on them.
+	if (params.deep) {
+		onUpdate?.({
+			content: [
+				{
+					type: "text",
+					text: `Starting DRYKISS deep-${params.deep} review for ${scope.label} (${scope.files.length} file(s))...`,
+				},
+			],
+		});
+		return runDeepAutoreview(
+			ctx,
+			scope,
+			{
+				deep: params.deep,
+				deepPasses: params.deepPasses,
+				deepMinVotes: params.deepMinVotes,
+				deepValidate: params.deepValidate,
+				model: params.model,
+			},
+			onUpdate,
+			signal,
+		);
+	}
+
 	onUpdate?.({
 		content: [
 			{
@@ -868,6 +954,9 @@ export async function executeDrykissAutoreviewTool(
 			severityOverrides: effectiveConfig.riskTargeting?.severity,
 			suppressions,
 			commands: effectiveConfig.commands,
+			// CLI --validate flag takes precedence over config.validate.
+			// When neither is set, defaults to false (current behavior).
+			validate: params.validate ?? effectiveConfig.validate ?? false,
 			onProgress: onUpdate
 				? (job) =>
 						onUpdate({
@@ -905,6 +994,10 @@ export async function executeDrykissAutoreviewTool(
 						low: finalFindings.filter((f) => f.severity === "low").length,
 						nit: finalFindings.filter((f) => f.severity === "nit").length,
 						suppressed: result.counts.suppressed ?? 0,
+						previouslyRejected: result.counts.previouslyRejected ?? 0,
+						validatorReal: result.counts.validatorReal ?? 0,
+						validatorFalsePositive: result.counts.validatorFalsePositive ?? 0,
+						validatorUnverified: result.counts.validatorUnverified ?? 0,
 					},
 				}
 			: result;
@@ -1071,4 +1164,228 @@ export async function executeDrykissReviewTool(
 		content: [{ type: "text", text: JSON.stringify(review.findings, null, 2) }],
 		details: { findings: review.findings },
 	};
+}
+
+/**
+ * Run the Bugbot deep-review pipeline for a single lens and return
+ * the result in the same `ReviewResult` shape the flat multi-lens
+ * flow produces, so the agent doesn't need to special-case the
+ * return value.
+ *
+ * Mapping from `DeepValidatedFinding` (blocker|warning|note) to
+ * `Finding` (critical|high|medium|low|nit):
+ *   - blocker   → critical
+ *   - warning   → high
+ *   - note (validated, votes ≥ 2) → medium
+ *   - note (validated, votes 1)  → low
+ *
+ * This is a deliberate 3→2-step ladder: the deep pipeline's three
+ * severity tiers get promoted to DRYKISS's five-tier scale so the
+ * downstream counts/verdict/health-score logic is unchanged.
+ */
+async function runDeepAutoreview(
+	ctx: ExtensionContext,
+	scope: ReviewScope,
+	params: {
+		deep: ReviewLens;
+		deepPasses?: number;
+		deepMinVotes?: number;
+		deepValidate?: boolean;
+		model?: string;
+	},
+	onUpdate:
+		| ((result: { content: Array<{ type: "text"; text: string }> }) => void)
+		| undefined,
+	signal: AbortSignal | undefined,
+): Promise<{
+	content: Array<{ type: "text"; text: string }>;
+	details: { result: ReviewResult };
+}> {
+	// Lazy-import the deep-review module so the autoreview tool's
+	// startup cost doesn't pull it in for flat-mode runs.
+	const {
+		runDeepReview,
+		buildModelPlan,
+		loadDeepPassSystemPrompt,
+		makePiCallerAdapter,
+	} = await import("./deep-review.js");
+	const { findModelByHint } = await import("./model-utils.js");
+
+	const available = ctx.modelRegistry.getAvailable();
+	const sessionModel = findModelByHint(available, params.model ?? "haiku");
+	if (!sessionModel) {
+		throw new Error("No model available for deep-review pipeline.");
+	}
+
+	// Build the lens system prompt: reuse the existing lens
+	// composition so the deep-mode pass sees the same per-lens body
+	// (criteria, project-specific overlays, etc.) the flat-mode
+	// lens would see.
+	const { composeLensPrompt } = await import("./prompt-composer.js");
+	// Narrow the deep field to a non-"all" lens for the inner pipeline.
+	if (params.deep === "all") {
+		throw new Error(
+			"Deep mode requires a specific lens name (e.g. 'security'), not 'all'.",
+		);
+	}
+	const lensSystem = await composeLensPrompt(params.deep as never, {});
+
+	// Build the user prompt: scope label + the diff blocks. Reuse
+	// the existing context builder for consistency with the flat
+	// flow.
+	const diffBlock = formatDiffsForDeepAutoreview(scope);
+
+	const baseUserPrompt = `# Deep Review (${params.deep} lens)\n\n${diffBlock}`;
+
+	const passSystem = await loadDeepPassSystemPrompt();
+	const validatorSystem = await readValidatorSystemPrompt();
+
+	const config: import("./deep-review.js").DeepReviewConfig = {
+		passes: params.deepPasses ?? 5,
+		concurrency: params.deepPasses ?? 5,
+		temperature: 0.4,
+		maxFindings: 50,
+		minVotes: params.deepMinVotes ?? 2,
+		...(signal ? { signal } : {}),
+	};
+
+	const plan = buildModelPlan({
+		passModelKey: sessionModel.id,
+		passModelLabel: sessionModel.name,
+		validatorModelKey: sessionModel.id,
+		validatorModelLabel: sessionModel.name,
+		passes: config.passes,
+	});
+
+	const caller = makePiCallerAdapter(ctx, sessionModel);
+
+	const onStage = (stage: string) => {
+		onUpdate?.({
+			content: [{ type: "text", text: `Deep review: ${stage}...` }],
+		});
+	};
+
+	const result = await runDeepReview({
+		baseUserPrompt,
+		config,
+		plan,
+		passSystem: lensSystem + "\n\n" + passSystem,
+		validatorSystem,
+		caller,
+		hooks: { onStage },
+	});
+
+	// Map DeepSeverity → Severity.
+	const mapSeverity = (
+		deep: import("./deep-review.js").DeepSeverity,
+		votes: number,
+	): Severity => {
+		if (deep === "blocker") return "critical";
+		if (deep === "warning") return "high";
+		return votes >= 2 ? "medium" : "low";
+	};
+
+	const findings: Finding[] = result.findings.map((f) => ({
+		file: f.file,
+		...(f.line !== undefined ? { line: f.line } : {}),
+		severity: mapSeverity(f.severity, f.votes),
+		category: f.category ?? "Deep Review Finding",
+		summary: f.message,
+		detail: f.message,
+		suggestion: "",
+		consequence: undefined,
+		source: params.deep as string,
+		fixability: undefined,
+		confidence: f.votes >= 2 ? "confirmed" : "likely",
+		lens: params.deep as never,
+		riskCode: undefined,
+		action: "fix",
+		riskLevel: f.severity === "blocker" ? "high" : "medium",
+		priority: undefined,
+		_validatorVerdict: f.verdict === "real" ? "real" : "unverified",
+		_validatorJustification: f.justification,
+	}));
+
+	const critical = findings.filter((f) => f.severity === "critical").length;
+	const high = findings.filter((f) => f.severity === "high").length;
+	const medium = findings.filter((f) => f.severity === "medium").length;
+	const low = findings.filter((f) => f.severity === "low").length;
+	const nit = findings.filter((f) => f.severity === "nit").length;
+	const scoreBreakdown = {
+		critical,
+		warning: high + medium,
+		suggestion: low + nit,
+	};
+	const healthScore = Math.max(
+		0,
+		100 -
+			scoreBreakdown.critical * 15 -
+			scoreBreakdown.warning * 5 -
+			scoreBreakdown.suggestion * 1,
+	);
+	const verdict: "Approve" | "Request changes" | "Needs security review" =
+		critical > 0 ? "Request changes" : high > 0 ? "Request changes" : "Approve";
+
+	const reviewResult: ReviewResult = {
+		jobId: "deep",
+		clean: verdict === "Approve" && findings.length === 0,
+		status: "done",
+		verdict,
+		files: scope.files.map((f) => f.path),
+		counts: {
+			total: findings.length,
+			critical,
+			high,
+			medium,
+			low,
+			nit,
+			suppressed: 0,
+			previouslyRejected: 0,
+			validatorReal: result.findings.length,
+			validatorFalsePositive: result.rejected.length,
+			validatorUnverified: 0,
+		},
+		findings,
+		summary: `Deep review (${params.deep}) found ${findings.length} finding(s) across ${result.telemetry.passes} adversarial passes.`,
+		errors: [],
+		validationIssues: [],
+		healthScore,
+		scoreBreakdown,
+	};
+
+	return {
+		content: [
+			{
+				type: "text",
+				text: formatReviewResultForTool(reviewResult, {
+					qualityGateThreshold: 70,
+				}),
+			},
+		],
+		details: { result: reviewResult },
+	};
+}
+
+/** Format the resolved scope's diffs for the deep-mode pass prompt. */
+function formatDiffsForDeepAutoreview(scope: ReviewScope): string {
+	if (scope.diffs.size === 0) return "(no diff)";
+	const blocks: string[] = [];
+	const PER_FILE_BUDGET = 8_000;
+	for (const [file, diff] of scope.diffs) {
+		const truncated =
+			diff.length > PER_FILE_BUDGET
+				? `${diff.slice(0, PER_FILE_BUDGET)}\n... (truncated)`
+				: diff;
+		blocks.push(`### ${file}\n\n${truncated}`);
+	}
+	return `# Diff Under Review\n\n${blocks.join("\n\n")}`;
+}
+
+/** Load the deep-mode validator system prompt. */
+async function readValidatorSystemPrompt(): Promise<string> {
+	const { bundledPromptsDir } = await import("./prompt-loader.js");
+	const { readFile } = await import("node:fs/promises");
+	const { join } = await import("node:path");
+	const path = join(bundledPromptsDir(), "_shared", "validator-bugbot.md");
+	return readFile(path, "utf8");
 }
