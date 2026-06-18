@@ -247,6 +247,10 @@ export class ReviewManager {
 			lenses?: ReviewLens[];
 			activeConstraints?: string;
 			commands?: { test?: string; lint?: string };
+			/** Review mode (e.g. "pr", "full") — drives the posture context block. */
+			mode?: string;
+			/** Human-readable scope label injected into the posture block. */
+			scopeLabel?: string;
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
@@ -270,6 +274,8 @@ export class ReviewManager {
 			projectIndex,
 			activeConstraints: options.activeConstraints,
 			commands: options.commands,
+			mode: options.mode,
+			scopeLabel: options.scopeLabel,
 		});
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
 
@@ -704,6 +710,14 @@ export class ReviewManager {
 			}>;
 			commands?: { test?: string; lint?: string };
 			/**
+			 * Active risk-targeting constraints rendered into the lens
+			 * system prompt. Built by `buildActiveConstraints` from the
+			 * effective config. Required to reach the lens prompts from
+			 * this entry point (the autoreview tool path); previously
+			 * dropped, so risk-targeting config was silently ignored here.
+			 */
+			activeConstraints?: string;
+			/**
 			 * Opt-in: run the validator stage over the synthesized
 			 * findings. The validator is a separate LLM call whose
 			 * system prompt is in `_shared/validator.md`; it tries to
@@ -727,6 +741,9 @@ export class ReviewManager {
 				model: options.model,
 				lenses: options.lenses,
 				commands: options.commands,
+				activeConstraints: options.activeConstraints,
+				mode: options.target?.mode,
+				scopeLabel: options.target?.label,
 			},
 		);
 		const started = this.jobs.get(jobId);

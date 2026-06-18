@@ -23,6 +23,7 @@ import {
 	composeSynthesisPrompt,
 	type ComposeOptions,
 } from "./prompt-composer.js";
+import { modeToPosture, loadModeContextBlock } from "./mode-context.js";
 
 // Helper functions that go through the module namespace so vi.mock can
 // intercept the calls. (Destructured imports are not always live-bound
@@ -97,11 +98,13 @@ const BUNDLED_SHARED_FILES = [
 	"grounding-rules-synthesis.md",
 	"kiss-dry-checklist.md",
 	"active-constraints.md",
+	"mode-context-proposed.md",
+	"mode-context-audit.md",
 ] as const;
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "2"; // bump to force re-seed
+const CURRENT_SEED_VERSION = "3"; // bump to force re-seed (v3: mode-context fragments)
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);
@@ -348,6 +351,15 @@ export async function buildReviewPrompts(
 		activeConstraints?: string;
 		commands?: { test?: string; lint?: string };
 		guidelines?: string | null;
+		/**
+		 * Review mode (e.g. "pr", "commit", "full"). When provided, a
+		 * posture-specific context block is injected into the user prompt
+		 * so lenses frame the review correctly (proposed-change gate vs
+		 * codebase audit). See `./mode-context.ts`.
+		 */
+		mode?: string;
+		/** Human-readable scope label (e.g. "owner/repo#123", "full codebase"). */
+		scopeLabel?: string;
 	},
 ): Promise<ReviewPrompt[]> {
 	const context = buildFileContext(files, diffs, options?.contents);
@@ -362,9 +374,19 @@ export async function buildReviewPrompts(
 		options?.guidelines === undefined
 			? await loadProjectReviewGuidelines(cwd)
 			: options.guidelines;
+	// Load the posture context block once (mode-agnostic across lenses).
+	// Fail-open: missing mode or missing fragment → no block, preserving
+	// the pre-mode-awareness behavior for callers that don't pass mode.
+	const modeContext = options?.mode
+		? await loadModeContextBlock(
+				modeToPosture(options.mode),
+				options.scopeLabel,
+			)
+		: "";
 
 	function buildUserPrompt(includeIndex: boolean): string {
 		let prompt = `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
+		if (modeContext) prompt += `\n\n${modeContext}`;
 		if (commandsBlock) prompt += `\n${commandsBlock}`;
 		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
 		if (guidelines) {

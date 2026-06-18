@@ -42,7 +42,11 @@ import {
 	getPromptPath,
 	loadProjectReviewGuidelines,
 } from "./prompt-builder.js";
-import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
+import {
+	bundledPromptsDir,
+	userPromptsDir,
+	loadPromptBody,
+} from "./prompt-loader.js";
 import {
 	composeLensPrompt,
 	composeSynthesisPrompt,
@@ -350,6 +354,68 @@ describe("buildReviewPrompts", () => {
 	});
 });
 
+// ── mode context ────────────────────────────────────────────────────────
+
+describe("buildReviewPrompts — mode context", () => {
+	it("injects the proposed-posture block for change-based modes", async () => {
+		vi.mocked(loadPromptBody).mockResolvedValue("PROPOSED {{scope_label}}");
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"simplicity",
+			{ mode: "pr", scopeLabel: "owner/repo#42" },
+		);
+		expect(prompts[0].userPrompt).toContain("PROPOSED owner/repo#42");
+		expect(loadPromptBody).toHaveBeenCalledWith(
+			"mode-context-proposed",
+			"shared",
+		);
+	});
+
+	it("injects the audit-posture block for full mode", async () => {
+		vi.mocked(loadPromptBody).mockResolvedValue("AUDIT {{scope_label}}");
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"simplicity",
+			{ mode: "full", scopeLabel: "full codebase" },
+		);
+		expect(prompts[0].userPrompt).toContain("AUDIT full codebase");
+		expect(loadPromptBody).toHaveBeenCalledWith("mode-context-audit", "shared");
+	});
+
+	it("does not inject a mode block when mode is absent (backward compat)", async () => {
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"simplicity",
+		);
+		// No mode → no posture block loaded, preserving pre-mode-awareness behavior.
+		expect(loadPromptBody).not.toHaveBeenCalled();
+		expect(prompts[0].userPrompt).toContain("src/app.ts");
+	});
+
+	it("loads the mode block once and reuses it across all lenses", async () => {
+		vi.mocked(loadPromptBody).mockResolvedValue("PROPOSED {{scope_label}}");
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"all",
+			{ mode: "commit", scopeLabel: "commit abc123" },
+		);
+		expect(prompts).toHaveLength(7);
+		for (const p of prompts) {
+			expect(p.userPrompt).toContain("PROPOSED commit abc123");
+		}
+		// Loaded once total, not once per lens.
+		expect(loadPromptBody).toHaveBeenCalledTimes(1);
+	});
+});
+
 // ── project guidelines ─────────────────────────────────────────────────
 
 describe("loadProjectReviewGuidelines", () => {
@@ -629,11 +695,11 @@ describe("prompt template management", () => {
 
 				await ensureDefaultPrompts("/cwd");
 
-				// 8 lens + 7 shared + 1 sentinel = 16 files
+				// 8 lens + 9 shared + 1 sentinel = 18 files
 				const entries = await readdir(userDir);
 				const sharedEntries = await readdir(join(userDir, "_shared"));
 				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
-				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(7);
+				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(9);
 				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
 					true,
 				);

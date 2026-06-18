@@ -190,6 +190,8 @@ async function prepareReview(
 	projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined;
 	config: Awaited<ReturnType<typeof loadConfig>>;
 	activeConstraints: string;
+	scopeMode: string;
+	scopeLabel: string;
 } | null> {
 	let options =
 		typeof argsOrOptions === "string"
@@ -232,7 +234,14 @@ async function prepareReview(
 			ignorePatterns: config.ignorePatterns,
 		},
 	);
-	const { files, diffs, contents, projectIndex } = scope;
+	const {
+		files,
+		diffs,
+		contents,
+		projectIndex,
+		mode: scopeMode,
+		label: scopeLabel,
+	} = scope;
 
 	if (files.length === 0) {
 		const msg = options.all
@@ -258,6 +267,8 @@ async function prepareReview(
 		projectIndex,
 		config,
 		activeConstraints,
+		scopeMode,
+		scopeLabel,
 	};
 }
 
@@ -426,6 +437,8 @@ export async function handleDrykissCommand(
 		projectIndex,
 		config,
 		activeConstraints,
+		scopeMode,
+		scopeLabel,
 	} = prepared;
 	const fileList = files.map((f) => f.path).join(", ");
 
@@ -455,7 +468,13 @@ export async function handleDrykissCommand(
 			diffs,
 			contents,
 			projectIndex,
-			{ ...options, activeConstraints, commands: config.commands },
+			{
+				...options,
+				activeConstraints,
+				commands: config.commands,
+				mode: scopeMode,
+				scopeLabel,
+			},
 		);
 		ctx.ui.notify(
 			`DRYKISS review **${jobId}** started in background. Watch the widget above the editor for live progress. Results will appear here when complete.`,
@@ -528,6 +547,8 @@ async function handleSingleLensCommand(
 		projectIndex,
 		config,
 		activeConstraints,
+		scopeMode,
+		scopeLabel,
 	} = prepared;
 
 	try {
@@ -544,6 +565,8 @@ async function handleSingleLensCommand(
 				lenses: [lens],
 				activeConstraints,
 				commands: config.commands,
+				mode: scopeMode,
+				scopeLabel,
 			},
 		);
 		ctx.ui.notify(
@@ -955,6 +978,13 @@ export async function executeDrykissAutoreviewTool(
 		],
 	});
 
+	// Build active risk-targeting constraints for the lens system prompts.
+	// Previously dropped on this path, so risk-targeting config was silently
+	// ignored by the autoreview tool (the slash-command path already built it).
+	const activeConstraints = buildActiveConstraints(
+		effectiveConfig.riskTargeting,
+	);
+
 	const result = await manager.runReview(
 		ctx,
 		pi,
@@ -973,6 +1003,7 @@ export async function executeDrykissAutoreviewTool(
 			},
 			severityOverrides: effectiveConfig.riskTargeting?.severity,
 			suppressions,
+			activeConstraints,
 			commands: effectiveConfig.commands,
 			// CLI --validate flag takes precedence over config.validate.
 			// When neither is set, defaults to false (current behavior).
