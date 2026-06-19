@@ -139,6 +139,7 @@ export async function callLLM(
 			{ provider: model.provider, id: model.id },
 			"Model Error",
 			`${model.name} failed: ${err.message}\n\nChoose a different model:`,
+			{ error: err, lens },
 		);
 		if (!selected) throw err;
 

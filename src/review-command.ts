@@ -1110,7 +1110,17 @@ function formatReviewResultForTool(
 		result.counts.suppressed > 0
 			? `, ${result.counts.suppressed} suppressed`
 			: "";
-	const findingsLine = `findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit${suppressedStr})`;
+	// When validation drops findings, the raw synthesis output may
+	// still contain them — surface the drop count so the discrepancy
+	// between this summary and the persisted report is visible.
+	const validationDropped =
+		result.findings.length === 0 &&
+		result.counts.total === 0 &&
+		result.validationIssues.length > 0;
+	const validationStr = validationDropped
+		? ` (raw synthesis output preserved: ${result.validationIssues.length} finding(s) dropped during validation — see issues below)`
+		: "";
+	const findingsLine = `findings: ${result.counts.total} (${result.counts.critical} critical, ${result.counts.high} high, ${result.counts.medium} medium, ${result.counts.low} low, ${result.counts.nit} nit${suppressedStr})${validationStr}`;
 	const scoreLine = `health score: ${result.healthScore}/100`;
 	const breakdown = result.scoreBreakdown;
 	const scoreDetail = `(critical: ${breakdown.critical}, warning: ${breakdown.warning}, suggestion: ${breakdown.suggestion})`;

@@ -14,6 +14,7 @@ import {
 	normalizeScopeHints,
 	type ExcludedModel,
 } from "./free-models.js";
+import { findModelByHint } from "./model-utils.js";
 
 const bgColor = (text: string): string => `\x1b[48;2;0;20;137m${text}\x1b[0m`;
 
@@ -210,6 +211,66 @@ export function isAuthError(err: unknown): boolean {
 }
 
 /**
+ * Detect "server-gated" or feature-gate errors from the provider.
+ *
+ * Some providers expose a "free mode" or "trial" tier that is
+ * feature-gated on the server side (e.g. `403 "Free mode is
+ * server-gated"`). Every free-tier model from that provider will
+ * fail with the same error — autorouting to another free model
+ * would loop forever. The caller should skip autorouting and fall
+ * back to a paid model (the user's `defaultModel` config) instead.
+ *
+ * Includes the broader "not enabled" / "feature flag" variants so
+ * the check survives provider-specific phrasing.
+ */
+export function isServerGatedError(err: unknown): boolean {
+	return matchesErrorPattern(err, [
+		"server-gated",
+		"server gated",
+		"feature-gated",
+		"feature gated",
+		"not enabled",
+		"feature not available",
+		"tier not available",
+		"plan does not include",
+		"free mode",
+		"trial mode",
+		"free tier",
+	]);
+}
+
+/**
+ * Detect model-incompatible request-format errors (400 class).
+ *
+ * Some models reject the request before producing any output because
+ * the API adapter uses a role/field the model doesn't understand
+ * (e.g. `400 messages: Unexpected role "developer"`). The error is
+ * deterministic for that model — retrying with the same model will
+ * fail again — but a different model in the registry may accept the
+ * same request. Treat as a model error so the user is prompted to
+ * switch.
+ *
+ * Conservative: only matches 400-class errors whose body mentions
+ * `role`, `messages`, or `developer`. Bare "400" alone is too broad
+ * (would catch client-side bugs that should surface as-is).
+ */
+export function isModelIncompatibleError(err: unknown): boolean {
+	return matchesErrorPattern(err, [
+		"unexpected role",
+		"invalid role",
+		"unsupported role",
+		"unknown role",
+		"role not supported",
+		// Match 400 only when the body mentions a message-format field,
+		// so unrelated 400s (bad params, missing fields, etc.) surface
+		// as their own error instead of triggering model switching.
+		"400 messages",
+		"400 request",
+		"messages: unexpected",
+	]);
+}
+
+/**
  * Detect server-side (5xx) errors from the model provider. These mean the
  * provider's gateway / upstream is unreachable for the current model, so
  * switching to a different model — ideally an autorouted free one — is a
@@ -236,6 +297,15 @@ export function isServerError(err: unknown): boolean {
 		"terminated",
 		"stream terminated",
 		"connection terminated",
+		// Stream-cutoff signals: the upstream closed the stream before
+		// sending a finish_reason, so the client sees a half-formed
+		// response. Treat as a transient provider/gateway issue —
+		// retrying with a different model is a reasonable recovery.
+		"stream ended",
+		"without finish_reason",
+		"no finish_reason",
+		"missing finish_reason",
+		"unexpected eof",
 	]);
 }
 
@@ -252,7 +322,13 @@ function formatScopeNote(scope: string | string[] | undefined): string {
 
 /** Check if an error is a model-level error (quota, auth, or server-side) that warrants model switching. */
 export function isModelError(err: unknown): boolean {
-	return isQuotaError(err) || isAuthError(err) || isServerError(err);
+	return (
+		isQuotaError(err) ||
+		isAuthError(err) ||
+		isServerError(err) ||
+		isServerGatedError(err) ||
+		isModelIncompatibleError(err)
+	);
 }
 
 /**
@@ -306,25 +382,103 @@ export async function selectModelWithAutoroute(
  * a silent fallback to the caller — not an unhandled rejection. Returns
  * undefined if no model was selected or if autorouting failed.
  *
+ * Resolution order:
+ *   1. If the error indicates the free tier is server-gated
+ *      (`isServerGatedError`), skip autorouting entirely — every free
+ *      model from the same provider will fail with the same error.
+ *      Fall back to the user's `defaultModel` config (paid model),
+ *      then to the per-lens `lensModels[lens]` config, then to the
+ *      interactive popup.
+ *   2. Otherwise, follow the standard `selectModelWithAutoroute` path:
+ *      free models first (if `autoroute: true`), then the popup.
+ *   3. As a final fallback when the popup is unavailable (headless),
+ *      try `defaultModel` / `lensModels[lens]` so we never silently
+ *      drop a model error.
+ *
  * This is the shared helper for the repeated retry pattern in:
  *   - callLLM (llm.ts)
  *   - runLens (review-manager.ts)
  *   - runSynthesis (review-manager.ts)
+ *
+ * @param options.config Optional pre-loaded config. When omitted, the
+ *                       config is loaded via `loadConfig()` (the normal
+ *                       production path). Tests pass a stub here to
+ *                       avoid hitting the real filesystem.
  */
 export async function selectModelOnError(
 	ctx: ExtensionContext,
 	failedModel: { provider: string; id: string },
 	title: string,
 	message: string,
+	options?: {
+		/** The original error that triggered the retry, used for server-gated detection. */
+		error?: unknown;
+		/** Lens name — used to look up `lensModels[lens]` in config. */
+		lens?: string;
+		/** Pre-loaded config (skips `loadConfig()`). Test-friendly escape hatch. */
+		config?: DrykissConfig;
+	},
 ): Promise<Model<Api> | undefined> {
 	try {
-		const config = await loadConfig();
-		return await selectModelWithAutoroute(ctx, config, title, message, {
-			provider: failedModel.provider,
-			id: failedModel.id,
-		});
+		const config = options?.config ?? (await loadConfig());
+
+		// Server-gated: every free model from this provider will fail.
+		// Skip autorouting and go straight to the paid default config.
+		if (options?.error && isServerGatedError(options.error)) {
+			const fromConfig = resolveDefaultConfigModel(ctx, config, options.lens);
+			if (fromConfig) {
+				ctx.ui.notify(
+					`Free mode is server-gated — falling back to ${fromConfig.name} (default config).`,
+					"info",
+				);
+				return fromConfig;
+			}
+			// No default config model — fall through to popup if possible.
+			if (!ctx.hasUI) return undefined;
+			return await selectModel(ctx, title, message);
+		}
+
+		const selected = await selectModelWithAutoroute(
+			ctx,
+			config,
+			title,
+			message,
+			{
+				provider: failedModel.provider,
+				id: failedModel.id,
+			},
+		);
+		if (selected) return selected;
+
+		// Autoroute produced nothing (no free model, or all excluded) and
+		// we couldn't reach the popup (e.g. headless). As a last resort,
+		// try the default config model so we never silently drop a
+		// recoverable model error.
+		if (!ctx.hasUI) {
+			return resolveDefaultConfigModel(ctx, config, options?.lens);
+		}
+		return undefined;
 	} catch {
 		// Autoroute failed — return undefined so caller can decide how to handle
 		return undefined;
 	}
+}
+
+/**
+ * Resolve the default config model: `lensModels[lens]` first, then
+ * `defaultModel`. Returns undefined if neither is set or if neither
+ * matches a model in the registry.
+ */
+function resolveDefaultConfigModel(
+	ctx: ExtensionContext,
+	config: DrykissConfig,
+	lens?: string,
+): Model<Api> | undefined {
+	const available = ctx.modelRegistry.getAvailable();
+	if (available.length === 0) return undefined;
+	const hint =
+		(lens && config.lensModels?.[lens as keyof typeof config.lensModels]) ||
+		config.defaultModel;
+	if (!hint) return undefined;
+	return findModelByHint(available, hint);
 }

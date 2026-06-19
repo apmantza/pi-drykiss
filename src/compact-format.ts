@@ -126,7 +126,20 @@ export function formatReviewResultCompact(
 		counts.validatorFalsePositive && counts.validatorFalsePositive > 0
 			? `, ${counts.validatorFalsePositive} validator-refuted`
 			: "";
-	const findingsLine = `findings: ${counts.total} (${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low, ${counts.nit} nit${suppressedNote}${rejectedNote}${validatorNote})`;
+	// When findings were dropped during validation (out-of-scope files,
+	// invalid severity/line, missing required fields), the raw
+	// synthesis output may still contain them — but they don't reach
+	// the summary line. Surface the drop count so the discrepancy
+	// between "summary says 0" and "saved report has N" is visible.
+	const rawFindingsCount = result.findings.length;
+	const validationDropped =
+		rawFindingsCount > 0 &&
+		counts.total === 0 &&
+		result.validationIssues.length > 0;
+	const validationNote = validationDropped
+		? ` (raw synthesis output preserved: ${rawFindingsCount} finding(s) — see validation issues below)`
+		: "";
+	const findingsLine = `findings: ${counts.total} (${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low, ${counts.nit} nit${suppressedNote}${rejectedNote}${validatorNote})${validationNote}`;
 	const scoreLine = `health score: ${result.healthScore}/100`;
 	const trendLine =
 		result.prevScore != null
@@ -180,6 +193,14 @@ export function formatReviewResultCompact(
 		lines.push(
 			`validation issues: ${result.validationIssues.length} (see structured result for details)`,
 		);
+		// Show up to 5 issue reasons inline so the user can see why
+		// findings were dropped without opening the structured payload.
+		for (const vi of result.validationIssues.slice(0, 5)) {
+			lines.push(`  - #${vi.findingIndex}: ${vi.reason}`);
+		}
+		if (result.validationIssues.length > 5) {
+			lines.push(`  ... and ${result.validationIssues.length - 5} more`);
+		}
 	}
 
 	return lines.join("\n");

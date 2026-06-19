@@ -193,12 +193,19 @@ export class ReviewManager {
 		failedSession: AgentSession | undefined,
 		taskLabel: string,
 		runFn: (model: Model<Api>) => Promise<SubagentResult>,
+		options?: {
+			/** Original error from the failed run, used for server-gated detection. */
+			error?: unknown;
+			/** Lens name — used to look up per-lens config on fallback. */
+			lens?: string;
+		},
 	): Promise<SubagentResult | null> {
 		const selected = await selectModelOnError(
 			ctx,
 			{ provider: failedModel.provider, id: failedModel.id },
 			"Model Error",
 			`Model "${failedModel.name}" failed.\n\nChoose a different model for ${taskLabel}:`,
+			{ error: options?.error, lens: options?.lens },
 		);
 		if (!selected) {
 			// User cancelled — dispose the failed session before returning
@@ -448,7 +455,9 @@ export class ReviewManager {
 			if (isModelErr) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
-				// that just failed so autorouting can't loop on it.
+				// that just failed so autorouting can't loop on it. When the
+				// error is server-gated, the retry path skips free models and
+				// falls back to the default config model (paid tier).
 				const retryResult = await this.retryOnModelError(
 					ctx,
 					task.model,
@@ -468,6 +477,7 @@ export class ReviewManager {
 								task.onStreamUpdate();
 							},
 						),
+					{ error: result.errorMessage, lens: task.lens },
 				);
 				if (retryResult) {
 					state.session = retryResult.session;
@@ -624,7 +634,9 @@ export class ReviewManager {
 			if (result.errorMessage && isModelError(result.errorMessage)) {
 				// Auto-route to a free model if the user has configured it;
 				// otherwise show the standard picker popup. Exclude the model
-				// that just failed so autorouting can't loop on it.
+				// that just failed so autorouting can't loop on it. When the
+				// error is server-gated, the retry path skips free models and
+				// falls back to the default config model (paid tier).
 				const retryResult = await this.retryOnModelError(
 					ctx,
 					model,
@@ -632,6 +644,7 @@ export class ReviewManager {
 					"synthesis",
 					async (m) =>
 						runLensSubagent(ctx, cwd, m, systemPrompt, userPrompt, "synthesis"),
+					{ error: result.errorMessage, lens: "synthesis" },
 				);
 				if (retryResult) {
 					if (retryResult.session) {

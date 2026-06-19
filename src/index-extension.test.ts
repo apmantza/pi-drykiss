@@ -55,10 +55,6 @@ vi.mock("./persist.js", () => ({
 	formatReviewForDisplay,
 }));
 
-vi.mock("./config.js", () => ({
-	loadConfig,
-}));
-
 const commandExports = {
 	handleDrykissCommand: vi.fn(),
 	handleKissCommand: vi.fn(),
@@ -145,7 +141,6 @@ describe("extension event wiring", () => {
 		buildAutoInjectBlock.mockReturnValue("\nAUTO-INJECT");
 		formatReviewForDisplay.mockReturnValue("formatted review");
 		loadConfig.mockResolvedValue({});
-		commandExports.executeDrykissAutoreviewTool.mockReset();
 	});
 
 	it("attaches the review widget on tool execution start", () => {
@@ -220,7 +215,7 @@ describe("extension event wiring", () => {
 				handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx),
 			).not.toThrow();
 			expect(ctx.ui.notify).toHaveBeenCalledWith(
-				expect.stringContaining("Failed tracking edited file"),
+				expect.stringContaining("Failed tracking file edit"),
 				"warning",
 			);
 		} finally {
@@ -303,142 +298,6 @@ describe("extension event wiring", () => {
 		} finally {
 			warn.mockRestore();
 		}
-	});
-
-	it("runs autoreview on agent end and clears edited files after success", async () => {
-		const { pi, handlers } = makePi();
-		registerDrykiss(pi as any);
-		const ctx = makeCtx();
-		trackerTrackEdit.mockReturnValue({
-			path: "src/a.ts",
-			language: "TypeScript",
-		});
-		loadConfig.mockResolvedValue({
-			autoreview: {
-				enabled: true,
-				confirmBeforeRun: false,
-				mode: "files",
-				cooldownMs: 0,
-			},
-		});
-		commandExports.executeDrykissAutoreviewTool.mockResolvedValue({
-			content: [{ text: "done" }],
-			details: { result: { clean: true } },
-		});
-		handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx);
-
-		await handlers.get("agent_end")?.({}, ctx);
-		await handlers.get("agent_end")?.({}, ctx);
-
-		expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
-			1,
-		);
-		// We intentionally do NOT post the autoreview result as a
-		// follow-up message — see the comment in the agent_end hook
-		// for the rationale. The result is still visible via the
-		// widget, /drykiss-history, and the persisted review file.
-		expect(pi.sendMessage).not.toHaveBeenCalled();
-	});
-
-	it("keeps edited files when autoreview fails so the next agent end can retry", async () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const { pi, handlers } = makePi();
-			registerDrykiss(pi as any);
-			const ctx = makeCtx();
-			trackerTrackEdit.mockReturnValue({
-				path: "src/a.ts",
-				language: "TypeScript",
-			});
-			loadConfig.mockResolvedValue({
-				autoreview: {
-					enabled: true,
-					confirmBeforeRun: false,
-					mode: "files",
-				},
-			});
-			commandExports.executeDrykissAutoreviewTool
-				.mockRejectedValueOnce(new Error("review failed"))
-				.mockResolvedValueOnce({
-					content: [{ text: "done" }],
-					details: { result: { clean: true } },
-				});
-			handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx);
-
-			await handlers.get("agent_end")?.({}, ctx);
-			await handlers.get("agent_end")?.({}, ctx);
-
-			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
-				2,
-			);
-			expect(ctx.ui.notify).toHaveBeenCalledWith(
-				expect.stringContaining("Failed running DRYKISS autoreview"),
-				"warning",
-			);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("clears successful autoreview edits even when post-run logging fails", async () => {
-		// Replaces the old "completion notification fails" test: the
-		// autoreview no longer posts a follow-up message, so we
-		// exercise the next realistic failure path — a warn-style
-		// error inside the hook — and confirm edits are still cleared
-		// on a successful review.
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const { pi, handlers } = makePi();
-			registerDrykiss(pi as any);
-			const ctx = makeCtx();
-			trackerTrackEdit.mockReturnValue({
-				path: "src/a.ts",
-				language: "TypeScript",
-			});
-			loadConfig.mockResolvedValue({
-				autoreview: {
-					enabled: true,
-					confirmBeforeRun: false,
-					mode: "files",
-					cooldownMs: 0,
-				},
-			});
-			commandExports.executeDrykissAutoreviewTool.mockResolvedValue({
-				content: [{ text: "done" }],
-				details: { result: { clean: true } },
-			});
-			handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx);
-
-			await handlers.get("agent_end")?.({}, ctx);
-			await handlers.get("agent_end")?.({}, ctx);
-
-			expect(commandExports.executeDrykissAutoreviewTool).toHaveBeenCalledTimes(
-				1,
-			);
-			// The result is intentionally NOT posted as a follow-up.
-			expect(pi.sendMessage).not.toHaveBeenCalled();
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("agent_start clears pending autoreview edits", async () => {
-		const { pi, handlers } = makePi();
-		registerDrykiss(pi as any);
-		const ctx = makeCtx();
-		trackerTrackEdit.mockReturnValue({
-			path: "src/a.ts",
-			language: "TypeScript",
-		});
-		loadConfig.mockResolvedValue({
-			autoreview: { enabled: true, confirmBeforeRun: false, mode: "files" },
-		});
-		handlers.get("tool_execution_end")?.({ toolName: "edit" }, ctx);
-
-		handlers.get("agent_start")?.({}, ctx);
-		await handlers.get("agent_end")?.({}, ctx);
-
-		expect(commandExports.executeDrykissAutoreviewTool).not.toHaveBeenCalled();
 	});
 
 	it("renders completed review messages with serialized lens state", () => {

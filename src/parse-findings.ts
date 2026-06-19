@@ -6,6 +6,43 @@ export interface ParseFindingsResult {
 	readonly parseError?: string;
 }
 
+/**
+ * Wrapper keys that lenses commonly use to wrap their findings array.
+ * Ordered by expected frequency — `findings` is the canonical contract
+ * (see prompt-builder prompt text in `json-output.md`), but LLM output
+ * sometimes drifts to semantically equivalent keys. When the LLM wraps
+ * the array under one of these, we accept it and unwrap transparently.
+ */
+const FINDINGS_WRAPPER_KEYS: readonly string[] = [
+	"findings", // canonical contract
+	"results",
+	"issues",
+	"violations",
+	"defects",
+	"problems",
+	"items",
+	"data",
+	"output",
+	"review",
+	"lens_findings",
+];
+
+/**
+ * Find the first array-typed property on an object whose key matches a
+ * known findings-wrapper name. Returns the array, or undefined.
+ *
+ * Used to recover from LLM drift: when a lens returns
+ * `{ "results": [...] }` instead of the canonical
+ * `{ "findings": [...] }`, we still surface the findings.
+ */
+function findWrapperArray(obj: Record<string, unknown>): unknown[] | undefined {
+	for (const key of FINDINGS_WRAPPER_KEYS) {
+		const v = obj[key];
+		if (Array.isArray(v)) return v;
+	}
+	return undefined;
+}
+
 function extractBalancedJson(
 	raw: string,
 	open: string,
@@ -66,18 +103,43 @@ export function parseFindingsJson(
 				parsed = lenientJsonParse(jsonText);
 			}
 		}
-		const findingsSource =
+
+		// Normalize the parsed value to a findings array:
+		//   1. Array -> use as-is (canonical contract).
+		//   2. Object -> look for a known wrapper key (findings, results,
+		//      issues, violations, defects, problems, items, data, output,
+		//      review, lens_findings) holding an array.
+		//   3. Object -> fall back to scanning for the first array-typed
+		//      property (last-ditch recovery from LLM drift to a new
+		//      wrapper key we haven't enumerated yet).
+		//   4. Anything else -> return a parse error.
+		let findingsSource: unknown = parsed;
+		if (
 			typeof parsed === "object" &&
 			parsed !== null &&
-			"findings" in parsed &&
-			Array.isArray((parsed as { findings?: unknown }).findings)
-				? (parsed as { findings: unknown[] }).findings
-				: parsed;
+			!Array.isArray(parsed)
+		) {
+			const obj = parsed as Record<string, unknown>;
+			const wrapper = findWrapperArray(obj);
+			if (wrapper) {
+				findingsSource = wrapper;
+			} else {
+				// Last-ditch: pick the first array-typed property.
+				const firstArray = Object.values(obj).find((v) => Array.isArray(v));
+				if (firstArray) findingsSource = firstArray;
+			}
+		}
 
 		if (!Array.isArray(findingsSource)) {
+			const objType =
+				typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+					? `object (keys: ${Object.keys(parsed as Record<string, unknown>)
+							.slice(0, 5)
+							.join(", ")})`
+					: typeof parsed;
 			return {
 				findings: [],
-				parseError: `Expected array, got ${typeof parsed}`,
+				parseError: `Expected array, got ${objType}`,
 			};
 		}
 
