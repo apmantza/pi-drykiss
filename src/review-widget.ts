@@ -210,7 +210,15 @@ export class ReviewProgressWidget {
 		const lines: string[] = [];
 
 		for (const job of this.jobs) {
-			if (job.overallStatus !== "running" && job.overallStatus !== "queued") {
+			const isLive = job.overallStatus === "running" || job.overallStatus === "queued";
+			if (!isLive) {
+				// Show a compact completed summary so the user sees the
+				// health score, verdict, and per-lens breakdown right
+				// after the job finishes — without waiting for the
+				// follow-up message renderer notification.
+				if (job.overallStatus === "done" || job.overallStatus === "error") {
+					lines.push(...this.renderCompletedSummary(job, theme, truncate));
+				}
 				continue;
 			}
 
@@ -278,12 +286,88 @@ export class ReviewProgressWidget {
 		return lines;
 	}
 
+	/**
+	 * Render a compact post-completion summary for a job that has
+	 * finished. Surfaces the health score, verdict, and per-lens
+	 * model breakdown so the user sees the bottom line immediately,
+	 * without waiting for the follow-up notification message.
+	 *
+	 * The completed summary is intentionally short (4 lines max) so it
+	 * doesn't compete with the running-widget for vertical space —
+	 * once the user dismisses or scrolls past it, the widget hides
+	 * itself via the existing `hasActive` check in `update()`.
+	 */
+	private renderCompletedSummary(
+		job: ReviewJob,
+		theme: Theme,
+		truncate: (line: string) => string,
+	): string[] {
+		const out: string[] = [];
+		const s = job.synthesisResult;
+		const hasError = job.overallStatus === "error";
+
+		// Distinct lens provider/model pairs. Helps when lenses ran on
+		// different models (e.g. one Sonnet, one Haiku). Empty /
+		// whitespace-only provider or modelName are skipped — a legacy
+		// persisted review with no model info must not render as
+		// `@ ` or `@ /`.
+		const modelPairs = new Set<string>();
+		for (const lens of job.lenses) {
+			const st = job.states.get(lens);
+			if (!st) continue;
+			const prov = st.provider?.trim() ?? "";
+			const name = st.modelName?.trim() ?? "";
+			if (!prov && !name) continue;
+			modelPairs.add(prov ? `${prov}/${name}` : name);
+		}
+		const modelLine =
+			modelPairs.size > 0
+				? theme.fg("dim", `@ ${[...modelPairs].join(", ")}`)
+				: "";
+
+		const icon = hasError
+			? theme.fg("error", "✗")
+			: theme.fg("success", "✓");
+		const verdict = s?.verdict ?? "Request changes";
+		const findingsCount = s?.findings?.length ?? 0;
+		const healthScore = s?.healthScore;
+		const elapsed =
+			job.completedAt && job.startedAt
+				? formatElapsed(job.completedAt - job.startedAt)
+				: "";
+
+		const statsParts: string[] = [];
+		statsParts.push(`${findingsCount} findings`);
+		if (s?.criticalCount && s.criticalCount > 0)
+			statsParts.push(`${s.criticalCount} critical`);
+		if (s?.highCount && s.highCount > 0)
+			statsParts.push(`${s.highCount} high`);
+		if (typeof healthScore === "number") {
+			statsParts.push(`score ${healthScore}/100`);
+		}
+		if (elapsed) statsParts.push(elapsed);
+
+		const heading = `${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg(
+			"accent",
+			`Verdict: ${verdict}`,
+		)}`;
+		const statsLine = theme.fg(
+			"dim",
+			statsParts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `),
+		);
+		out.push(truncate(heading));
+		out.push(truncate(`  ${statsLine}`));
+		if (modelLine) out.push(truncate(`  ${modelLine}`));
+		return out;
+	}
+
 	private renderLensLine(
 		branch: string,
 		lens: string,
 		state: {
 			status: LensStatus;
 			modelName: string;
+			provider?: string;
 			durationMs: number;
 			errorMessage?: string;
 			findingsCount: number;
@@ -328,18 +412,34 @@ export class ReviewProgressWidget {
 
 		const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
 		const name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-		const model = theme.fg("dim", `@ ${state.modelName}`);
+		// Show provider/model together so users can tell which
+		// provider served which lens at a glance — important when
+		// lenses autoroute to different providers, or when a
+		// server-gated free tier triggers a fallback to a paid
+		// model on a different provider. Whitespace-only or empty
+		// fields are skipped so the line never renders as `@ /`.
+		const prov = state.provider?.trim() ?? "";
+		const modelName = state.modelName?.trim() ?? "";
+		const modelLabel = prov
+			? `${prov}/${modelName}`
+			: modelName;
+		const model = theme.fg("dim", `@ ${modelLabel}`);
 		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}${linkSegment}`;
 	}
 
 	private update() {
 		if (!this.uiCtx?.setWidget) return;
 
-		const hasActive = this.jobs.some(
-			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
-		);
+		// Keep the widget alive if there's anything to show: live
+		// jobs, or completed jobs whose summary hasn't been read
+		// yet. Without completed jobs the user would lose the
+		// health-score summary the instant synthesis finishes.
+		// The cleanup job in ReviewManager removes old completed
+		// jobs after 10 minutes, which is when this widget
+		// disposes naturally.
+		const hasAnything = this.jobs.length > 0;
 
-		if (!hasActive) {
+		if (!hasAnything) {
 			this.dispose();
 			return;
 		}

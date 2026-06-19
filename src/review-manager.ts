@@ -57,6 +57,13 @@ export type LensStatus = "queued" | "running" | "done" | "error";
 export interface LensState {
 	status: LensStatus;
 	modelName: string;
+	/**
+	 * Provider id (e.g. "anthropic", "openai") for the model that ran this
+	 * lens. Optional for backward compat with persisted reviews that
+	 * pre-date the field; the widget falls back to the modelName alone
+	 * when it's missing.
+	 */
+	provider?: string;
 	durationMs: number;
 	errorMessage?: string;
 	findingsCount: number;
@@ -289,9 +296,11 @@ export class ReviewManager {
 		// Initialize job
 		const states = new Map<ReviewLens, LensState>();
 		for (const lens of lenses) {
+			const m = modelMap.get(lens);
 			states.set(lens, {
 				status: "queued",
-				modelName: modelMap.get(lens)?.name ?? "unknown",
+				modelName: m?.name ?? "unknown",
+				provider: m?.provider,
 				durationMs: 0,
 				findingsCount: 0,
 				rawOutput: "[]",
