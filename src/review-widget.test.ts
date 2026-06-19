@@ -551,6 +551,74 @@ describe("renderWidget — completed summary", () => {
 		// dim occurrences to a sane upper limit (outer + separators).
 		expect(dimCount).toBeLessThanOrEqual(6);
 	});
+
+	it("color-bands the score in the completed summary (green ≥80, yellow ≥50, red <50)", () => {
+		// Consistency guard: widget summary must use the same color
+		// bands as the message renderer so users learn one rule,
+		// not two. Use a theme that wraps each color in a distinct
+		// sentinel token so the test is meaningful (the default
+		// no-op theme would let any color pass).
+		const seenColors: Set<string> = new Set();
+		const theme = {
+			fg: (color: string, text: string) => {
+				seenColors.add(color);
+				return `[${color}:${text}]`;
+			},
+			bold: (text: string) => text,
+		};
+
+		function buildWithScore(score: number): ReviewJob {
+			const lens: ReviewLens = "simplicity";
+			return buildCompletedJob({
+				synthesisResult: {
+					findings: [],
+					summary: "ok",
+					verdict: "Approve",
+					criticalCount: 0,
+					highCount: 0,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: score,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				},
+				states: new Map([[lens, buildLensState({ status: "done" })]]),
+			});
+		}
+
+		function renderOne(job: ReviewJob): string[] {
+			let captured: (() => string[]) | undefined;
+			const widget = new ReviewProgressWidget();
+			const uiCtx = {
+				setWidget: (
+					_key: string,
+					fn: (tui: any, theme: any) => { render: () => string[] },
+				) => {
+					captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+				},
+			};
+			widget.attach(uiCtx);
+			widget.setJobs([job]);
+			const lines = captured?.() ?? [];
+			widget.dispose();
+			return lines;
+		}
+
+		// 92 → success
+		let lines = renderOne(buildWithScore(92));
+		expect(lines[1]).toContain("[success:score 92/100]");
+		// 65 → warning
+		lines = renderOne(buildWithScore(65));
+		expect(lines[1]).toContain("[warning:score 65/100]");
+		// 30 → error
+		lines = renderOne(buildWithScore(30));
+		expect(lines[1]).toContain("[error:score 30/100]");
+		// Band thresholds
+		lines = renderOne(buildWithScore(80));
+		expect(lines[1]).toContain("[success:score 80/100]");
+		lines = renderOne(buildWithScore(50));
+		expect(lines[1]).toContain("[warning:score 50/100]");
+	});
 });
 
 import { formatFinding } from "./review-widget.js";
@@ -658,6 +726,156 @@ describe("formatFinding", () => {
 		const out = formatFinding(buildFinding({ lens: "simplicity" }));
 		// simplicity → "KISS" via LENS_DISPLAY_NAMES
 		expect(out).toContain("[KISS]");
+	});
+});
+
+describe("ReviewProgressWidget — lifecycle", () => {
+	function makeCompletedJob(): ReviewJob {
+		const lens: ReviewLens = "simplicity";
+		return {
+			id: "lifecycle",
+			files: [],
+			lenses: [lens],
+			states: new Map([
+				[
+					lens,
+					buildLensState({
+						status: "done",
+						modelName: "Sonnet",
+						provider: "anthropic",
+						durationMs: 100,
+						findingsCount: 0,
+					}),
+				],
+			]),
+			synthesisStatus: "done",
+			overallStatus: "done",
+			startedAt: Date.now() - 1000,
+			completedAt: Date.now(),
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 90,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			},
+		};
+	}
+
+	function makeRunningJob(): ReviewJob {
+		const lens: ReviewLens = "simplicity";
+		return {
+			id: "running",
+			files: [],
+			lenses: [lens],
+			states: new Map([
+				[
+					lens,
+					buildLensState({
+						status: "running",
+						modelName: "Sonnet",
+						provider: "anthropic",
+						durationMs: 0,
+						findingsCount: 0,
+						startedAt: Date.now() - 500,
+					}),
+				],
+			]),
+			synthesisStatus: "idle",
+			overallStatus: "running",
+			startedAt: Date.now() - 500,
+		};
+	}
+
+	function attachAndCapture(widget: ReviewProgressWidget): {
+		captured?: () => string[];
+		setJobs: (jobs: ReviewJob[]) => void;
+	} {
+		let captured: (() => string[]) | undefined;
+		const theme = {
+			fg: (_c: string, t: string) => t,
+			bold: (t: string) => t,
+		};
+		const uiCtx = {
+			setWidget: (
+				_key: string,
+				fn: (tui: any, theme: any) => { render: () => string[] },
+			) => {
+				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+			},
+		};
+		widget.attach(uiCtx);
+		return {
+			get captured() {
+				return captured;
+			},
+			setJobs: (jobs: ReviewJob[]) => widget.setJobs(jobs),
+		};
+	}
+
+	it("keeps the widget alive when only completed jobs remain (so the summary renders)", () => {
+		// Regression guard: update() previously disposed the widget
+		// as soon as no job was running/queued, losing the
+		// health-score summary the instant synthesis finished.
+		const widget = new ReviewProgressWidget();
+		const ctx = attachAndCapture(widget);
+		ctx.setJobs([makeCompletedJob()]);
+		// Widget should still be registered (not disposed) — the
+		// captured renderer should produce the summary lines.
+		expect(ctx.captured).toBeDefined();
+		const lines = ctx.captured!();
+		expect(lines.length).toBeGreaterThan(0);
+		expect(lines[0]).toContain("DRYKISS Review");
+		widget.dispose();
+	});
+
+	it("stops the 80ms render timer when only completed jobs remain", () => {
+		// Perf guard: completed jobs render a static summary with no
+		// spinner or live elapsed counter. The 12Hz tick is pure waste.
+		const widget = new ReviewProgressWidget();
+		const ctx = attachAndCapture(widget);
+		// First prime with a running job so ensureTimer() actually
+		// installs the interval.
+		ctx.setJobs([makeRunningJob()]);
+		const before = widget["timer"];
+		expect(before).toBeDefined();
+		// Now swap to a completed job. update() should stop the timer.
+		ctx.setJobs([makeCompletedJob()]);
+		const after = widget["timer"];
+		expect(after).toBeUndefined();
+		widget.dispose();
+	});
+
+	it("restarts the render timer when a new live job lands", () => {
+		// Symmetry guard: stopTimer must be reversible so the widget
+		// can pick back up if another review starts after the first
+		// one finished.
+		const widget = new ReviewProgressWidget();
+		const ctx = attachAndCapture(widget);
+		// Completed job first — timer should stay stopped.
+		ctx.setJobs([makeCompletedJob()]);
+		expect(widget["timer"]).toBeUndefined();
+		// Now a running job lands — timer should restart.
+		ctx.setJobs([makeRunningJob()]);
+		expect(widget["timer"]).toBeDefined();
+		widget.dispose();
+	});
+
+	it("disposes the widget when the jobs list is empty", () => {
+		const widget = new ReviewProgressWidget();
+		const ctx = attachAndCapture(widget);
+		ctx.setJobs([makeCompletedJob()]);
+		expect(ctx.captured).toBeDefined();
+		// Clearing jobs should fully dispose (ReviewManager's 10-min
+		// cleanup is what reaches this state).
+		ctx.setJobs([]);
+		// After dispose, the registered widget is cleared.
+		expect(widget["widgetRegistered"]).toBe(false);
 	});
 });
 

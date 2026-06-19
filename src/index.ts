@@ -299,10 +299,9 @@ export default function (pi: ExtensionAPI): void {
 						.join(` ${theme.fg("dim", "·")} `);
 			}
 
-			// Distinct provider/model pairs across lenses. Routed
-			// through the shared aggregator in review-widget so the
-			// widget, notification body, and message renderer all
-			// apply the same empty/whitespace skip and ordering.
+			// Shared with the widget completed summary and the
+			// notification body via collectModelPairs() — see that
+			// helper for the empty/whitespace-skip and ordering rules.
 			const modelPairs = collectModelPairs(
 				lensStateEntries(job.states) as Iterable<
 					[string, { provider?: unknown; modelName?: unknown } | undefined]
@@ -407,9 +406,9 @@ export default function (pi: ExtensionAPI): void {
 			report += `\n## Review warnings\n${lensErrors.join("\n")}\n`;
 		}
 
-		// Distinct provider/model pairs across lenses. Same shared
-		// aggregator as the TUI widget and message renderer — one
-		// source of truth for empty/whitespace handling and ordering.
+		// Shared with the widget completed summary and the message
+		// renderer via collectModelPairs() — see that helper for the
+		// empty/whitespace-skip and ordering rules.
 		const modelPairs = collectModelPairs(
 			lensStateEntries(job.states) as Iterable<
 				[string, { provider?: unknown; modelName?: unknown } | undefined]

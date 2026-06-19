@@ -385,9 +385,19 @@ export class ReviewProgressWidget {
 			statsParts.push(`${s.highCount} high`);
 		// typeof check (not safeNumber) so a missing healthScore stays
 		// hidden instead of being displayed as a misleading "score 0/100"
-		// in the red band.
+		// in the red band. Same 80/50 thresholds as the message renderer
+		// and notification body so the three surfaces never disagree on
+		// what "good" / "warning" / "critical" looks like.
 		if (typeof healthScore === "number") {
-			statsParts.push(`score ${healthScore}/100`);
+			const scoreColor =
+				healthScore >= 80
+					? "success"
+					: healthScore >= 50
+						? "warning"
+						: "error";
+			statsParts.push(
+				theme.fg(scoreColor, `score ${healthScore}/100`),
+			);
 		}
 		if (elapsed) statsParts.push(elapsed);
 
