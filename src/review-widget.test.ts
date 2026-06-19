@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	ReviewProgressWidget,
 	collectModelPairs,
+	pickVerdict,
 } from "./review-widget.js";
 import type { LensState, ReviewJob } from "./review-manager.js";
 import type { ReviewLens } from "./types.js";
@@ -539,17 +540,37 @@ describe("renderWidget — completed summary", () => {
 		// Regression guard: statsParts.map(p => fg("dim", p))
 		// followed by theme.fg("dim", joined) over-dims every part.
 		// The widget should dim the line as a whole, not each part.
-		const job = buildCompletedJob();
-		const lines = renderAll(job);
-		const statsLine = lines[1] ?? "";
-		// No stats segment should contain the ANSI escape for dim
-		// (ESC [ 2 m) — only one outer dim wrap is expected.
-		const dimCount = (statsLine.match(/\x1b\[2m/g) ?? []).length;
-		// 1 outer dim on the whole line + 3 dim separators + no per-part dims.
-		// The exact count is fragile across terminal themes; the test
-		// primarily asserts no runaway double-dimming by bounding the
-		// dim occurrences to a sane upper limit (outer + separators).
-		expect(dimCount).toBeLessThanOrEqual(6);
+		// Use a theme that counts "dim" invocations so the test
+		// detects double-dimming directly rather than relying on
+		// ANSI escape counting (which depends on the real theme
+		// emitting a recognizable escape sequence).
+		let dimCallCount = 0;
+		const theme = {
+			fg: (color: string, text: string) => {
+				if (color === "dim") dimCallCount++;
+				return text;
+			},
+			bold: (text: string) => text,
+		};
+		let captured: (() => string[]) | undefined;
+		const widget = new ReviewProgressWidget();
+		const uiCtx = {
+			setWidget: (
+				_key: string,
+				fn: (tui: any, theme: any) => { render: () => string[] },
+			) => {
+				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+			},
+		};
+		widget.attach(uiCtx);
+		widget.setJobs([buildCompletedJob()]);
+		captured?.();
+		widget.dispose();
+		// Expected: 3 separators + 1 outer wrap = 4 "dim" calls.
+		// If per-part dimming regressed, we'd see N additional
+		// calls (one per stats part: findings, critical, high,
+		// score, elapsed) = 4 + 4..5 = 8..9 calls.
+		expect(dimCallCount).toBeLessThanOrEqual(5);
 	});
 
 	it("color-bands the score in the completed summary (green ≥80, yellow ≥50, red <50)", () => {
@@ -967,5 +988,50 @@ describe("collectModelPairs", () => {
 			["c", { provider: "anthropic", modelName: "Sonnet" }],
 		];
 		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
+	});
+});
+
+describe("pickVerdict", () => {
+	// pickVerdict lives in review-widget.ts alongside collectModelPairs.
+	// Imported via the top-of-file ESM import so vitest's hoisting works.
+	it("returns the synthesis verdict when it is a non-empty string", () => {
+		expect(pickVerdict("Approve", false)).toBe("Approve");
+		expect(pickVerdict("Request changes", false)).toBe("Request changes");
+		expect(pickVerdict("Needs security review", false)).toBe(
+			"Needs security review",
+		);
+	});
+
+	it("returns 'Review failed' when the job errored and verdict is missing", () => {
+		expect(pickVerdict(undefined, true)).toBe("Review failed");
+		expect(pickVerdict(null, true)).toBe("Review failed");
+		expect(pickVerdict("", true)).toBe("Review failed");
+	});
+
+	it("returns 'Request changes' when the job is fine but verdict is missing", () => {
+		expect(pickVerdict(undefined, false)).toBe("Request changes");
+		expect(pickVerdict(null, false)).toBe("Request changes");
+		expect(pickVerdict("", false)).toBe("Request changes");
+	});
+
+	it("falls through on empty string verdict (does not display a blank 'Verdict:' line)", () => {
+		// Regression guard: an LLM emitting {"verdict": ""} should not
+		// produce a blank "Verdict:" line in the TUI. The widget
+		// previously used `??` which would have displayed the empty
+		// string verbatim.
+		expect(pickVerdict("", false).length).toBeGreaterThan(0);
+	});
+
+	it("returns the verdict even when the job errored (explicit content verdict wins)", () => {
+		// If a job somehow produced a verdict before erroring on the
+		// last lens, we should still show the verdict. The "Review
+		// failed" fallback only kicks in when verdict is missing.
+		expect(pickVerdict("Approve", true)).toBe("Approve");
+	});
+
+	it("handles non-string verdict types safely (post-serialization may coerce)", () => {
+		expect(pickVerdict(42, false)).toBe("Request changes");
+		expect(pickVerdict({ verdict: "Approve" }, false)).toBe("Request changes");
+		expect(pickVerdict(true, false)).toBe("Request changes");
 	});
 });

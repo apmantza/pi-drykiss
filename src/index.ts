@@ -37,7 +37,11 @@ import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
 import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
-import { ReviewProgressWidget, collectModelPairs } from "./review-widget.js";
+import {
+	ReviewProgressWidget,
+	collectModelPairs,
+	pickVerdict,
+} from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
 import { LOG_PREFIX } from "./constants.js";
 import { toErrorMessage } from "./error-utils.js";
@@ -311,13 +315,12 @@ export default function (pi: ExtensionAPI): void {
 				line += `\n  ${theme.fg("dim", `@ ${modelPairs.join(", ")}`)}`;
 			}
 
-			// Verdict — "Review failed" when the job errored without
-			// synthesis producing a verdict, so the line never implies
-			// a content verdict (e.g. "Request changes") for an
-			// infrastructure failure.
-			const verdict =
-				safeString(s?.verdict) ||
-				(hasError ? "Review failed" : "Request changes");
+			// Verdict — shared picker with the widget completed summary.
+			// "Review failed" when the job errored without synthesis
+			// producing a verdict, so the line never implies a content
+			// verdict (e.g. "Request changes") for an infrastructure
+			// failure.
+			const verdict = pickVerdict(s?.verdict, hasError);
 			if (verdict) {
 				line += `\n  ${theme.fg("accent", `Verdict: ${verdict}`)}`;
 			}

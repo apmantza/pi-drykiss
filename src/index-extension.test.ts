@@ -25,11 +25,19 @@ vi.mock("./review-widget.js", () => ({
 		attach: widgetAttach,
 		setJobs: widgetSetJobs,
 	})),
-	// The aggregator used by both the TUI widget and the message
-	// renderer. The real implementation is a pure function over
-	// lens-state entries; the test stub returns an empty array
-	// because the test fixtures don't exercise the model-pair path.
+	// The aggregators used by both the TUI widget and the message
+	// renderer. The real implementations are pure functions over
+	// lens-state entries; the test stubs return empty arrays
+	// because the test fixtures don't exercise these paths.
 	collectModelPairs: vi.fn(() => []),
+	pickVerdict: vi.fn(
+		(synthesisVerdict: unknown, hasError: boolean) =>
+			typeof synthesisVerdict === "string" && synthesisVerdict.length > 0
+				? synthesisVerdict
+				: hasError
+					? "Review failed"
+					: "Request changes",
+	),
 }));
 
 vi.mock("./review-manager.js", () => ({

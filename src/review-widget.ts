@@ -99,6 +99,34 @@ export function collectModelPairs(
 	return [...pairs].sort();
 }
 
+/**
+ * Pick a verdict string for display when synthesis.verdict may be
+ * missing or non-string. Shared by the TUI widget completed summary
+ * and the message renderer so the two surfaces never disagree on
+ * "what verdict do we show for a job with no synthesis verdict?"
+ *
+ * Rules (in order):
+ *   1. If synthesis.verdict is a non-empty string, return it.
+ *   2. If the job errored, return "Review failed" — an
+ *      infrastructure failure must not be conflated with a content
+ *      verdict like "Request changes".
+ *   3. Otherwise, return "Request changes" as a safe default that
+ *      matches the fallback in createFallbackSynthesis.
+ *
+ * Uses || (not ??) so empty strings also fall through to the
+ * fallback — an LLM that emits {"verdict": ""} should not produce
+ * a blank "Verdict:" line in the TUI.
+ */
+export function pickVerdict(
+	synthesisVerdict: unknown,
+	hasError: boolean,
+): string {
+	if (typeof synthesisVerdict === "string" && synthesisVerdict.length > 0) {
+		return synthesisVerdict;
+	}
+	return hasError ? "Review failed" : "Request changes";
+}
+
 type FindingTheme = {
 	fg(color: string, text: string): string;
 	bold(text: string): string;
@@ -366,10 +394,10 @@ export class ReviewProgressWidget {
 		const icon = hasError
 			? theme.fg("error", "✗")
 			: theme.fg("success", "✓");
-		// For errored jobs where synthesis never produced a verdict,
-		// surface the failure explicitly instead of implying a content
-		// review with "Request changes" (which is a content verdict).
-		const verdict = s?.verdict ?? (hasError ? "Review failed" : "Request changes");
+		// Shared verdict picker — same rule as the message renderer and
+		// notification body so the three surfaces never disagree on
+		// "what verdict do we show for a job with no synthesis verdict?".
+		const verdict = pickVerdict(s?.verdict, hasError);
 		const findingsCount = s?.findings?.length ?? 0;
 		const healthScore = s?.healthScore;
 		const elapsed =
