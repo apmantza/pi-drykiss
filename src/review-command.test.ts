@@ -741,3 +741,50 @@ describe("review command error handling", () => {
 		expect(text).toContain("graph TD");
 	});
 });
+
+describe("tool parameter schemas (LLM-facing surface)", () => {
+	it("DrykissAutoreviewParams exposes only scope-related params", async () => {
+		// Regression guard for the slim-down: the LLM-facing schema
+		// should expose ONLY the params an agent needs to pick a
+		// scope and override output format. Removed from the
+		// schema (now config-driven or internal-only):
+		//   - `model`, `contextMode`, `maxFiles`, `validate`,
+		//     `deep`, `deepPasses`, `deepMinVotes`, `deepValidate`
+		// Kept:
+		//   - `mode`, `files`, `base`, `commit`, `pr` (scope picks)
+		//   - `lenses` (which lenses to run)
+		//   - `format` (output override)
+		const { DrykissAutoreviewParams } = await import("./review-command.js");
+		const props = Object.keys((DrykissAutoreviewParams as any).properties);
+		expect(props.sort()).toEqual(
+			["mode", "files", "base", "commit", "pr", "lenses", "format"].sort(),
+		);
+	});
+
+	it("DrykissAutoreviewParams `mode` enum excludes 'auto' (smart default only)", async () => {
+		const { DrykissAutoreviewParams } = await import("./review-command.js");
+		const modeSchema = (DrykissAutoreviewParams as any).properties.mode;
+		// Type.Union produces a `anyOf` array of literals.
+		const literals = modeSchema.anyOf.map((s: any) => s.const);
+		expect(literals).not.toContain("auto");
+		// Confirm the agent-facing modes are exactly these seven.
+		expect(literals.sort()).toEqual(
+			[
+				"local",
+				"staged",
+				"branch",
+				"commit",
+				"pr",
+				"full",
+				"files",
+			].sort(),
+		);
+	});
+
+	it("DrykissReviewParams exposes only lens + files", async () => {
+		// Same slim-down principle for the single-lens tool.
+		const { DrykissReviewParams } = await import("./review-command.js");
+		const props = Object.keys((DrykissReviewParams as any).properties);
+		expect(props.sort()).toEqual(["lens", "files"].sort());
+	});
+});

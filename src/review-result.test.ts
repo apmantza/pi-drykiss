@@ -236,9 +236,9 @@ describe("buildReviewResult", () => {
 		// user can see what went wrong even though no findings made it
 		// into the active list.
 		expect(result.validationIssues.length).toBeGreaterThan(0);
-		expect(result.validationIssues.every((i) => i.reason.includes("suggestion"))).toBe(
-			true,
-		);
+		expect(
+			result.validationIssues.every((i) => i.reason.includes("suggestion")),
+		).toBe(true);
 	});
 
 	it("counts valid findings and makes the result non-clean", () => {

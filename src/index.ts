@@ -616,12 +616,14 @@ export default function (pi: ExtensionAPI): void {
 		name: "drykiss_autoreview",
 		label: "DRYKISS Autoreview",
 		description:
-			"Run a blocking multi-lens DRYKISS review over a git/PR/codebase target. Supports local, staged, branch, commit, PR, full, and explicit-file scopes. Returns a stable structured ReviewResult.",
+			"Run a blocking multi-lens DRYKISS review over a git/PR/codebase target. Pick a scope: local (uncommitted), staged, branch (needs base), commit (needs SHA), pr (needs URL), full, or files (needs paths). Returns a stable structured ReviewResult.",
 		promptSnippet:
 			"Run a multi-lens DRYKISS autoreview over a git/PR/codebase target",
 		promptGuidelines: [
 			"Use drykiss_autoreview for closeout code reviews, git diff reviews, PR reviews, full-codebase scans, or when the user asks for autoreview.",
-			"Prefer mode 'local' for uncommitted changes, 'staged' for staged changes, 'branch' with base for branch reviews, 'commit' with commit for single commits, 'pr' with pr for GitHub PRs, and 'files' with files for explicit paths.",
+			"Pick exactly one scope via the `mode` field: 'local' for uncommitted changes, 'staged' for staged changes, 'branch' with `base` for branch reviews, 'commit' with `commit` for single commits, 'pr' with `pr` for GitHub PRs, 'full' for the entire codebase, 'files' with `files` for explicit paths. Omit `mode` to use a smart default (staged → local).",
+			"Optional: pass `lenses` to run a subset (default is all). Pass `format: 'structured'` if you need the full markdown report; default 'compact' is one line per finding.",
+			"Model selection, context mode, max files, validator, and deep mode are config-driven — not exposed here. Use /drykiss-config to change them.",
 			"Treat drykiss_autoreview findings as advisory: verify real code before fixing, reject speculative findings, and rerun focused tests after any review-triggered fix.",
 		],
 		parameters: DrykissAutoreviewParams,
@@ -691,12 +693,12 @@ export default function (pi: ExtensionAPI): void {
 		name: "drykiss_review",
 		label: "DRYKISS Review",
 		description:
-			"Review code changes through a specific DRYKISS lens. Returns structured JSON findings. Use for focused reviews on specific files.",
+			"Review code changes through a specific DRYKISS lens. Returns structured JSON findings. Use for focused reviews on specific files. Model selection is config-driven.",
 		promptSnippet: "Run a focused DRYKISS lens review on code changes",
 		promptGuidelines: [
 			"Use drykiss_review when the user asks for a focused code quality, simplicity, duplication, resilience, architecture, tests, or security review on specific files.",
 			"Pass one lens ('simplicity', 'deduplication', 'clarity', 'resilience', 'architecture', 'tests', or 'security') and the file paths to review.",
-			"Optionally pass a model hint like 'haiku' for faster/cheaper reviews or 'sonnet' for deeper analysis.",
+			"Model selection is config-driven (per-lens overrides, autoroute). Use /drykiss-config to change models — the tool does not accept a model parameter.",
 		],
 		parameters: DrykissReviewParams,
 

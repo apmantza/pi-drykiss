@@ -806,9 +806,10 @@ export const DrykissReviewParams = Type.Object({
 });
 
 export const DrykissAutoreviewParams = Type.Object({
+	// ── Scope (the only thing you should think about) ────────
+	// Defaults to a smart pick if omitted: staged → local → error.
 	mode: Type.Optional(
 		Type.Union([
-			Type.Literal("auto"),
 			Type.Literal("local"),
 			Type.Literal("staged"),
 			Type.Literal("branch"),
@@ -818,21 +819,22 @@ export const DrykissAutoreviewParams = Type.Object({
 			Type.Literal("files"),
 		]),
 	),
+	// ── Scope refinements (only needed for non-default scopes) ──
 	files: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Specific file paths to review (relative to cwd)",
+			description: "Specific file paths to review (only when mode=files)",
 		}),
 	),
 	base: Type.Optional(
 		Type.String({
-			description: "Base ref for branch reviews, e.g. origin/main",
+			description: "Base ref for branch reviews, e.g. origin/main (only when mode=branch)",
 		}),
 	),
 	commit: Type.Optional(
-		Type.String({ description: "Commit ref for commit reviews" }),
+		Type.String({ description: "Commit ref for commit reviews (only when mode=commit)" }),
 	),
 	pr: Type.Optional(
-		Type.String({ description: "GitHub PR URL, owner/repo#123, or PR number" }),
+		Type.String({ description: "GitHub PR URL, owner/repo#123, or PR number (only when mode=pr)" }),
 	),
 	lenses: Type.Optional(
 		Type.Union([
@@ -840,63 +842,31 @@ export const DrykissAutoreviewParams = Type.Object({
 			Type.Array(LensParam, { description: "Subset of DRYKISS lenses to run" }),
 		]),
 	),
-	// Note: the previous schema exposed a `model` parameter so the
-	// LLM could pin the review to a specific model. We removed it
-	// from the LLM-facing schema because letting the agent override
-	// model selection at review time conflicts with the user's
-	// config-driven model choices (per-lens overrides, autoroute,
-	// quality gate thresholds, etc.). If the user wants a different
-	// model, they should change /drykiss-config or pass it through
-	// the slash command — not through the tool. Internal callers
-	// (runDeepAutoreview, runReview) still accept `model` directly.
-	contextMode: Type.Optional(
-		Type.Union([Type.Literal("diff"), Type.Literal("full")]),
-	),
-	/**
-	 * Output format for the tool's text content. The compact format
-	 * (default) emits one line per finding in kiss-check style and
-	 * is dramatically smaller than the structured format, which
-	 * is useful for agents with limited context budgets. The
-	 * structured format includes the full markdown report + JSON
-	 * dump of all findings, suitable for human review or
-	 * post-processing. Either way, the structured `details` payload
-	 * is always populated.
-	 */
+	// Note: the previous schema exposed `model`, `contextMode`,
+	// `maxFiles`, `validate`, and `deep*` parameters. We removed
+	// them from the LLM-facing schema because:
+	//   - `model`     → config-driven only (per-lens overrides, autoroute,
+	//                   quality gate). LLM shouldn't override the user's
+	//                   model policy.
+	//   - `contextMode` → /drykiss-config setting; LLM shouldn't override
+	//                     full-file context on a per-call basis.
+	//   - `maxFiles`   → /drykiss-config setting.
+	//   - `validate`   → adversarial validator; advanced, opt-in via
+	//                    /drykiss-config.validate or a future dedicated
+	//                    drykiss_validate tool.
+	//   - `deep*`      → Bugbot deep-mode pipeline; deserves its own
+	//                    tool surface, not buried in autoreview.
+	// Internal callers (runDeepAutoreview, runReview, tests) still
+	// accept these parameters directly on the function signature.
+	// ── Output (rare override) ──
+	// The compact format (default) emits one line per finding in
+	// kiss-check style. The structured format includes the full
+	// markdown report + JSON dump of all findings, suitable for
+	// post-processing. Either way, the structured `details` payload
+	// is always populated with the full ReviewResult.
 	format: Type.Optional(
 		Type.Union([Type.Literal("compact"), Type.Literal("structured")]),
 	),
-	maxFiles: Type.Optional(
-		Type.Number({
-			description: "Maximum files to review. Defaults to 20.",
-			minimum: 1,
-			maximum: 100,
-		}),
-	),
-	/**
-	 * Opt-in: run the Bugbot deep-review pipeline (passes → bucket →
-	 * vote → validator) for a single lens instead of the standard
-	 * flat multi-lens flow. Set to one of the lens names
-	 * ('simplicity', 'deduplication', 'clarity', 'resilience',
-	 * 'architecture', 'tests', 'security'). Returns the deep-mode
-	 * findings directly in the result.
-	 */
-	deep: Type.Optional(
-		Type.Union([
-			Type.Literal("simplicity"),
-			Type.Literal("deduplication"),
-			Type.Literal("clarity"),
-			Type.Literal("resilience"),
-			Type.Literal("architecture"),
-			Type.Literal("tests"),
-			Type.Literal("security"),
-		]),
-	),
-	/** Number of parallel adversarial passes in deep mode. Default 5. */
-	deepPasses: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
-	/** Min votes for a `note` finding to survive the low-signal filter. */
-	deepMinVotes: Type.Optional(Type.Number({ minimum: 1, maximum: 10 })),
-	/** When false, skip the deep-mode validator pass (candidates surface unvalidated). */
-	deepValidate: Type.Optional(Type.Boolean()),
 });
 
 export async function executeDrykissAutoreviewTool(
