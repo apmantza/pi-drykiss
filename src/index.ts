@@ -12,6 +12,7 @@ import {
 	handleArchCommand,
 	handleTestsCommand,
 	handleSecurityCommand,
+	handleDocsCommand,
 	handleJobsCommand,
 	handleEndReviewCommand,
 	executeDrykissReviewTool,
@@ -25,6 +26,7 @@ import {
 	ARCH_COMMAND_NAME,
 	TESTS_COMMAND_NAME,
 	SECURITY_COMMAND_NAME,
+	DOCS_COMMAND_NAME,
 } from "./review-command.js";
 import { applyReviewState, setReviewInProgress } from "./review-session.js";
 import {
@@ -505,6 +507,18 @@ export default function (pi: ExtensionAPI): void {
 			"Quick security scan for vulnerabilities, credential exposure, and attack surface issues. Supports --model=hint.",
 		handler: (args: string, ctx: ExtensionCommandContext) =>
 			handleSecurityCommand(args, ctx, pi, manager),
+	});
+
+	// ── /drykiss-docs — Documentation accuracy audit ───────
+	// Catches drift between README/CHANGELOG/AGENTS.md and the
+	// actual project state (commands, paths, symbols, claims).
+	// Distinct from Clarity's comment-accuracy check, which only
+	// looks at code-internal comments.
+	pi.registerCommand(DOCS_COMMAND_NAME, {
+		description:
+			"Review project documentation (README, CHANGELOG, AGENTS.md) for drift against current code, commands, and paths. Supports --model=hint.",
+		handler: (args: string, ctx: ExtensionCommandContext) =>
+			handleDocsCommand(args, ctx, pi, manager),
 	});
 
 	// ── /drykiss-config — Configure defaults and models ────

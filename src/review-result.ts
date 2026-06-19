@@ -146,12 +146,25 @@ export function buildReviewResult(
 	const errors = collectErrors(job);
 	const verdict = synthesis?.verdict ?? "Request changes";
 	const status = job.overallStatus;
+	// A failed review (any lens errored or synthesis errored) must
+	// never look "clean" — that misleads users into thinking the
+	// review ran successfully and produced no findings. A failed
+	// review has a non-empty `errors` array, so this condition
+	// short-circuits correctly even with empty findings and
+	// "Request changes" / default verdict.
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&
 		activeFresh.length === 0 &&
 		verdict === "Approve";
-	const hs = computeHealthScore(activeFresh);
+	// Health score: failed reviews must NOT score 100 just because
+	// there were no findings to deduct from. A failed review is
+	// missing evidence, not clean — score it as the worst possible
+	// (0) so it visibly fails the quality gate and the color band
+	// shows red instead of misleading green.
+	const hs = errors.length > 0
+		? { score: 0, breakdown: { critical: 1, warning: 0, suggestion: 0 } }
+		: computeHealthScore(activeFresh);
 
 	return {
 		jobId: job.id,

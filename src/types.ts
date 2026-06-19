@@ -51,6 +51,7 @@ export type ReviewLens =
 	| "architecture"
 	| "tests"
 	| "security"
+	| "docs"
 	| "all";
 
 /** All reviewable lens names (excludes "all"). */
@@ -62,6 +63,7 @@ export const LENS_NAMES: readonly Exclude<ReviewLens, "all">[] = [
 	"architecture",
 	"tests",
 	"security",
+	"docs",
 ];
 
 export type Severity = "critical" | "high" | "medium" | "low" | "nit";

@@ -48,6 +48,7 @@ export const LENS_DISPLAY_NAMES: Record<string, string> = {
 	architecture: "Architecture",
 	tests: "Tests",
 	security: "Security",
+	docs: "Docs",
 	synthesis: "Synthesis",
 };
 

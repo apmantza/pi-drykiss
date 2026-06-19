@@ -46,6 +46,7 @@ export const RESILIENCE_COMMAND_NAME = "drykiss-resilience";
 export const ARCH_COMMAND_NAME = "drykiss-arch";
 export const TESTS_COMMAND_NAME = "drykiss-tests";
 export const SECURITY_COMMAND_NAME = "drykiss-security";
+export const DOCS_COMMAND_NAME = "drykiss-docs";
 
 const MAX_FILES = 20;
 
@@ -248,6 +249,25 @@ async function prepareReview(
 			? "No source files found. Ensure your project has files in src/, lib/, app/, or packages/."
 			: "No changed files found. Specify file paths, use --all, pass a PR reference, or make some changes first.";
 		ctx.ui.notify(msg, "info");
+		return null;
+	}
+
+	// If every file has an empty diff, the review cannot produce
+	// meaningful findings — lenses would all return "no diff to
+	// gate", and synthesis would rubber-stamp the empty input as
+	// Approve. Surface this to the user immediately instead of
+	// silently running a vacuous review.
+	const filesWithDiff = files.filter(
+		(f) => (diffs.get(f.path) ?? "").trim().length > 0,
+	);
+	if (filesWithDiff.length === 0) {
+		ctx.ui.notify(
+			`${LOG_PREFIX} No diffs available for the ${files.length} selected file(s). ` +
+				`This usually means: (a) the file was added but the diff scope is wrong, ` +
+				`(b) git is filtering the diff, or (c) you're reviewing untracked files. ` +
+				`Try \`--all\` for full-codebase mode, or commit/stage your changes first.`,
+			"error",
+		);
 		return null;
 	}
 
@@ -680,6 +700,23 @@ export async function handleSecurityCommand(
 	);
 }
 
+export async function handleDocsCommand(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+	manager: import("./review-manager.js").ReviewManager,
+): Promise<void> {
+	return handleSingleLensCommand(
+		"docs",
+		"Docs review",
+		false,
+		args,
+		ctx,
+		pi,
+		manager,
+	);
+}
+
 // ── /drykiss-jobs — Browse running/completed reviews ────
 
 export async function handleJobsCommand(
@@ -756,12 +793,16 @@ export const DrykissReviewParams = Type.Object({
 	files: Type.Array(Type.String(), {
 		description: "File paths to review (relative to cwd)",
 	}),
-	model: Type.Optional(
-		Type.String({
-			description:
-				"Model hint, e.g. 'haiku', 'sonnet', 'anthropic/claude-sonnet-4-5'",
-		}),
-	),
+	// Note: the previous schema exposed a `model` parameter so the
+	// LLM could pin the review to a specific model. We removed it
+	// from the LLM-facing schema because letting the agent override
+	// model selection at review time conflicts with the user's
+	// config-driven model choices (per-lens overrides, autoroute,
+	// quality gate thresholds, etc.). If the user wants a different
+	// model, they should change /drykiss-config — not pass it
+	// through the tool. Internal callers (tests, the autoreview
+	// orchestrator) still accept `model` directly on the function
+	// signature.
 });
 
 export const DrykissAutoreviewParams = Type.Object({
@@ -799,12 +840,15 @@ export const DrykissAutoreviewParams = Type.Object({
 			Type.Array(LensParam, { description: "Subset of DRYKISS lenses to run" }),
 		]),
 	),
-	model: Type.Optional(
-		Type.String({
-			description:
-				"Model hint, e.g. 'haiku', 'sonnet', 'anthropic/claude-sonnet-4-5'",
-		}),
-	),
+	// Note: the previous schema exposed a `model` parameter so the
+	// LLM could pin the review to a specific model. We removed it
+	// from the LLM-facing schema because letting the agent override
+	// model selection at review time conflicts with the user's
+	// config-driven model choices (per-lens overrides, autoroute,
+	// quality gate thresholds, etc.). If the user wants a different
+	// model, they should change /drykiss-config or pass it through
+	// the slash command — not through the tool. Internal callers
+	// (runDeepAutoreview, runReview) still accept `model` directly.
 	contextMode: Type.Optional(
 		Type.Union([Type.Literal("diff"), Type.Literal("full")]),
 	),
@@ -863,6 +907,11 @@ export async function executeDrykissAutoreviewTool(
 		commit?: string;
 		pr?: string;
 		lenses?: "all" | Exclude<ReviewLens, "all">[];
+		/**
+		 * Internal-only: callers (deep-mode pipeline, tests) may pass
+		 * a model hint. The LLM-facing tool schema (DrykissAutoreviewParams)
+		 * no longer exposes this — model selection is config-driven.
+		 */
 		model?: string;
 		contextMode?: "diff" | "full";
 		maxFiles?: number;
@@ -985,6 +1034,10 @@ export async function executeDrykissAutoreviewTool(
 		effectiveConfig.riskTargeting,
 	);
 
+	// Model selection: config-driven only. The LLM-facing schema
+	// removed `params.model` so the agent cannot override the
+	// user's per-lens / autoroute / quality-gate config. Internal
+	// callers (runDeepAutoreview, tests) can still pass it.
 	const result = await manager.runReview(
 		ctx,
 		pi,

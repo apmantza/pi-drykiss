@@ -88,6 +88,7 @@ const commandExports = {
 	ARCH_COMMAND_NAME: "drykiss-arch",
 	TESTS_COMMAND_NAME: "drykiss-tests",
 	SECURITY_COMMAND_NAME: "drykiss-security",
+	DOCS_COMMAND_NAME: "drykiss-docs",
 };
 
 vi.mock("./review-command.js", () => commandExports);

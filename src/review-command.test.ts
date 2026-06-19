@@ -362,6 +362,66 @@ describe("review command error handling", () => {
 		expect(mockManager.startReview).not.toHaveBeenCalled();
 	});
 
+	it("returns early with a clear error when every file has an empty diff", async () => {
+		// Regression guard: previously, when all selected files had
+		// empty diffs (e.g. untracked files, broken git scope, or
+		// "(diff unavailable)" placeholders), lenses received an
+		// empty user prompt, returned empty findings, and the
+		// synthesis LLM rubber-stamped the empty input as "Approve"
+		// with score 100. The user saw a clean, perfect-score
+		// review for code that was never actually reviewed. Now we
+		// refuse to start the review and surface the cause.
+		const { getChangedFiles, getFileDiff } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+			{ path: "src/b.ts", status: "modified", language: "TypeScript" },
+		]);
+		// Both files have empty diffs — the empty-diff guard should fire.
+		// Use mockResolvedValueOnce so the mock state doesn't leak into
+		// the next test (vi.clearAllMocks doesn't reset implementations).
+		vi.mocked(getFileDiff).mockResolvedValue("");
+
+		await handleDrykissCommand("", mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("No diffs available"),
+			"error",
+		);
+		expect(mockCtx.ui.notify).toHaveBeenCalledWith(
+			expect.stringContaining("--all"),
+			"error",
+		);
+		expect(mockManager.startReview).not.toHaveBeenCalled();
+		// Restore default implementation for subsequent tests.
+		vi.mocked(getFileDiff).mockResolvedValue("mock diff");
+	});
+
+	it("starts the review when at least one file has a real diff", async () => {
+		// Counter-test for the empty-diff guard: the guard must NOT
+		// fire when the scope contains even one file with a real
+		// diff. Mixed scopes (one diff, one placeholder) are common
+		// and should proceed normally.
+		const { getChangedFiles, getFileDiff } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+			{ path: "src/b.ts", status: "modified", language: "TypeScript" },
+		]);
+		// First call returns a real diff, second returns empty.
+		vi.mocked(getFileDiff)
+			.mockResolvedValueOnce(
+				"--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+			)
+			.mockResolvedValueOnce("");
+
+		await handleDrykissCommand("", mockCtx, mockPi, mockManager);
+
+		expect(mockCtx.ui.notify).not.toHaveBeenCalledWith(
+			expect.stringContaining("No diffs available"),
+			"error",
+		);
+		expect(mockManager.startReview).toHaveBeenCalledTimes(1);
+	});
+
 	it("cancels review when user declines confirmation", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([

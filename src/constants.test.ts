@@ -23,11 +23,12 @@ describe("constants", () => {
 		expect(LOG_PREFIX).toBe("[DRYKISS]");
 	});
 
-	it("LENS_DISPLAY_NAMES has entries for all 8 lenses", () => {
-		expect(Object.keys(LENS_DISPLAY_NAMES)).toHaveLength(8);
+	it("LENS_DISPLAY_NAMES has entries for all 9 lenses", () => {
+		expect(Object.keys(LENS_DISPLAY_NAMES)).toHaveLength(9);
 		expect(LENS_DISPLAY_NAMES.simplicity).toBe("KISS");
 		expect(LENS_DISPLAY_NAMES.deduplication).toBe("DRY");
 		expect(LENS_DISPLAY_NAMES.synthesis).toBe("Synthesis");
+		expect(LENS_DISPLAY_NAMES.docs).toBe("Docs");
 	});
 });
 

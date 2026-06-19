@@ -33,6 +33,7 @@ Each lens focuses on one thing:
 | **Architecture** | SRP violations, wide interfaces, circular dependencies, removal candidates |
 | **Tests** | Missing coverage, untested branches, fragile assertions, shared mutable state |
 | **Security** | Injection vulnerabilities, hardcoded credentials, missing auth checks |
+| **Docs** | README/CHANGELOG/AGENTS.md drift — wrong flags, renamed paths, stale references |
 
 ## Commands
 
@@ -52,6 +53,7 @@ Each lens focuses on one thing:
 /drykiss-resilience        # error handling only
 /drykiss-arch              # architecture only
 /drykiss-tests             # test coverage only
+/drykiss-docs              # documentation accuracy (README/CHANGELOG/AGENTS.md vs code)
 ```
 
 **Configuration:**

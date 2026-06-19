@@ -206,14 +206,14 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].systemPrompt).toContain("Secrets & Credentials");
 	});
 
-	it("returns all seven prompts for 'all' lens", async () => {
+	it("returns all eight prompts for 'all' lens", async () => {
 		const prompts = await buildReviewPrompts(
 			"/cwd",
 			mockFiles,
 			mockDiffs,
 			"all",
 		);
-		expect(prompts).toHaveLength(7);
+		expect(prompts).toHaveLength(8);
 		const lenses = prompts.map((p) => p.lens);
 		expect(lenses).toContain("simplicity");
 		expect(lenses).toContain("deduplication");
@@ -418,7 +418,7 @@ describe("buildReviewPrompts — mode context", () => {
 			"all",
 			{ mode: "commit", scopeLabel: "commit abc123" },
 		);
-		expect(prompts).toHaveLength(7);
+		expect(prompts).toHaveLength(8);
 		for (const p of prompts) {
 			expect(p.userPrompt).toContain("PROPOSED commit abc123");
 		}
