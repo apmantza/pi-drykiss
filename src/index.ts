@@ -33,7 +33,6 @@ import {
 	handleListSuppressionsCommand,
 	handleUnsuppressCommand,
 } from "./config-command.js";
-import { loadConfig } from "./config.js";
 import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
 import { buildAutoInjectBlock } from "./auto-inject.js";
@@ -158,13 +157,6 @@ export default function (pi: ExtensionAPI): void {
 		warnExtensionError("starting review cleanup timer", err, lastContext);
 	}
 	const editTracker = createEditTracker();
-	const autoreviewEditedFiles = new Map<
-		string,
-		{ path: string; language: string | null }
-	>();
-	let autoreviewRunning = false;
-	let lastAutoreviewSignature = "";
-	let lastAutoreviewAt = 0;
 
 	// Grab UI context from tool executions so widget renders even when no
 	// command is active (matches pi-subagents pattern).
@@ -178,25 +170,16 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("agent_start", (_event: any, ctx: any) => {
-		try {
-			autoreviewEditedFiles.clear();
-		} catch (err) {
-			warnExtensionError("clearing autoreview edit state", err, ctx);
-		}
-	});
-
 	pi.on("tool_execution_end", (event: any, ctx: any) => {
 		try {
 			if (event.isError) return;
-			const edited = editTracker.trackEdit(
+			editTracker.trackEdit(
 				event.toolName,
 				event.result,
 				event.args ?? event.input,
 			);
-			if (edited) autoreviewEditedFiles.set(edited.path, edited);
 		} catch (err) {
-			warnExtensionError("tracking edited file for autoreview", err, ctx);
+			warnExtensionError("tracking file edit", err, ctx);
 		}
 	});
 
@@ -218,85 +201,6 @@ export default function (pi: ExtensionAPI): void {
 		} catch (err) {
 			warnExtensionError("building auto-inject prompt", err, ctx);
 			return undefined;
-		}
-	});
-
-	pi.on("agent_end", async (_event: any, ctx: any) => {
-		if (autoreviewRunning || autoreviewEditedFiles.size === 0) return;
-
-		try {
-			const config = await loadConfig();
-			const auto = config.autoreview;
-			if (auto?.enabled !== true) return;
-
-			const editedFiles = [...autoreviewEditedFiles.values()];
-			const signature = [
-				auto.mode ?? "local",
-				auto.base ?? "",
-				...editedFiles.map((f) => f.path).sort(),
-			].join("|");
-			const cooldownMs = auto.cooldownMs ?? 60_000;
-			const now = Date.now();
-			if (
-				cooldownMs > 0 &&
-				signature === lastAutoreviewSignature &&
-				now - lastAutoreviewAt < cooldownMs
-			) {
-				ctx.ui.notify(
-					"Skipping duplicate DRYKISS autoreview within cooldown.",
-					"info",
-				);
-				return;
-			}
-			if (auto.confirmBeforeRun !== false && ctx.hasUI) {
-				const ok = await ctx.ui.confirm(
-					"DRYKISS Autoreview",
-					`Run automatic DRYKISS review after edits?\n\nEdited files: ${editedFiles.map((f) => f.path).join(", ")}`,
-				);
-				if (!ok) return;
-			}
-
-			autoreviewRunning = true;
-			const result = await executeDrykissAutoreviewTool(
-				{
-					mode: auto.mode ?? "local",
-					files:
-						auto.mode === "files" ? editedFiles.map((f) => f.path) : undefined,
-					base: auto.base,
-					lenses: auto.lenses,
-					model: auto.model,
-					contextMode: auto.contextMode,
-					maxFiles: auto.maxFiles,
-				},
-				ctx,
-				pi,
-				manager,
-				undefined,
-				(update) =>
-					ctx.ui.notify(
-						update.content[0]?.text ?? "Running DRYKISS autoreview...",
-						"info",
-					),
-			);
-			const review = result.details.result;
-			autoreviewEditedFiles.clear();
-			lastAutoreviewSignature = signature;
-			lastAutoreviewAt = now;
-			// Note: we intentionally do NOT post the autoreview result as
-			// a follow-up message. Doing so re-injects the full review
-			// report into the conversation on every agent_end, which
-			// (a) pollutes the chat with stale results when the user
-			// was working on unrelated tasks and (b) can trigger another
-			// turn via `triggerTurn: !review.clean`, creating a noisy
-			// feedback loop. Users get the result via the widget,
-			// `/drykiss-history`, or the persisted review file. The
-			// lightweight checklist auto-injection (turn_end → next
-			// system prompt) is the in-conversation surface; the
-			// autoreview itself stays a background process.
-		} catch (err) {
-			warnExtensionError("running DRYKISS autoreview", err, ctx);
-		} finally {
-			autoreviewRunning = false;
 		}
 	});
 
