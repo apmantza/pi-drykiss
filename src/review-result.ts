@@ -151,18 +151,28 @@ export function buildReviewResult(
 	// review ran successfully and produced no findings. A failed
 	// review has a non-empty `errors` array, so this condition
 	// short-circuits correctly even with empty findings and
-	// "Request changes" / default verdict.
+	// "Request changes" / default verdict. The second guard
+	// catches the case where synthesis returned findings but the
+	// validator dropped them all (e.g. all findings missing the
+	// required `suggestion` field). The dropped findings are
+	// surfaced via `validationIssues`, so the user can see them,
+	// but the review should not look pristine in that case.
+	const droppedByValidation = validation.issues.length > 0;
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&
 		activeFresh.length === 0 &&
-		verdict === "Approve";
+		verdict === "Approve" &&
+		!droppedByValidation;
 	// Health score: failed reviews must NOT score 100 just because
 	// there were no findings to deduct from. A failed review is
 	// missing evidence, not clean — score it as the worst possible
 	// (0) so it visibly fails the quality gate and the color band
-	// shows red instead of misleading green.
-	const hs = errors.length > 0
+	// shows red instead of misleading green. Also drop the score
+	// when validation dropped findings, since dropping findings is
+	// a data-quality issue that should not produce a perfect score.
+	const reviewIncomplete = errors.length > 0 || droppedByValidation;
+	const hs = reviewIncomplete
 		? { score: 0, breakdown: { critical: 1, warning: 0, suggestion: 0 } }
 		: computeHealthScore(activeFresh);
 

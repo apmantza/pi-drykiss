@@ -202,6 +202,45 @@ describe("buildReviewResult", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	it("marks the result non-clean + score 0 when validation drops every finding", () => {
+		// Regression guard: previously, when the LLM produced findings
+		// that the validator dropped (e.g. all missing the required
+		// `suggestion` field), the active findings array ended up
+		// empty while validationIssues had entries. The review then
+		// scored 100/100 and looked pristine even though the
+		// synthesis output was malformed. Force non-clean + score 0
+		// in that case so the validation issue is visible.
+		const result = buildReviewResult(
+			job({
+				synthesisResult: {
+					findings: [
+						finding({ suggestion: "" }),
+						finding({ file: "src/b.ts", line: 5, suggestion: "  " }),
+					],
+					summary: "Issues found (but malformed).",
+					verdict: "Request changes",
+					criticalCount: 2,
+					highCount: 0,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: 100,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				},
+			}),
+		);
+
+		expect(result.clean).toBe(false);
+		expect(result.healthScore).toBe(0);
+		// The dropped findings are surfaced via validationIssues so the
+		// user can see what went wrong even though no findings made it
+		// into the active list.
+		expect(result.validationIssues.length).toBeGreaterThan(0);
+		expect(result.validationIssues.every((i) => i.reason.includes("suggestion"))).toBe(
+			true,
+		);
+	});
+
 	it("counts valid findings and makes the result non-clean", () => {
 		const result = buildReviewResult(
 			job({
