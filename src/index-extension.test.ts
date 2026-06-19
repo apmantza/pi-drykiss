@@ -522,4 +522,49 @@ describe("extension event wiring", () => {
 		expect(setReviewInProgress).not.toHaveBeenCalled();
 		expect(applyReviewState).not.toHaveBeenCalled();
 	});
+
+	it("hides the score line in the message renderer when synthesis has no healthScore", () => {
+		// Regression guard: safeNumber(undefined) → 0 previously made the
+		// renderer emit a misleading 'score 0/100' in the red band when
+		// synthesis.healthScore was missing. The renderer must now skip
+		// the line entirely.
+		const { pi } = makePi();
+		registerDrykiss(pi as any);
+		const renderer = pi.registerMessageRenderer.mock.calls.find(
+			([type]) => type === "drykiss-review-complete",
+		)?.[1];
+		const theme = {
+			fg: (_name: string, value: string) => `[fg:${value}]`,
+			bold: (value: string) => `[b:${value}]`,
+		};
+
+		const rendered = renderer(
+			{
+				details: {
+					files: [],
+					lenses: [],
+					states: {},
+					startedAt: Date.now(),
+					overallStatus: "done",
+					synthesisResult: {
+						findings: [],
+						summary: "clean",
+						verdict: "Approve",
+						criticalCount: 0,
+						highCount: 0,
+						mediumCount: 0,
+						lowCount: 0,
+						nitCount: 0,
+						// healthScore intentionally omitted via cast —
+						// simulates a legacy persisted review.
+					} as any,
+				},
+			},
+			{ expanded: false },
+			theme,
+		);
+
+		const text = rendered?.lines?.[0]?.text ?? "";
+		expect(text).not.toContain("score");
+	});
 });
