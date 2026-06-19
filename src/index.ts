@@ -647,11 +647,24 @@ export default function (pi: ExtensionAPI): void {
 			const clean = review?.clean === true;
 			const counts = review?.counts ?? {};
 			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
+			// Surface the health score in the same one-liner so users
+			// see the bottom line without expanding. Same color bands
+			// as the message renderer / notification body / widget
+			// summary — 80/50 thresholds so the rule is learned once.
+			const hs = review?.healthScore;
+			const hasScore = typeof hs === "number";
+			const scoreText = hasScore
+				? (() => {
+						const scoreColor =
+							hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
+						return theme.fg(scoreColor, `, score ${hs}/100`);
+					})()
+				: "";
 			return new Text(
 				`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
 					theme.fg(
 						"dim",
-						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}`,
+						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
 					),
 				0,
 				0,
