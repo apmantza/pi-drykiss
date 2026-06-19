@@ -910,55 +910,54 @@ describe("collectModelPairs", () => {
 	});
 
 	it("returns provider/modelName pairs", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["simplicity", { provider: "anthropic", modelName: "Claude Sonnet 4" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[["simplicity", { provider: "anthropic", modelName: "Claude Sonnet 4" }]];
 		expect(collectModelPairs(entries)).toEqual(["anthropic/Claude Sonnet 4"]);
 	});
 
 	it("returns modelName alone when provider is missing", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["simplicity", { modelName: "Claude Sonnet 4" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[["simplicity", { modelName: "Claude Sonnet 4" }]];
 		expect(collectModelPairs(entries)).toEqual(["Claude Sonnet 4"]);
 	});
 
 	it("returns provider alone when modelName is missing", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["simplicity", { provider: "anthropic" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[["simplicity", { provider: "anthropic" }]];
 		expect(collectModelPairs(entries)).toEqual(["anthropic"]);
 	});
 
 	it("skips entries where both provider and modelName are missing", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["a", {}],
-			["b", { provider: "openai", modelName: "GPT-4o" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[
+				["a", {}],
+				["b", { provider: "openai", modelName: "GPT-4o" }],
+			];
 		expect(collectModelPairs(entries)).toEqual(["openai/GPT-4o"]);
 	});
 
 	it("skips whitespace-only values", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["a", { provider: "   ", modelName: "   " }],
-			["b", { provider: "anthropic", modelName: "Sonnet" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[
+				["a", { provider: "   ", modelName: "   " }],
+				["b", { provider: "anthropic", modelName: "Sonnet" }],
+			];
 		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
 	});
 
 	it("trims surrounding whitespace from values", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["a", { provider: "  anthropic  ", modelName: "\tSonnet\n" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[["a", { provider: "  anthropic  ", modelName: "\tSonnet\n" }]];
 		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
 	});
 
 	it("deduplicates identical pairs", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["a", { provider: "anthropic", modelName: "Sonnet" }],
-			["b", { provider: "anthropic", modelName: "Sonnet" }],
-			["c", { provider: "openai", modelName: "GPT-4o" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[
+				["a", { provider: "anthropic", modelName: "Sonnet" }],
+				["b", { provider: "anthropic", modelName: "Sonnet" }],
+				["c", { provider: "openai", modelName: "GPT-4o" }],
+			];
 		expect(collectModelPairs(entries)).toEqual([
 			"anthropic/Sonnet",
 			"openai/GPT-4o",
@@ -966,11 +965,12 @@ describe("collectModelPairs", () => {
 	});
 
 	it("returns results sorted alphabetically for deterministic output", () => {
-		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
-			["a", { provider: "openai", modelName: "GPT-4o" }],
-			["b", { provider: "anthropic", modelName: "Sonnet" }],
-			["c", { provider: "google", modelName: "Gemini" }],
-		];
+		const entries: Array<[string, { provider?: string; modelName?: string }]> =
+			[
+				["a", { provider: "openai", modelName: "GPT-4o" }],
+				["b", { provider: "anthropic", modelName: "Sonnet" }],
+				["c", { provider: "google", modelName: "Gemini" }],
+			];
 		expect(collectModelPairs(entries)).toEqual([
 			"anthropic/Sonnet",
 			"google/Gemini",
@@ -982,7 +982,9 @@ describe("collectModelPairs", () => {
 		// After serialization through structured clone, fields can be
 		// missing or non-string. The helper must not throw — fall
 		// through to "missing" and skip the entry.
-		const entries: Array<[string, { provider?: unknown; modelName?: unknown }]> = [
+		const entries: Array<
+			[string, { provider?: unknown; modelName?: unknown }]
+		> = [
 			["a", { provider: null, modelName: undefined }],
 			["b", { provider: 42, modelName: { name: "x" } }],
 			["c", { provider: "anthropic", modelName: "Sonnet" }],

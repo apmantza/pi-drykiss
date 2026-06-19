@@ -89,10 +89,8 @@ export function collectModelPairs(
 	const pairs = new Set<string>();
 	for (const [, st] of lensStates) {
 		if (!st) continue;
-		const prov =
-			typeof st.provider === "string" ? st.provider.trim() : "";
-		const name =
-			typeof st.modelName === "string" ? st.modelName.trim() : "";
+		const prov = typeof st.provider === "string" ? st.provider.trim() : "";
+		const name = typeof st.modelName === "string" ? st.modelName.trim() : "";
 		if (!prov && !name) continue;
 		pairs.add(prov && name ? `${prov}/${name}` : prov || name);
 	}
@@ -287,7 +285,8 @@ export class ReviewProgressWidget {
 		const lines: string[] = [];
 
 		for (const job of this.jobs) {
-			const isLive = job.overallStatus === "running" || job.overallStatus === "queued";
+			const isLive =
+				job.overallStatus === "running" || job.overallStatus === "queued";
 			if (!isLive) {
 				// Show a compact completed summary so the user sees the
 				// health score, verdict, and per-lens breakdown right
@@ -391,9 +390,7 @@ export class ReviewProgressWidget {
 				? theme.fg("dim", `@ ${modelPairs.join(", ")}`)
 				: "";
 
-		const icon = hasError
-			? theme.fg("error", "✗")
-			: theme.fg("success", "✓");
+		const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
 		// Shared verdict picker — same rule as the message renderer and
 		// notification body so the three surfaces never disagree on
 		// "what verdict do we show for a job with no synthesis verdict?".
@@ -409,8 +406,7 @@ export class ReviewProgressWidget {
 		statsParts.push(`${findingsCount} findings`);
 		if (s?.criticalCount && s.criticalCount > 0)
 			statsParts.push(`${s.criticalCount} critical`);
-		if (s?.highCount && s.highCount > 0)
-			statsParts.push(`${s.highCount} high`);
+		if (s?.highCount && s.highCount > 0) statsParts.push(`${s.highCount} high`);
 		// typeof check (not safeNumber) so a missing healthScore stays
 		// hidden instead of being displayed as a misleading "score 0/100"
 		// in the red band. Same 80/50 thresholds as the message renderer
@@ -418,14 +414,8 @@ export class ReviewProgressWidget {
 		// what "good" / "warning" / "critical" looks like.
 		if (typeof healthScore === "number") {
 			const scoreColor =
-				healthScore >= 80
-					? "success"
-					: healthScore >= 50
-						? "warning"
-						: "error";
-			statsParts.push(
-				theme.fg(scoreColor, `score ${healthScore}/100`),
-			);
+				healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
+			statsParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
 		}
 		if (elapsed) statsParts.push(elapsed);
 
@@ -504,9 +494,7 @@ export class ReviewProgressWidget {
 		// fields are skipped so the line never renders as `@ /`.
 		const prov = state.provider?.trim() ?? "";
 		const modelName = state.modelName?.trim() ?? "";
-		const modelLabel = prov
-			? `${prov}/${modelName}`
-			: modelName;
+		const modelLabel = prov ? `${prov}/${modelName}` : modelName;
 		const model = theme.fg("dim", `@ ${modelLabel}`);
 		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}${linkSegment}`;
 	}

@@ -498,9 +498,9 @@ describe("ReviewManager", () => {
 		// original (failed) model. Without this, the TUI/notification
 		// would mislead users about which model produced the review
 		// when autorouting or per-lens fallback swapped providers.
-		const completedJob = manager.listJobs().find(
-			(j) => j.overallStatus === "done",
-		);
+		const completedJob = manager
+			.listJobs()
+			.find((j) => j.overallStatus === "done");
 		expect(completedJob?.states.get("security")?.modelName).toBe("fallback");
 		expect(completedJob?.states.get("security")?.provider).toBe("mock");
 	});

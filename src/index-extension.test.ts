@@ -30,13 +30,12 @@ vi.mock("./review-widget.js", () => ({
 	// lens-state entries; the test stubs return empty arrays
 	// because the test fixtures don't exercise these paths.
 	collectModelPairs: vi.fn(() => []),
-	pickVerdict: vi.fn(
-		(synthesisVerdict: unknown, hasError: boolean) =>
-			typeof synthesisVerdict === "string" && synthesisVerdict.length > 0
-				? synthesisVerdict
-				: hasError
-					? "Review failed"
-					: "Request changes",
+	pickVerdict: vi.fn((synthesisVerdict: unknown, hasError: boolean) =>
+		typeof synthesisVerdict === "string" && synthesisVerdict.length > 0
+			? synthesisVerdict
+			: hasError
+				? "Review failed"
+				: "Request changes",
 	),
 }));
 

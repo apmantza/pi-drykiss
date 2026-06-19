@@ -295,11 +295,7 @@ export default function (pi: ExtensionAPI): void {
 				line +=
 					"\n  " +
 					parts
-						.map((p) =>
-							p.startsWith("score ")
-								? p
-								: theme.fg("dim", p),
-						)
+						.map((p) => (p.startsWith("score ") ? p : theme.fg("dim", p)))
 						.join(` ${theme.fg("dim", "·")} `);
 			}
 
