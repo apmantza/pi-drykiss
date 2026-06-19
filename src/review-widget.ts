@@ -8,7 +8,8 @@ import type { Finding, Severity } from "./types.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/** Format a millisecond duration as a compact elapsed-time string. */
+/**
+ * Format a millisecond duration as a compact elapsed-time string. */
 function formatElapsed(ms: number): string {
 	const safe = Math.max(0, ms);
 	const totalSec = Math.floor(safe / 1000);
@@ -60,6 +61,43 @@ const FIXABILITY_LABEL: Record<NonNullable<Finding["fixability"]>, string> = {
 	guided: "guided (~10 lines)",
 	manual: "manual (larger refactor)",
 };
+
+/**
+ * A lens state with the two fields the widget cares about for the
+ * "Models used" line. Loose shape so we can read it from both the
+ * strongly-typed `Map<ReviewLens, LensState>` on `ReviewJob.states`
+ * and the post-serialization `Record<string, unknown>` shape that
+ * the message renderer receives (where the field types are erased).
+ */
+export interface ModelPairSource {
+	readonly provider?: unknown;
+	readonly modelName?: unknown;
+}
+
+/**
+ * Collect distinct "provider/modelName" strings across a job's lens
+ * states, skipping empty/whitespace-only entries. Single source of
+ * truth for both the TUI widget and the completed-review
+ * notification body — keep the two in sync by routing through here.
+ *
+ * Returns an array sorted alphabetically so the output is
+ * deterministic regardless of lens iteration order.
+ */
+export function collectModelPairs(
+	lensStates: Iterable<[string, ModelPairSource | undefined]>,
+): string[] {
+	const pairs = new Set<string>();
+	for (const [, st] of lensStates) {
+		if (!st) continue;
+		const prov =
+			typeof st.provider === "string" ? st.provider.trim() : "";
+		const name =
+			typeof st.modelName === "string" ? st.modelName.trim() : "";
+		if (!prov && !name) continue;
+		pairs.add(prov && name ? `${prov}/${name}` : prov || name);
+	}
+	return [...pairs].sort();
+}
 
 type FindingTheme = {
 	fg(color: string, text: string): string;
@@ -195,12 +233,23 @@ export class ReviewProgressWidget {
 	}
 
 	private ensureTimer() {
-		if (!this.timer) {
-			this.timer = setInterval(() => {
-				this.frame++;
-				this.update();
-			}, 80);
-		}
+		if (this.timer) return;
+		this.timer = setInterval(() => {
+			this.frame++;
+			this.update();
+		}, 80);
+	}
+
+	/**
+	 * Stop the render timer when no jobs need live updates. Completed
+	 * jobs render a static summary, so 12 ticks/second of `frame++` +
+	 * `update()` is pure CPU/battery waste. The next `setJobs()` (if
+	 * any) restarts the timer via `ensureTimer()`.
+	 */
+	private stopTimer() {
+		if (!this.timer) return;
+		clearInterval(this.timer);
+		this.timer = undefined;
 	}
 
 	private renderWidget(_tui: any, theme: Theme): string[] {
@@ -295,7 +344,7 @@ export class ReviewProgressWidget {
 	 * The completed summary is intentionally short (4 lines max) so it
 	 * doesn't compete with the running-widget for vertical space —
 	 * once the user dismisses or scrolls past it, the widget hides
-	 * itself via the existing `hasActive` check in `update()`.
+	 * itself via the existing `hasAnything` check in `update()`.
 	 */
 	private renderCompletedSummary(
 		job: ReviewJob,
@@ -306,29 +355,21 @@ export class ReviewProgressWidget {
 		const s = job.synthesisResult;
 		const hasError = job.overallStatus === "error";
 
-		// Distinct lens provider/model pairs. Helps when lenses ran on
-		// different models (e.g. one Sonnet, one Haiku). Empty /
-		// whitespace-only provider or modelName are skipped — a legacy
-		// persisted review with no model info must not render as
-		// `@ ` or `@ /`.
-		const modelPairs = new Set<string>();
-		for (const lens of job.lenses) {
-			const st = job.states.get(lens);
-			if (!st) continue;
-			const prov = st.provider?.trim() ?? "";
-			const name = st.modelName?.trim() ?? "";
-			if (!prov && !name) continue;
-			modelPairs.add(prov ? `${prov}/${name}` : name);
-		}
+		// Shared aggregation — same logic as the message renderer and
+		// the notification body, so the three surfaces never disagree.
+		const modelPairs = collectModelPairs(job.states);
 		const modelLine =
-			modelPairs.size > 0
-				? theme.fg("dim", `@ ${[...modelPairs].join(", ")}`)
+			modelPairs.length > 0
+				? theme.fg("dim", `@ ${modelPairs.join(", ")}`)
 				: "";
 
 		const icon = hasError
 			? theme.fg("error", "✗")
 			: theme.fg("success", "✓");
-		const verdict = s?.verdict ?? "Request changes";
+		// For errored jobs where synthesis never produced a verdict,
+		// surface the failure explicitly instead of implying a content
+		// review with "Request changes" (which is a content verdict).
+		const verdict = s?.verdict ?? (hasError ? "Review failed" : "Request changes");
 		const findingsCount = s?.findings?.length ?? 0;
 		const healthScore = s?.healthScore;
 		const elapsed =
@@ -342,6 +383,9 @@ export class ReviewProgressWidget {
 			statsParts.push(`${s.criticalCount} critical`);
 		if (s?.highCount && s.highCount > 0)
 			statsParts.push(`${s.highCount} high`);
+		// typeof check (not safeNumber) so a missing healthScore stays
+		// hidden instead of being displayed as a misleading "score 0/100"
+		// in the red band.
 		if (typeof healthScore === "number") {
 			statsParts.push(`score ${healthScore}/100`);
 		}
@@ -351,9 +395,11 @@ export class ReviewProgressWidget {
 			"accent",
 			`Verdict: ${verdict}`,
 		)}`;
+		// One dim wrap around the whole line, not per-part — double-dimming
+		// made the separator and parts harder to scan.
 		const statsLine = theme.fg(
 			"dim",
-			statsParts.map((p) => theme.fg("dim", p)).join(` ${theme.fg("dim", "·")} `),
+			statsParts.join(` ${theme.fg("dim", "·")} `),
 		);
 		out.push(truncate(heading));
 		out.push(truncate(`  ${statsLine}`));
@@ -438,6 +484,17 @@ export class ReviewProgressWidget {
 		// jobs after 10 minutes, which is when this widget
 		// disposes naturally.
 		const hasAnything = this.jobs.length > 0;
+		// Live timer ticks are only useful while at least one job
+		// is running or queued (spinner + elapsed counter). Stop
+		// the 12Hz tick when only completed jobs remain.
+		const hasLive = this.jobs.some(
+			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
+		);
+		if (hasLive) {
+			this.ensureTimer();
+		} else {
+			this.stopTimer();
+		}
 
 		if (!hasAnything) {
 			this.dispose();

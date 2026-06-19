@@ -37,7 +37,7 @@ import { createEditTracker } from "./edit-tracker.js";
 import { listReviews, formatReviewForDisplay } from "./persist.js";
 import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
-import { ReviewProgressWidget } from "./review-widget.js";
+import { ReviewProgressWidget, collectModelPairs } from "./review-widget.js";
 import type { ReviewJob } from "./review-manager.js";
 import { LOG_PREFIX } from "./constants.js";
 import { toErrorMessage } from "./error-utils.js";
@@ -271,9 +271,12 @@ export default function (pi: ExtensionAPI): void {
 				// Health score is the single-number bottom line. Show it
 				// here so users don't have to expand the message to see
 				// how the review scored overall. Colored by band: green
-				// (≥80), warning (50–79), error (<50).
-				const hs = safeNumber(s.healthScore);
-				if (hs > 0 || hs === 0) {
+				// (≥80), warning (50–79), error (<50). typeof check
+				// (not safeNumber) so a missing healthScore stays hidden
+				// instead of being rendered as a misleading "score 0/100"
+				// in the red band.
+				if (typeof s.healthScore === "number") {
+					const hs = s.healthScore;
 					const scoreColor =
 						hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
 					parts.push(theme.fg(scoreColor, `score ${hs}/100`));
@@ -296,28 +299,26 @@ export default function (pi: ExtensionAPI): void {
 						.join(` ${theme.fg("dim", "·")} `);
 			}
 
-			// Distinct provider/model pairs across lenses. Helps users
-			// spot when lenses ran on different providers/models —
-			// relevant when autorouting or per-lens config is in play.
-			// Empty / whitespace-only fields are skipped so the line
-			// never renders as `@ /` for legacy persisted reviews.
-			const modelPairs = new Set<string>();
-			for (const l of lenses) {
-				const st = getLensState(job.states, l);
-				if (!st) continue;
-				const prov =
-					typeof st.provider === "string" ? st.provider.trim() : "";
-				const name =
-					typeof st.modelName === "string" ? st.modelName.trim() : "";
-				if (!prov && !name) continue;
-				modelPairs.add(prov ? `${prov}/${name}` : name);
-			}
-			if (modelPairs.size > 0) {
-				line += `\n  ${theme.fg("dim", `@ ${[...modelPairs].join(", ")}`)}`;
+			// Distinct provider/model pairs across lenses. Routed
+			// through the shared aggregator in review-widget so the
+			// widget, notification body, and message renderer all
+			// apply the same empty/whitespace skip and ordering.
+			const modelPairs = collectModelPairs(
+				lensStateEntries(job.states) as Iterable<
+					[string, { provider?: unknown; modelName?: unknown } | undefined]
+				>,
+			);
+			if (modelPairs.length > 0) {
+				line += `\n  ${theme.fg("dim", `@ ${modelPairs.join(", ")}`)}`;
 			}
 
-			// Verdict
-			const verdict = safeString(s?.verdict);
+			// Verdict — "Review failed" when the job errored without
+			// synthesis producing a verdict, so the line never implies
+			// a content verdict (e.g. "Request changes") for an
+			// infrastructure failure.
+			const verdict =
+				safeString(s?.verdict) ||
+				(hasError ? "Review failed" : "Request changes");
 			if (verdict) {
 				line += `\n  ${theme.fg("accent", `Verdict: ${verdict}`)}`;
 			}
@@ -406,26 +407,23 @@ export default function (pi: ExtensionAPI): void {
 			report += `\n## Review warnings\n${lensErrors.join("\n")}\n`;
 		}
 
-		// Distinct provider/model pairs across lenses. Same empty/whitespace
-		// skip as the renderer in registerMessageRenderer — keeps the
-		// markdown and TUI outputs consistent.
-		const modelPairs = new Set<string>();
-		for (const l of safeLenses(job)) {
-			const st = getLensState(job.states, l);
-			if (!st) continue;
-			const prov = typeof st.provider === "string" ? st.provider.trim() : "";
-			const name = typeof st.modelName === "string" ? st.modelName.trim() : "";
-			if (!prov && !name) continue;
-			modelPairs.add(prov ? `${prov}/${name}` : name);
-		}
-		if (modelPairs.size > 0) {
-			report += `\n## Models used\n${[...modelPairs].map((m) => `- ${m}`).join("\n")}\n`;
+		// Distinct provider/model pairs across lenses. Same shared
+		// aggregator as the TUI widget and message renderer — one
+		// source of truth for empty/whitespace handling and ordering.
+		const modelPairs = collectModelPairs(
+			lensStateEntries(job.states) as Iterable<
+				[string, { provider?: unknown; modelName?: unknown } | undefined]
+			>,
+		);
+		if (modelPairs.length > 0) {
+			report += `\n## Models used\n${modelPairs.map((m) => `- ${m}`).join("\n")}\n`;
 		}
 		// Health score as a top-level summary line so it's the first
 		// thing the user sees when the notification is rendered.
-		const hs = safeNumber(s?.healthScore);
-		if (hs > 0 || hs === 0) {
-			report = `**Health score: ${hs}/100**\n\n` + report;
+		// typeof check (not safeNumber) so a missing score stays hidden
+		// instead of being rendered as a misleading "score 0/100".
+		if (typeof s?.healthScore === "number") {
+			report = `**Health score: ${s.healthScore}/100**\n\n` + report;
 		}
 
 		// Strip session objects (contain non-cloneable async handlers) before sending

@@ -26,6 +26,8 @@ export interface SubagentResult {
 	lens: string;
 	text: string;
 	modelName: string;
+	/** Provider id (e.g. "anthropic", "openai") for the model that ran. */
+	provider?: string;
 	durationMs: number;
 	errorMessage?: string;
 	/** The live session object — caller must dispose when no longer needed. */
@@ -209,6 +211,7 @@ export async function runLensSubagent(
 		lens,
 		text,
 		modelName: model.name,
+		provider: model.provider,
 		durationMs: Date.now() - start,
 		session,
 		...(errorMessage ? { errorMessage } : {}),

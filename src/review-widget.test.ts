@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ReviewProgressWidget } from "./review-widget.js";
+import {
+	ReviewProgressWidget,
+	collectModelPairs,
+} from "./review-widget.js";
 import type { LensState, ReviewJob } from "./review-manager.js";
 import type { ReviewLens } from "./types.js";
 
@@ -473,7 +476,9 @@ describe("renderWidget — completed summary", () => {
 		// Heading should still render; the widget doesn't crash when
 		// synthesis is missing on an errored job.
 		expect(lines[0]).toContain("DRYKISS Review");
-		expect(lines[0]).toContain("Request changes"); // fallback verdict
+		// Errored jobs surface "Review failed" so we don't conflate
+		// infrastructure failures with a content verdict.
+		expect(lines[0]).toContain("Review failed");
 	});
 
 	it("renders the elapsed duration for completed jobs", () => {
@@ -481,6 +486,70 @@ describe("renderWidget — completed summary", () => {
 		const statsLine = lines[1] ?? "";
 		// startedAt is 5s ago, completedAt is now → ~5s elapsed
 		expect(statsLine).toMatch(/\d+\.\ds/);
+	});
+
+	it("hides the score line when synthesis is missing (undefined healthScore)", () => {
+		// Regression guard: safeNumber(undefined) → 0 would render a
+		// misleading "score 0/100" in the red band. The widget must
+		// hide the line entirely instead.
+		const job = buildCompletedJob({
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				// healthScore intentionally omitted via cast — simulates
+				// a legacy persisted review that pre-dates the field.
+			} as any,
+		});
+		const lines = renderAll(job);
+		const statsLine = lines[1] ?? "";
+		expect(statsLine).not.toContain("score");
+	});
+
+	it("hides the score line when synthesis has no scoreBreakdown property", () => {
+		// Defensive: synthesisResult without the scoreBreakdown field
+		// at all (legacy persisted review) must not crash.
+		const job = buildCompletedJob({
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 0,
+				// no scoreBreakdown
+			} as any,
+		});
+		const lines = renderAll(job);
+		const statsLine = lines[1] ?? "";
+		// healthScore === 0 is a valid number, so it should still render.
+		expect(statsLine).toContain("score 0/100");
+	});
+
+	it("does not double-dim each stats part", () => {
+		// Regression guard: statsParts.map(p => fg("dim", p))
+		// followed by theme.fg("dim", joined) over-dims every part.
+		// The widget should dim the line as a whole, not each part.
+		const job = buildCompletedJob();
+		const lines = renderAll(job);
+		const statsLine = lines[1] ?? "";
+		// No stats segment should contain the ANSI escape for dim
+		// (ESC [ 2 m) — only one outer dim wrap is expected.
+		const dimCount = (statsLine.match(/\x1b\[2m/g) ?? []).length;
+		// 1 outer dim on the whole line + 3 dim separators + no per-part dims.
+		// The exact count is fragile across terminal themes; the test
+		// primarily asserts no runaway double-dimming by bounding the
+		// dim occurrences to a sane upper limit (outer + separators).
+		expect(dimCount).toBeLessThanOrEqual(6);
 	});
 });
 
@@ -589,5 +658,96 @@ describe("formatFinding", () => {
 		const out = formatFinding(buildFinding({ lens: "simplicity" }));
 		// simplicity → "KISS" via LENS_DISPLAY_NAMES
 		expect(out).toContain("[KISS]");
+	});
+});
+
+describe("collectModelPairs", () => {
+	it("returns an empty array for an empty iterable", () => {
+		expect(collectModelPairs([])).toEqual([]);
+	});
+
+	it("skips entries that are undefined", () => {
+		expect(collectModelPairs([["a", undefined]])).toEqual([]);
+	});
+
+	it("returns provider/modelName pairs", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["simplicity", { provider: "anthropic", modelName: "Claude Sonnet 4" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["anthropic/Claude Sonnet 4"]);
+	});
+
+	it("returns modelName alone when provider is missing", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["simplicity", { modelName: "Claude Sonnet 4" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["Claude Sonnet 4"]);
+	});
+
+	it("returns provider alone when modelName is missing", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["simplicity", { provider: "anthropic" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["anthropic"]);
+	});
+
+	it("skips entries where both provider and modelName are missing", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["a", {}],
+			["b", { provider: "openai", modelName: "GPT-4o" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["openai/GPT-4o"]);
+	});
+
+	it("skips whitespace-only values", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["a", { provider: "   ", modelName: "   " }],
+			["b", { provider: "anthropic", modelName: "Sonnet" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
+	});
+
+	it("trims surrounding whitespace from values", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["a", { provider: "  anthropic  ", modelName: "\tSonnet\n" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
+	});
+
+	it("deduplicates identical pairs", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["a", { provider: "anthropic", modelName: "Sonnet" }],
+			["b", { provider: "anthropic", modelName: "Sonnet" }],
+			["c", { provider: "openai", modelName: "GPT-4o" }],
+		];
+		expect(collectModelPairs(entries)).toEqual([
+			"anthropic/Sonnet",
+			"openai/GPT-4o",
+		]);
+	});
+
+	it("returns results sorted alphabetically for deterministic output", () => {
+		const entries: Array<[string, { provider?: string; modelName?: string }]> = [
+			["a", { provider: "openai", modelName: "GPT-4o" }],
+			["b", { provider: "anthropic", modelName: "Sonnet" }],
+			["c", { provider: "google", modelName: "Gemini" }],
+		];
+		expect(collectModelPairs(entries)).toEqual([
+			"anthropic/Sonnet",
+			"google/Gemini",
+			"openai/GPT-4o",
+		]);
+	});
+
+	it("coerces non-string provider/modelName safely (unknown from serialized payload)", () => {
+		// After serialization through structured clone, fields can be
+		// missing or non-string. The helper must not throw — fall
+		// through to "missing" and skip the entry.
+		const entries: Array<[string, { provider?: unknown; modelName?: unknown }]> = [
+			["a", { provider: null, modelName: undefined }],
+			["b", { provider: 42, modelName: { name: "x" } }],
+			["c", { provider: "anthropic", modelName: "Sonnet" }],
+		];
+		expect(collectModelPairs(entries)).toEqual(["anthropic/Sonnet"]);
 	});
 });

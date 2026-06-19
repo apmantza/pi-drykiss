@@ -492,6 +492,17 @@ describe("ReviewManager", () => {
 			expect.any(AbortSignal),
 			expect.any(Function),
 		);
+
+		// Regression guard: after a successful retry, the lens state
+		// must advertise the model that actually ran — not the
+		// original (failed) model. Without this, the TUI/notification
+		// would mislead users about which model produced the review
+		// when autorouting or per-lens fallback swapped providers.
+		const completedJob = manager.listJobs().find(
+			(j) => j.overallStatus === "done",
+		);
+		expect(completedJob?.states.get("security")?.modelName).toBe("fallback");
+		expect(completedJob?.states.get("security")?.provider).toBe("mock");
 	});
 
 	it("handles runSynthesis error with fallback result", async () => {

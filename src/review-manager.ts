@@ -490,6 +490,18 @@ export class ReviewManager {
 				);
 				if (retryResult) {
 					state.session = retryResult.session;
+					// Update provider/modelName with the model that
+					// actually produced this review. Without this the
+					// widget/notification would keep advertising the
+					// original (failed) model — misleading when
+					// autorouting or per-lens fallback swapped models.
+					// retryResult.modelName and retryResult.provider are
+					// set by runLensSubagent from the model arg of the
+					// retry call.
+					state.modelName = retryResult.modelName;
+					if (retryResult.provider) {
+						state.provider = retryResult.provider;
+					}
 					try {
 						state.logPath = await saveSessionLog(
 							job.id,

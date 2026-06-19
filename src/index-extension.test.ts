@@ -25,6 +25,11 @@ vi.mock("./review-widget.js", () => ({
 		attach: widgetAttach,
 		setJobs: widgetSetJobs,
 	})),
+	// The aggregator used by both the TUI widget and the message
+	// renderer. The real implementation is a pure function over
+	// lens-state entries; the test stub returns an empty array
+	// because the test fixtures don't exercise the model-pair path.
+	collectModelPairs: vi.fn(() => []),
 }));
 
 vi.mock("./review-manager.js", () => ({
