@@ -51,6 +51,7 @@ import {
 	composeLensPrompt,
 	composeSynthesisPrompt,
 } from "./prompt-composer.js";
+import { MODE_CONTEXT_FRAGMENT_NAMES } from "./mode-context.js";
 
 // ── Test helpers ────────────────────────────────────────────────────────
 
@@ -368,9 +369,13 @@ describe("buildReviewPrompts — mode context", () => {
 		);
 		expect(prompts[0].userPrompt).toContain("PROPOSED owner/repo#42");
 		expect(loadPromptBody).toHaveBeenCalledWith(
-			"mode-context-proposed",
+			MODE_CONTEXT_FRAGMENT_NAMES.proposed,
 			"shared",
 		);
+		// Posture block should prime the lens before it sees file context.
+		expect(
+			prompts[0].userPrompt.indexOf("PROPOSED owner/repo#42"),
+		).toBeLessThan(prompts[0].userPrompt.indexOf("--- src/app.ts"));
 	});
 
 	it("injects the audit-posture block for full mode", async () => {
@@ -383,7 +388,13 @@ describe("buildReviewPrompts — mode context", () => {
 			{ mode: "full", scopeLabel: "full codebase" },
 		);
 		expect(prompts[0].userPrompt).toContain("AUDIT full codebase");
-		expect(loadPromptBody).toHaveBeenCalledWith("mode-context-audit", "shared");
+		expect(loadPromptBody).toHaveBeenCalledWith(
+			MODE_CONTEXT_FRAGMENT_NAMES.audit,
+			"shared",
+		);
+		expect(prompts[0].userPrompt.indexOf("AUDIT full codebase")).toBeLessThan(
+			prompts[0].userPrompt.indexOf("--- src/app.ts"),
+		);
 	});
 
 	it("does not inject a mode block when mode is absent (backward compat)", async () => {

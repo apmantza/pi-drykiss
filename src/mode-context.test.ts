@@ -7,8 +7,8 @@ vi.mock("./prompt-loader.js", () => ({
 import { loadPromptBody } from "./prompt-loader.js";
 import {
 	modeToPosture,
-	postureHasDiff,
 	loadModeContextBlock,
+	MODE_CONTEXT_FRAGMENT_NAMES,
 } from "./mode-context.js";
 
 beforeEach(() => {
@@ -20,27 +20,36 @@ describe("modeToPosture", () => {
 		expect(modeToPosture("full")).toBe("audit");
 	});
 
-	it("maps every change-based mode → proposed", () => {
-		for (const m of ["local", "staged", "branch", "commit", "pr", "files"]) {
-			expect(modeToPosture(m)).toBe("proposed");
-		}
+	it("maps local → proposed", () => {
+		expect(modeToPosture("local")).toBe("proposed");
 	});
 
-	it("defaults undefined/unknown → proposed (preserves historical behavior)", () => {
-		// The lens prompts were written assuming a diff exists, so unknown
-		// modes must fall back to the proposed-change posture, not audit.
+	it("maps staged → proposed", () => {
+		expect(modeToPosture("staged")).toBe("proposed");
+	});
+
+	it("maps branch → proposed", () => {
+		expect(modeToPosture("branch")).toBe("proposed");
+	});
+
+	it("maps commit → proposed", () => {
+		expect(modeToPosture("commit")).toBe("proposed");
+	});
+
+	it("maps pr → proposed", () => {
+		expect(modeToPosture("pr")).toBe("proposed");
+	});
+
+	it("maps files → proposed", () => {
+		expect(modeToPosture("files")).toBe("proposed");
+	});
+
+	it("defaults undefined → proposed", () => {
 		expect(modeToPosture(undefined)).toBe("proposed");
+	});
+
+	it("defaults unknown mode → proposed", () => {
 		expect(modeToPosture("nonsense")).toBe("proposed");
-	});
-});
-
-describe("postureHasDiff", () => {
-	it("proposed has a meaningful per-file diff", () => {
-		expect(postureHasDiff("proposed")).toBe(true);
-	});
-
-	it("audit has no coherent diff to reason about", () => {
-		expect(postureHasDiff("audit")).toBe(false);
 	});
 });
 
@@ -52,7 +61,7 @@ describe("loadModeContextBlock", () => {
 		const block = await loadModeContextBlock("proposed", "owner/repo#42");
 		expect(block).toBe("PROPOSED scope=owner/repo#42 posture=proposed");
 		expect(loadPromptBody).toHaveBeenCalledWith(
-			"mode-context-proposed",
+			MODE_CONTEXT_FRAGMENT_NAMES.proposed,
 			"shared",
 		);
 	});
@@ -61,7 +70,10 @@ describe("loadModeContextBlock", () => {
 		vi.mocked(loadPromptBody).mockResolvedValue("AUDIT {{scope_label}}");
 		const block = await loadModeContextBlock("audit", "full codebase");
 		expect(block).toBe("AUDIT full codebase");
-		expect(loadPromptBody).toHaveBeenCalledWith("mode-context-audit", "shared");
+		expect(loadPromptBody).toHaveBeenCalledWith(
+			MODE_CONTEXT_FRAGMENT_NAMES.audit,
+			"shared",
+		);
 	});
 
 	it("omits scope_label placeholder when no label is given", async () => {
@@ -80,5 +92,38 @@ describe("loadModeContextBlock", () => {
 		vi.mocked(loadPromptBody).mockResolvedValue("   \n  ");
 		const block = await loadModeContextBlock("audit");
 		expect(block).toBe("");
+	});
+
+	it("returns empty string and logs a warning when loadPromptBody throws", async () => {
+		const consoleSpy = vi
+			.spyOn(console, "warn")
+			.mockImplementation(() => undefined);
+		vi.mocked(loadPromptBody).mockRejectedValue(new Error("ENOENT"));
+		const block = await loadModeContextBlock("proposed", "pr#1");
+		expect(block).toBe("");
+		expect(loadPromptBody).toHaveBeenCalledWith(
+			MODE_CONTEXT_FRAGMENT_NAMES.proposed,
+			"shared",
+		);
+		expect(consoleSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Could not load mode context fragment"),
+		);
+		consoleSpy.mockRestore();
+	});
+
+	it("trims whitespace from a non-empty template", async () => {
+		vi.mocked(loadPromptBody).mockResolvedValue(
+			"  \n  PROPOSED {{scope_label}}  \n  ",
+		);
+		const block = await loadModeContextBlock("proposed", "x");
+		expect(block).toBe("PROPOSED x");
+	});
+
+	it("leaves unknown placeholders unchanged", async () => {
+		vi.mocked(loadPromptBody).mockResolvedValue(
+			"PROPOSED {{unknown}} {{scope_label}}",
+		);
+		const block = await loadModeContextBlock("proposed", "y");
+		expect(block).toBe("PROPOSED {{unknown}} y");
 	});
 });

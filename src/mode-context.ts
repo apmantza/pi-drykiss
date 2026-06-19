@@ -20,11 +20,12 @@
  * file loading + placeholder substitution. No prompt strings here.
  */
 import { loadPromptBody } from "./prompt-loader.js";
+import { LOG_PREFIX } from "./constants.js";
 
 export type ReviewPosture = "proposed" | "audit";
 
-/** Shared-fragment filename (without `.md`) for each posture. */
-const MODE_CONTEXT_FRAGMENT: Record<ReviewPosture, string> = {
+/** Shared-fragment filenames (without `.md`) for each posture. */
+export const MODE_CONTEXT_FRAGMENT_NAMES: Record<ReviewPosture, string> = {
 	proposed: "mode-context-proposed",
 	audit: "mode-context-audit",
 };
@@ -42,11 +43,6 @@ export function modeToPosture(mode: string | undefined): ReviewPosture {
 	return mode === "full" ? "audit" : "proposed";
 }
 
-/** Whether the posture has a meaningful per-file diff to reason about. */
-export function postureHasDiff(posture: ReviewPosture): boolean {
-	return posture === "proposed";
-}
-
 function substitute(template: string, vars: Record<string, string>): string {
 	return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
 		const v = vars[key];
@@ -56,16 +52,23 @@ function substitute(template: string, vars: Record<string, string>): string {
 
 /**
  * Load and render the posture-specific context block for the lens user
- * prompt. Returns `""` when the fragment is missing or empty — fail-open
- * so a missing fragment never breaks a review (and so test environments
- * that mock the loader get a no-op, preserving prior behavior).
+ * prompt. Returns `""` when the fragment is missing, empty, or cannot be
+ * read — fail-open so a missing fragment never breaks a review.
  */
 export async function loadModeContextBlock(
 	posture: ReviewPosture,
 	scopeLabel?: string,
 ): Promise<string> {
-	const name = MODE_CONTEXT_FRAGMENT[posture];
-	const body = await loadPromptBody(name, "shared");
+	const name = MODE_CONTEXT_FRAGMENT_NAMES[posture];
+	let body: string;
+	try {
+		body = await loadPromptBody(name, "shared");
+	} catch (err) {
+		console.warn(
+			`${LOG_PREFIX} Could not load mode context fragment ${name}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return "";
+	}
 	if (!body || !body.trim()) return "";
 	return substitute(body, {
 		posture,

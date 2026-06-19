@@ -5,7 +5,15 @@ describe("parseFindingsJson", () => {
 	describe("canonical contract: bare array", () => {
 		it("parses a top-level JSON array of findings", () => {
 			const raw = JSON.stringify([
-				{ file: "src/a.ts", line: 1, severity: "high", category: "x", summary: "s", detail: "d", suggestion: "f" },
+				{
+					file: "src/a.ts",
+					line: 1,
+					severity: "high",
+					category: "x",
+					summary: "s",
+					detail: "d",
+					suggestion: "f",
+				},
 			]);
 			const { findings, parseError } = parseFindingsJson(raw, "simplicity");
 			expect(parseError).toBeUndefined();
@@ -14,7 +22,19 @@ describe("parseFindingsJson", () => {
 		});
 
 		it("parses a top-level JSON array inside a markdown fence", () => {
-			const raw = "```json\n" + JSON.stringify([{ file: "src/a.ts", severity: "low", category: "c", summary: "s", detail: "d", suggestion: "f" }]) + "\n```";
+			const raw =
+				"```json\n" +
+				JSON.stringify([
+					{
+						file: "src/a.ts",
+						severity: "low",
+						category: "c",
+						summary: "s",
+						detail: "d",
+						suggestion: "f",
+					},
+				]) +
+				"\n```";
 			const { findings, parseError } = parseFindingsJson(raw);
 			expect(parseError).toBeUndefined();
 			expect(findings).toHaveLength(1);
@@ -30,7 +50,14 @@ describe("parseFindingsJson", () => {
 		it("unwraps the canonical findings wrapper", () => {
 			const raw = JSON.stringify({
 				findings: [
-					{ file: "src/a.ts", severity: "high", category: "x", summary: "s", detail: "d", suggestion: "f" },
+					{
+						file: "src/a.ts",
+						severity: "high",
+						category: "x",
+						summary: "s",
+						detail: "d",
+						suggestion: "f",
+					},
 				],
 			});
 			const { findings, parseError } = parseFindingsJson(raw);
@@ -59,7 +86,14 @@ describe("parseFindingsJson", () => {
 		])("unwraps an object with a '%s' wrapper key", (key) => {
 			const raw = JSON.stringify({
 				[key]: [
-					{ file: "src/a.ts", severity: "medium", category: "x", summary: "s", detail: "d", suggestion: "f" },
+					{
+						file: "src/a.ts",
+						severity: "medium",
+						category: "x",
+						summary: "s",
+						detail: "d",
+						suggestion: "f",
+					},
 				],
 			});
 			const { findings, parseError } = parseFindingsJson(raw);
@@ -71,10 +105,24 @@ describe("parseFindingsJson", () => {
 		it("prefers 'findings' over other wrapper keys when both are present", () => {
 			const raw = JSON.stringify({
 				findings: [
-					{ file: "src/canonical.ts", severity: "high", category: "x", summary: "s", detail: "d", suggestion: "f" },
+					{
+						file: "src/canonical.ts",
+						severity: "high",
+						category: "x",
+						summary: "s",
+						detail: "d",
+						suggestion: "f",
+					},
 				],
 				results: [
-					{ file: "src/wrong.ts", severity: "high", category: "x", summary: "s", detail: "d", suggestion: "f" },
+					{
+						file: "src/wrong.ts",
+						severity: "high",
+						category: "x",
+						summary: "s",
+						detail: "d",
+						suggestion: "f",
+					},
 				],
 			});
 			const { findings } = parseFindingsJson(raw);
@@ -89,7 +137,14 @@ describe("parseFindingsJson", () => {
 			const raw = JSON.stringify({
 				lens_output: {
 					simplicity_findings: [
-						{ file: "src/a.ts", severity: "critical", category: "x", summary: "s", detail: "d", suggestion: "f" },
+						{
+							file: "src/a.ts",
+							severity: "critical",
+							category: "x",
+							summary: "s",
+							detail: "d",
+							suggestion: "f",
+						},
 					],
 				},
 			});

@@ -8,7 +8,7 @@
  *   - Provides the bundled-prompt seeder (`ensureDefaultPrompts`, `resetPrompts`)
  *   - Builds the auto-inject KISS/DRY checklist (this is TUI text, not an LLM prompt — exempt from the `.md` rule)
  *
- * Total: ~230 lines. The previous version was 790 lines because it embedded ~600 lines of prompt text.
+ * Total: ~530 lines. The previous version was 790 lines because it embedded ~600 lines of prompt text.
  */
 
 import { readFile, mkdir, writeFile, readdir } from "node:fs/promises";
@@ -23,7 +23,11 @@ import {
 	composeSynthesisPrompt,
 	type ComposeOptions,
 } from "./prompt-composer.js";
-import { modeToPosture, loadModeContextBlock } from "./mode-context.js";
+import {
+	modeToPosture,
+	loadModeContextBlock,
+	MODE_CONTEXT_FRAGMENT_NAMES,
+} from "./mode-context.js";
 
 // Helper functions that go through the module namespace so vi.mock can
 // intercept the calls. (Destructured imports are not always live-bound
@@ -98,8 +102,7 @@ const BUNDLED_SHARED_FILES = [
 	"grounding-rules-synthesis.md",
 	"kiss-dry-checklist.md",
 	"active-constraints.md",
-	"mode-context-proposed.md",
-	"mode-context-audit.md",
+	...Object.values(MODE_CONTEXT_FRAGMENT_NAMES).map((name) => `${name}.md`),
 ] as const;
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
@@ -156,6 +159,43 @@ async function copyBundledFile(src: string, dest: string): Promise<void> {
 	await writeFile(dest, content, "utf8");
 }
 
+/** Copy all bundled lens prompts and shared fragments into the user dir. */
+async function copyBundledPrompts(
+	bundledDir: string,
+	userDir: string,
+): Promise<void> {
+	await mkdir(userDir, { recursive: true });
+	await mkdir(join(userDir, "_shared"), { recursive: true });
+
+	await Promise.all(
+		BUNDLED_LENS_FILES.map(async (filename) => {
+			const src = join(bundledDir, filename);
+			const dest = join(userDir, filename);
+			try {
+				await copyBundledFile(src, dest);
+			} catch (err) {
+				throw new Error(
+					`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}),
+	);
+
+	await Promise.all(
+		BUNDLED_SHARED_FILES.map(async (filename) => {
+			const src = join(bundledDir, "_shared", filename);
+			const dest = join(userDir, "_shared", filename);
+			try {
+				await copyBundledFile(src, dest);
+			} catch (err) {
+				throw new Error(
+					`Failed to seed shared fragment ${filename}: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}),
+	);
+}
+
 /**
  * Seed the user's prompt dir with all bundled `.md` files on first run.
  * Sentinel-gated: subsequent calls are no-ops.
@@ -170,37 +210,7 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
 		}
 
 		const bundledDir = _bundledPromptsDir();
-
-		// Copy per-lens prompts
-		await Promise.all(
-			BUNDLED_LENS_FILES.map(async (filename) => {
-				const src = join(bundledDir, filename);
-				const dest = join(userDir, filename);
-				try {
-					await copyBundledFile(src, dest);
-				} catch (err) {
-					throw new Error(
-						`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
-			}),
-		);
-
-		// Copy shared fragments
-		await Promise.all(
-			BUNDLED_SHARED_FILES.map(async (filename) => {
-				const src = join(bundledDir, "_shared", filename);
-				const dest = join(userDir, "_shared", filename);
-				await mkdir(join(userDir, "_shared"), { recursive: true });
-				try {
-					await copyBundledFile(src, dest);
-				} catch (err) {
-					throw new Error(
-						`Failed to seed shared fragment ${filename}: ${err instanceof Error ? err.message : String(err)}`,
-					);
-				}
-			}),
-		);
+		await copyBundledPrompts(bundledDir, userDir);
 
 		// Clean up old-version sentinels and write the new one
 		await removeOldSentinels(userDir);
@@ -215,23 +225,8 @@ export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
  */
 export async function resetPrompts(): Promise<void> {
 	const userDir = _userPromptsDir();
-	await mkdir(userDir, { recursive: true });
-
 	const bundledDir = _bundledPromptsDir();
-
-	for (const filename of BUNDLED_LENS_FILES) {
-		const src = join(bundledDir, filename);
-		const dest = join(userDir, filename);
-		await copyBundledFile(src, dest);
-	}
-
-	await mkdir(join(userDir, "_shared"), { recursive: true });
-	for (const filename of BUNDLED_SHARED_FILES) {
-		const src = join(bundledDir, "_shared", filename);
-		const dest = join(userDir, "_shared", filename);
-		await copyBundledFile(src, dest);
-	}
-
+	await copyBundledPrompts(bundledDir, userDir);
 	await writeSentinel(userDir);
 }
 
@@ -385,8 +380,9 @@ export async function buildReviewPrompts(
 		: "";
 
 	function buildUserPrompt(includeIndex: boolean): string {
-		let prompt = `${EXAMINE_CONTEXT_INSTRUCTION}\n\n${context}`;
+		let prompt = EXAMINE_CONTEXT_INSTRUCTION;
 		if (modeContext) prompt += `\n\n${modeContext}`;
+		prompt += `\n\n${context}`;
 		if (commandsBlock) prompt += `\n${commandsBlock}`;
 		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
 		if (guidelines) {
