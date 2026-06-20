@@ -457,14 +457,14 @@ export async function handleSuppressCommand(
 				// Support "90d" shorthand
 				const daysMatch = val.match(/^(\d+)d$/);
 				if (daysMatch) {
-					const days = parseInt(daysMatch[1], 10);
+					const days = Number.parseInt(daysMatch[1], 10);
 					const expiryDate = new Date();
 					expiryDate.setDate(expiryDate.getDate() + days);
 					expiresAt = expiryDate.toISOString().split("T")[0];
 				} else {
 					// Try parsing as date
 					const d = new Date(val);
-					if (!isNaN(d.getTime())) {
+					if (!Number.isNaN(d.getTime())) {
 						expiresAt = val;
 					} else {
 						ctx.ui.notify(

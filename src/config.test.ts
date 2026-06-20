@@ -243,7 +243,7 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 
 	it("deduplicates overlapping global and project suppressions", async () => {
 		vi.mocked(readFile).mockImplementation(async (path) => {
-			const p = String(path).replace(/\\/g, "/");
+			const p = String(path).replaceAll(/\\/g, "/");
 			// Global config lives directly under the drykiss base dir.
 			if (p.endsWith(".pi/drykiss/config.json") && !p.includes("/project")) {
 				return JSON.stringify({

@@ -164,7 +164,7 @@ export class ConversationViewer implements Component {
  * Chunk a long line into smaller pieces for display.
  */
 export function chunkLine(text: string, max: number): string[] {
-	const t = stripAnsi(text).replace(/\n/g, " ");
+	const t = stripAnsi(text).replaceAll(/\n/g, " ");
 	if (!t) return [];
 	if (t.length <= max) return [t];
 	const chunks: string[] = [];

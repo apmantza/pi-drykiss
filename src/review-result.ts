@@ -316,7 +316,7 @@ function collectErrors(job: ReviewJob): string[] {
 }
 
 function normalizePath(file: string): string {
-	return String(file).replace(/\\/g, "/").replace(/^\.\//, "");
+	return String(file).replaceAll(/\\/g, "/").replace(/^\.\//, "");
 }
 
 function isSafeRelativePath(file: string): boolean {
@@ -437,7 +437,7 @@ export function applySuppressions(
 	const active: Finding[] = [];
 
 	for (const f of findings) {
-		const file = f.file.replace(/\\/g, "/");
+		const file = f.file.replaceAll(/\\/g, "/");
 		let isSuppressed = false;
 		for (const s of compiled) {
 			if (s.riskCode !== "*" && s.riskCode !== f.riskCode) continue;

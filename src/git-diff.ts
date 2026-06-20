@@ -89,7 +89,7 @@ export async function getAllSourceFiles(
 	for (const dir of dirsToWalk) {
 		for await (const filePath of walkDir(cwd, dir)) {
 			if (seenPaths.has(filePath)) continue;
-			const normalized = filePath.replace(/\\/g, "/");
+			const normalized = filePath.replaceAll(/\\/g, "/");
 			if (ignorePatterns && matchesAnyGlob(normalized, ignorePatterns)) {
 				continue;
 			}
@@ -429,7 +429,7 @@ export async function getProjectIndex(
 	const seenPaths = new Set<string>();
 
 	for await (const filePath of projectIndexCandidates(cwd, paths)) {
-		const normalized = filePath.replace(/\\/g, "/");
+		const normalized = filePath.replaceAll(/\\/g, "/");
 		if (seenPaths.has(normalized)) continue;
 		seenPaths.add(normalized);
 		if (ignorePatterns && matchesAnyGlob(normalized, ignorePatterns)) continue;

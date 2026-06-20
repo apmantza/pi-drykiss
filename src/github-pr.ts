@@ -59,7 +59,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 		return {
 			owner: urlMatch[1],
 			repo: urlMatch[2],
-			number: parseInt(urlMatch[3], 10),
+			number: Number.parseInt(urlMatch[3], 10),
 		};
 	}
 
@@ -71,7 +71,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 		return {
 			owner: shorthandMatch[1],
 			repo: shorthandMatch[2],
-			number: parseInt(shorthandMatch[3], 10),
+			number: Number.parseInt(shorthandMatch[3], 10),
 		};
 	}
 
@@ -85,7 +85,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 			return {
 				owner: remoteMatch[1],
 				repo: remoteMatch[2],
-				number: parseInt(trimmed, 10),
+				number: Number.parseInt(trimmed, 10),
 			};
 		}
 	}

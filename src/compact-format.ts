@@ -81,7 +81,7 @@ function normalizePath(file: string): string {
 	// job of git-diff.ts upstream. Just return the input verbatim;
 	// the agent can resolve it against cwd. Compacting means making
 	// the line readable, not changing what it points at.
-	return file.replace(/\\/g, "/");
+	return file.replaceAll(/\\/g, "/");
 }
 
 /** Build a single compact violation line. Pure. */

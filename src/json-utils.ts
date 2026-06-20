@@ -93,14 +93,14 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		// Only process if there are unescaped newlines
 		if (!content.includes("\n")) return match;
 		// Escape the newlines
-		const escaped = content.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+		const escaped = content.replaceAll(/\n/g, "\\n").replaceAll(/\r/g, "\\r");
 		return `"${escaped}"`;
 	});
 
 	// 5. Fix unescaped tabs inside string values
 	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
 		if (!content.includes("\t")) return match;
-		const escaped = content.replace(/\t/g, "\\t");
+		const escaped = content.replaceAll(/\t/g, "\\t");
 		return `"${escaped}"`;
 	});
 
@@ -109,7 +109,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	// SECURITY: Only convert when no double quotes exist to avoid corrupting
 	// strings that legitimately contain apostrophes in double-quoted JSON.
 	if (!fixed.includes('"') && fixed.includes("'")) {
-		fixed = fixed.replace(/'/g, '"');
+		fixed = fixed.replaceAll(/'/g, '"');
 	}
 
 	// 3. Try to fix unterminated strings by finding last complete object/array

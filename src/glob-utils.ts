@@ -20,7 +20,7 @@ export function matchesAnyGlob(
 	patterns: readonly string[],
 ): boolean {
 	if (patterns.length === 0) return false;
-	const normalized = filePath.replace(/\\/g, "/");
+	const normalized = filePath.replaceAll(/\\/g, "/");
 	const matchers = compileGlobMatchers(patterns);
 	return matchers.some((r) => r.test(normalized));
 }
@@ -28,7 +28,7 @@ export function matchesAnyGlob(
 /** Convert a simple glob pattern to a regex (supports **, *, ?). */
 function globToRegex(pattern: string): RegExp {
 	// Normalize backslashes to forward slashes for cross-platform support
-	const normalized = pattern.replace(/\\/g, "/");
+	const normalized = pattern.replaceAll(/\\/g, "/");
 	let regex = "^";
 	for (let i = 0; i < normalized.length; i++) {
 		const ch = normalized[i];

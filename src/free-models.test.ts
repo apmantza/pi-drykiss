@@ -125,7 +125,7 @@ describe("getFreeModels", () => {
 			shape("b", "charlie", "Charlie", { input: 0, output: 0 }),
 		];
 		const free = getFreeModels(models);
-		const ids = free.map((m) => m.id).sort();
+		const ids = free.map((m) => m.id).sort((a, b) => a.localeCompare(b));
 		expect(ids).toEqual(["bravo", "free-a"]);
 	});
 
