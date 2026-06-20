@@ -30,6 +30,24 @@ jobs:
       - name: Run tests
         run: npm test
 
+  sonarqube-scan:
+    name: SonarCloud scan
+    runs-on: ubuntu-latest
+    needs: [typecheck-and-test]
+    permissions:
+      contents: read
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
   install-test:
     name: Install test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -60,7 +78,9 @@ jobs:
         run: |
           TARBALL=$(ls pi-drykiss-*.tgz)
           echo "Checking tarball: $TARBALL"
-          tar -tzf "$TARBALL" | grep -E "index\.ts|package\.json|README\.md|LICENSE" | sort
+          tar -tzf "$TARBALL" \
+            | grep -E "index\.ts|package\.json|README\.md|LICENSE" \
+            | sort
           tar -tzf "$TARBALL" | grep "index.ts" || \
             (echo "ERROR: index.ts missing from tarball" && exit 1)
 
@@ -74,17 +94,24 @@ jobs:
           check_field() {
             local field="$1" value="$2"
             if [ ! -f "$TMPDIR/package/$value" ]; then
-              echo "ERROR: package.json '$field' points to '$value' which is missing from the tarball"
+              echo "ERROR: package.json '$field' points to \
+                   '$value' which is missing from the tarball"
               exit 1
             fi
             echo "OK: $field -> $value"
           }
 
           export PI_DRYKISS_PKG_DIR="$TMPDIR/package"
-          MAIN=$(node -p "require(process.env.PI_DRYKISS_PKG_DIR + '/package.json').main || ''" 2>/dev/null)
+          MAIN=$(node -p \
+            "require(process.env.PI_DRYKISS_PKG_DIR
+              + '/package.json').main || ''" \
+            2>/dev/null)
           [ -n "$MAIN" ] && check_field "main" "$MAIN"
 
-          TYPES=$(node -p "require(process.env.PI_DRYKISS_PKG_DIR + '/package.json').types || ''" 2>/dev/null)
+          TYPES=$(node -p \
+            "require(process.env.PI_DRYKISS_PKG_DIR
+              + '/package.json').types || ''" \
+            2>/dev/null)
           [ -n "$TYPES" ] && check_field "types" "$TYPES"
 
           # Check pi.extensions entries
@@ -96,7 +123,12 @@ jobs:
             const extensions = pkg.pi?.extensions || [];
             extensions.forEach(f => {
               const full = path.join(pkgDir, f);
-              if (!fs.existsSync(full)) { console.error('ERROR: pi.extensions entry missing from tarball: ' + f); process.exit(1); }
+              if (!fs.existsSync(full)) {
+                console.error(
+                  'ERROR: pi.extensions entry missing from tarball: ' + f
+                );
+                process.exit(1);
+              }
               else { console.log('OK: pi.extensions -> ' + f); }
             });
           "
@@ -115,8 +147,10 @@ jobs:
           cd "$INSTALL_DIR"
           npx tsx index.ts 2>&1 | tee /tmp/tsx-output.txt || true
           # Build expected-peers list and check for unexpected missing deps
-          printf 'typebox\n@earendil-works/pi-coding-agent\n'  >/tmp/expected.txt
-          printf '@earendil-works/pi-ai\n@earendil-works/pi-tui\n' >>/tmp/expected.txt
+          printf 'typebox\n@earendil-works/pi-coding-agent\n' \
+            >/tmp/expected.txt
+          printf '@earendil-works/pi-ai\n@earendil-works/pi-tui\n' \
+            >>/tmp/expected.txt
           grep -oE "Cannot find (package|module) '[^']+'" \
             /tmp/tsx-output.txt 2>/dev/null \
             | sed "s/.*'\(.*\)'/\1/" | sort -u > /tmp/missing.txt || true
@@ -126,7 +160,8 @@ jobs:
           cat /tmp/missing.txt || true
           echo "=== expected packages ==="
           cat /tmp/expected.txt
-          UNEXPECTED=$(comm -23 /tmp/missing.txt /tmp/expected.txt 2>/dev/null || true)
+          UNEXPECTED=$(comm -23 /tmp/missing.txt /tmp/expected.txt \
+            2>/dev/null || true)
           if [ -n "$UNEXPECTED" ]; then
             echo "FAILED: unexpected missing dependency detected:"
             echo "$UNEXPECTED"
