@@ -44,6 +44,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install peer dependencies
+        run: |
+          npm install --no-save \
+            @earendil-works/pi-ai \
+            @earendil-works/pi-coding-agent \
+            @earendil-works/pi-tui
+
+      - name: Generate coverage report
+        run: npx vitest run --coverage
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
