@@ -11,7 +11,6 @@ const trackerOnTurnEnd = vi.fn();
 const managerListJobs = vi.fn();
 const managerStartCleanup = vi.fn();
 const buildAutoInjectBlock = vi.fn(() => "\nAUTO-INJECT");
-const formatReviewForDisplay = vi.fn(() => "formatted review");
 const loadConfig = vi.fn().mockResolvedValue({});
 let managerOnComplete: ((job: any) => void) | undefined;
 
@@ -25,10 +24,10 @@ vi.mock("./review-widget.js", () => ({
 		attach: widgetAttach,
 		setJobs: widgetSetJobs,
 	})),
-	// The aggregators used by both the TUI widget and the message
-	// renderer. The real implementations are pure functions over
-	// lens-state entries; the test stubs return empty arrays
-	// because the test fixtures don't exercise these paths.
+	// Aggregators consumed by the TUI widget's completed summary.
+	// The real implementations are pure functions over lens-state
+	// entries; the test stubs return empty arrays because the test
+	// fixtures don't exercise these paths.
 	collectModelPairs: vi.fn(() => []),
 	pickVerdict: vi.fn((synthesisVerdict: unknown, hasError: boolean) =>
 		typeof synthesisVerdict === "string" && synthesisVerdict.length > 0
@@ -64,7 +63,6 @@ vi.mock("./auto-inject.js", () => ({
 
 vi.mock("./persist.js", () => ({
 	listReviews: vi.fn().mockResolvedValue([]),
-	formatReviewForDisplay,
 }));
 
 const commandExports = {
@@ -152,7 +150,6 @@ describe("extension event wiring", () => {
 		trackerGetLastTurnEdits.mockReturnValue(null);
 		trackerTrackEdit.mockReturnValue(undefined);
 		buildAutoInjectBlock.mockReturnValue("\nAUTO-INJECT");
-		formatReviewForDisplay.mockReturnValue("formatted review");
 		loadConfig.mockResolvedValue({});
 	});
 
@@ -313,112 +310,6 @@ describe("extension event wiring", () => {
 		}
 	});
 
-	it("renders completed review messages with serialized lens state", () => {
-		const { pi } = makePi();
-		registerDrykiss(pi as any);
-		const renderer = pi.registerMessageRenderer.mock.calls.find(
-			([type]) => type === "drykiss-review-complete",
-		)?.[1];
-		const theme = {
-			fg: (_name: string, value: string) => value,
-			bold: (value: string) => value,
-		};
-
-		expect(() =>
-			renderer(
-				{
-					details: {
-						files: [],
-						lenses: ["tests"],
-						states: { tests: { status: "error", errorMessage: "boom" } },
-						startedAt: Date.now(),
-						overallStatus: "done",
-						synthesisResult: {
-							findings: [],
-							summary: "clean",
-							verdict: "Approve",
-							criticalCount: 0,
-							highCount: 0,
-							mediumCount: 0,
-							lowCount: 0,
-							nitCount: 0,
-						},
-					},
-				},
-				{ expanded: false },
-				theme,
-			),
-		).not.toThrow();
-	});
-
-	it("renders completed review messages with malformed synthesis fields", () => {
-		const { pi } = makePi();
-		registerDrykiss(pi as any);
-		const renderer = pi.registerMessageRenderer.mock.calls.find(
-			([type]) => type === "drykiss-review-complete",
-		)?.[1];
-		const theme = {
-			fg: (_name: string, value: string) => value,
-			bold: (value: string) => value,
-		};
-
-		expect(() =>
-			renderer(
-				{
-					details: {
-						files: "not-files",
-						lenses: "not-lenses",
-						states: {},
-						startedAt: "not-a-date",
-						overallStatus: "done",
-						synthesisResult: {
-							findings: "not-findings",
-							summary: undefined,
-							verdict: 123,
-							criticalCount: "1",
-							highCount: null,
-						},
-					},
-				},
-				{ expanded: true },
-				theme,
-			),
-		).not.toThrow();
-	});
-
-	it("renders a fallback when expanded review formatting fails", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const { pi } = makePi();
-			registerDrykiss(pi as any);
-			const renderer = pi.registerMessageRenderer.mock.calls.find(
-				([type]) => type === "drykiss-review-complete",
-			)?.[1];
-			const theme = {
-				fg: (_name: string, value: string) => value,
-				bold: (value: string) => value,
-			};
-			formatReviewForDisplay.mockImplementationOnce(() => {
-				throw new Error("format failed");
-			});
-
-			expect(() =>
-				renderer(
-					{
-						details: completedJob(),
-					},
-					{ expanded: true },
-					theme,
-				),
-			).not.toThrow();
-			expect(warn).toHaveBeenCalledWith(
-				expect.stringContaining("Failed rendering expanded review report"),
-			);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
 	it("resets review-in-progress state when the last review completes", () => {
 		const { pi, handlers } = makePi();
 		registerDrykiss(pi as any);
@@ -431,7 +322,6 @@ describe("extension event wiring", () => {
 
 		expect(setReviewInProgress).toHaveBeenCalledWith(false);
 		expect(applyReviewState).toHaveBeenCalledWith(ctx);
-		expect(pi.sendMessage).toHaveBeenCalled();
 	});
 
 	it("still resets review-in-progress state when completion widget update fails", () => {
@@ -453,32 +343,6 @@ describe("extension event wiring", () => {
 			expect(applyReviewState).toHaveBeenCalledWith(ctx);
 			expect(ctx.ui.notify).toHaveBeenCalledWith(
 				expect.stringContaining("Failed handling completed review"),
-				"warning",
-			);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("resets review-in-progress state when completion notification throws", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const { pi, handlers } = makePi();
-			registerDrykiss(pi as any);
-			const ctx = makeCtx();
-			handlers.get("session_start")?.({}, ctx);
-			vi.clearAllMocks();
-			managerListJobs.mockReturnValue([]);
-			pi.sendMessage.mockImplementationOnce(() => {
-				throw new Error("send failed");
-			});
-
-			managerOnComplete?.(completedJob());
-
-			expect(setReviewInProgress).toHaveBeenCalledWith(false);
-			expect(applyReviewState).toHaveBeenCalledWith(ctx);
-			expect(ctx.ui.notify).toHaveBeenCalledWith(
-				expect.stringContaining("Failed sending review notification"),
 				"warning",
 			);
 		} finally {
@@ -529,50 +393,5 @@ describe("extension event wiring", () => {
 
 		expect(setReviewInProgress).not.toHaveBeenCalled();
 		expect(applyReviewState).not.toHaveBeenCalled();
-	});
-
-	it("hides the score line in the message renderer when synthesis has no healthScore", () => {
-		// Regression guard: safeNumber(undefined) → 0 previously made the
-		// renderer emit a misleading 'score 0/100' in the red band when
-		// synthesis.healthScore was missing. The renderer must now skip
-		// the line entirely.
-		const { pi } = makePi();
-		registerDrykiss(pi as any);
-		const renderer = pi.registerMessageRenderer.mock.calls.find(
-			([type]) => type === "drykiss-review-complete",
-		)?.[1];
-		const theme = {
-			fg: (_name: string, value: string) => `[fg:${value}]`,
-			bold: (value: string) => `[b:${value}]`,
-		};
-
-		const rendered = renderer(
-			{
-				details: {
-					files: [],
-					lenses: [],
-					states: {},
-					startedAt: Date.now(),
-					overallStatus: "done",
-					synthesisResult: {
-						findings: [],
-						summary: "clean",
-						verdict: "Approve",
-						criticalCount: 0,
-						highCount: 0,
-						mediumCount: 0,
-						lowCount: 0,
-						nitCount: 0,
-						// healthScore intentionally omitted via cast —
-						// simulates a legacy persisted review.
-					} as any,
-				},
-			},
-			{ expanded: false },
-			theme,
-		);
-
-		const text = rendered?.lines?.[0]?.text ?? "";
-		expect(text).not.toContain("score");
 	});
 });

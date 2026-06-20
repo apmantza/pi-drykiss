@@ -36,15 +36,10 @@ import {
 	handleUnsuppressCommand,
 } from "./config-command.js";
 import { createEditTracker } from "./edit-tracker.js";
-import { listReviews, formatReviewForDisplay } from "./persist.js";
+import { listReviews } from "./persist.js";
 import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
-import {
-	ReviewProgressWidget,
-	collectModelPairs,
-	pickVerdict,
-} from "./review-widget.js";
-import type { ReviewJob } from "./review-manager.js";
+import { ReviewProgressWidget } from "./review-widget.js";
 import { LOG_PREFIX } from "./constants.js";
 import { toErrorMessage } from "./error-utils.js";
 
@@ -69,57 +64,6 @@ function warnExtensionError(
 	}
 }
 
-function getLensState(states: unknown, lens: string): any {
-	if (states instanceof Map) return states.get(lens);
-	if (states && typeof states === "object") {
-		return (states as Record<string, unknown>)[lens];
-	}
-	return undefined;
-}
-
-function lensStateEntries(states: unknown): Array<[string, any]> {
-	if (states instanceof Map) return [...states.entries()];
-	if (states && typeof states === "object") {
-		return Object.entries(states as Record<string, unknown>);
-	}
-	return [];
-}
-
-function safeFindings(result: any): any[] {
-	return Array.isArray(result?.findings) ? result.findings : [];
-}
-
-function safeNumber(value: unknown): number {
-	return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function safeString(value: unknown): string {
-	return typeof value === "string" ? value : "";
-}
-
-function safeLenses(job: any): string[] {
-	return Array.isArray(job?.lenses) ? job.lenses : [];
-}
-
-function safeTimestamp(value: unknown): string {
-	const ms = safeNumber(value);
-	return new Date(ms || Date.now()).toISOString();
-}
-
-async function sendMessageSafely(
-	pi: ExtensionAPI,
-	message: Parameters<ExtensionAPI["sendMessage"]>[0],
-	options: Parameters<ExtensionAPI["sendMessage"]>[1],
-	action: string,
-	ctx?: ExtensionContext,
-): Promise<void> {
-	try {
-		await Promise.resolve(pi.sendMessage(message, options));
-	} catch (err) {
-		warnExtensionError(action, err, ctx);
-	}
-}
-
 export default function (pi: ExtensionAPI): void {
 	// ── Background review manager + live widget ────────────
 	const widget = new ReviewProgressWidget();
@@ -132,13 +76,12 @@ export default function (pi: ExtensionAPI): void {
 				warnExtensionError("updating review widget", err, lastContext);
 			}
 		},
-		(job) => {
+		(_job) => {
 			let hasRunningReview = false;
 			try {
 				const jobs = manager.listJobs();
 				hasRunningReview = jobs.some((j) => j.overallStatus === "running");
 				widget.setJobs(jobs);
-				sendReviewNotification(pi, job);
 			} catch (err) {
 				warnExtensionError("handling completed review", err, lastContext);
 			} finally {
@@ -234,224 +177,6 @@ export default function (pi: ExtensionAPI): void {
 			);
 		}
 	});
-
-	// ── Custom notification renderer for completed reviews ─
-	pi.registerMessageRenderer<ReviewJob>(
-		"drykiss-review-complete",
-		(message: any, { expanded }: { expanded: boolean }, theme: any) => {
-			const job = message.details;
-			if (!job) return undefined;
-
-			const s = job.synthesisResult;
-			const lenses = safeLenses(job);
-			const hasError =
-				job.overallStatus === "error" ||
-				lenses.some(
-					(l: string) => getLensState(job.states, l)?.status === "error",
-				);
-			const findings = safeFindings(s);
-			const hasCritical = safeNumber(s?.criticalCount) > 0;
-			const hasHigh = safeNumber(s?.highCount) > 0;
-
-			const icon = hasCritical
-				? theme.fg("error", "✗")
-				: hasError
-					? theme.fg("error", "✗")
-					: hasHigh
-						? theme.fg("warning", "◐")
-						: theme.fg("success", "✓");
-
-			const statusText =
-				job.overallStatus === "error" ? "completed with errors" : "completed";
-
-			let line = `${icon} ${theme.bold(`DRYKISS Review`)} ${theme.fg("dim", statusText)}`;
-
-			// Stats line: findings + severity breakdown + health score
-			const parts: string[] = [];
-			if (s) {
-				parts.push(`${findings.length} findings`);
-				if (safeNumber(s.criticalCount) > 0)
-					parts.push(`${safeNumber(s.criticalCount)} critical`);
-				if (safeNumber(s.highCount) > 0)
-					parts.push(`${safeNumber(s.highCount)} high`);
-				// Health score is the single-number bottom line. Show it
-				// here so users don't have to expand the message to see
-				// how the review scored overall. Colored by band: green
-				// (≥80), warning (50–79), error (<50). typeof check
-				// (not safeNumber) so a missing healthScore stays hidden
-				// instead of being rendered as a misleading "score 0/100"
-				// in the red band.
-				if (typeof s.healthScore === "number") {
-					const hs = s.healthScore;
-					const scoreColor =
-						hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
-					parts.push(theme.fg(scoreColor, `score ${hs}/100`));
-				}
-			}
-			const completedAt = safeNumber(job.completedAt);
-			const startedAt = safeNumber(job.startedAt);
-			if (completedAt > 0 && startedAt > 0) {
-				parts.push(`${((completedAt - startedAt) / 1000).toFixed(1)}s`);
-			}
-			if (parts.length) {
-				line +=
-					"\n  " +
-					parts
-						.map((p) => (p.startsWith("score ") ? p : theme.fg("dim", p)))
-						.join(` ${theme.fg("dim", "·")} `);
-			}
-
-			// Shared with the widget completed summary and the
-			// notification body via collectModelPairs() — see that
-			// helper for the empty/whitespace-skip and ordering rules.
-			const modelPairs = collectModelPairs(
-				lensStateEntries(job.states) as Iterable<
-					[string, { provider?: unknown; modelName?: unknown } | undefined]
-				>,
-			);
-			if (modelPairs.length > 0) {
-				line += `\n  ${theme.fg("dim", `@ ${modelPairs.join(", ")}`)}`;
-			}
-
-			// Verdict — shared picker with the widget completed summary.
-			// "Review failed" when the job errored without synthesis
-			// producing a verdict, so the line never implies a content
-			// verdict (e.g. "Request changes") for an infrastructure
-			// failure.
-			const verdict = pickVerdict(s?.verdict, hasError);
-			if (verdict) {
-				line += `\n  ${theme.fg("accent", `Verdict: ${verdict}`)}`;
-			}
-
-			// Result preview (collapsed) or full report (expanded)
-			if (expanded && s) {
-				try {
-					const suppressedCount = findings.filter(
-						(f: any) => f._suppressed === true,
-					).length;
-					const reportLines = formatReviewForDisplay({
-						timestamp: safeTimestamp(job.startedAt),
-						files: Array.isArray(job.files) ? job.files : [],
-						findings,
-						summary: safeString(s.summary),
-						verdict,
-						criticalCount: safeNumber(s.criticalCount),
-						highCount: safeNumber(s.highCount),
-						mediumCount: safeNumber(s.mediumCount),
-						lowCount: safeNumber(s.lowCount),
-						nitCount: safeNumber(s.nitCount),
-						suppressedCount,
-					}).split("\n");
-					for (const rl of reportLines.slice(0, 40)) {
-						line += "\n" + theme.fg("dim", `  ${rl}`);
-					}
-					if (reportLines.length > 40) {
-						line +=
-							"\n" +
-							theme.fg("dim", `  ... (${reportLines.length - 40} more lines)`);
-					}
-				} catch (err) {
-					console.warn(
-						`${LOG_PREFIX} Failed rendering expanded review report: ${toErrorMessage(err)}`,
-					);
-					line +=
-						"\n  " + theme.fg("dim", "Review report could not be rendered.");
-				}
-			} else {
-				const summary = safeString(s?.summary);
-				if (summary) {
-					line += "\n  " + theme.fg("dim", `⎿  ${summary.slice(0, 80)}`);
-				}
-			}
-
-			return new Text(line, 0, 0);
-		},
-	);
-
-	function sendReviewNotification(piRef: ExtensionAPI, job: ReviewJob) {
-		const s = job.synthesisResult;
-		const findings = safeFindings(s);
-		const suppressedCount = findings.filter(
-			(f: any) => f._suppressed === true,
-		).length;
-		let report = "Review completed but synthesis produced no output.";
-		if (s) {
-			try {
-				report = formatReviewForDisplay({
-					timestamp: safeTimestamp(job.startedAt),
-					files: Array.isArray(job.files) ? job.files : [],
-					findings,
-					summary: safeString(s.summary),
-					verdict: safeString(s.verdict),
-					criticalCount: safeNumber(s.criticalCount),
-					highCount: safeNumber(s.highCount),
-					mediumCount: safeNumber(s.mediumCount),
-					lowCount: safeNumber(s.lowCount),
-					nitCount: safeNumber(s.nitCount),
-					suppressedCount,
-				});
-			} catch (err) {
-				warnExtensionError("formatting review notification", err, lastContext);
-				report = `Review completed, but report formatting failed: ${toErrorMessage(err)}`;
-			}
-		}
-		const lensErrors = safeLenses(job)
-			.map((lens) => {
-				const state = getLensState(job.states, lens);
-				return state?.status === "error"
-					? `- ${lens}: ${state.errorMessage ?? "lens failed"}`
-					: undefined;
-			})
-			.filter((line): line is string => line !== undefined);
-		if (lensErrors.length > 0) {
-			report += `\n## Review warnings\n${lensErrors.join("\n")}\n`;
-		}
-
-		// Shared with the widget completed summary and the message
-		// renderer via collectModelPairs() — see that helper for the
-		// empty/whitespace-skip and ordering rules.
-		const modelPairs = collectModelPairs(
-			lensStateEntries(job.states) as Iterable<
-				[string, { provider?: unknown; modelName?: unknown } | undefined]
-			>,
-		);
-		if (modelPairs.length > 0) {
-			report += `\n## Models used\n${modelPairs.map((m) => `- ${m}`).join("\n")}\n`;
-		}
-		// Health score as a top-level summary line so it's the first
-		// thing the user sees when the notification is rendered.
-		// typeof check (not safeNumber) so a missing score stays hidden
-		// instead of being rendered as a misleading "score 0/100".
-		if (typeof s?.healthScore === "number") {
-			report = `**Health score: ${s.healthScore}/100**\n\n` + report;
-		}
-
-		// Strip session objects (contain non-cloneable async handlers) before sending
-		// Convert Map to plain object for serialization (structured clone fails on Maps)
-		const serializableJob = {
-			...job,
-			states: Object.fromEntries(
-				lensStateEntries(job.states).map(([lens, state]) => [
-					lens,
-					{ ...state, session: undefined },
-				]),
-			),
-			synthesisSession: undefined,
-		};
-
-		void sendMessageSafely(
-			piRef,
-			{
-				customType: "drykiss-review-complete",
-				content: report,
-				display: true,
-				details: serializableJob as unknown as ReviewJob,
-			},
-			{ deliverAs: "followUp", triggerTurn: true },
-			"sending review notification",
-			lastContext,
-		);
-	}
 
 	// ── /drykiss — Full multi-lens KISS/DRY review ─────────
 	pi.registerCommand(COMMAND_NAME, {
