@@ -63,7 +63,7 @@ function makeMinimalCtx() {
 		{ name: "fallback", id: "fallback", provider: "mock" },
 	];
 	return {
-		cwd: "/tmp/test",
+		cwd: "/home/test",
 		hasUI: true,
 		modelRegistry: {
 			getAvailable: vi.fn().mockReturnValue(models),
@@ -108,7 +108,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -136,7 +136,7 @@ describe("ReviewManager", () => {
 		const id1 = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -150,7 +150,7 @@ describe("ReviewManager", () => {
 		const id2 = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -199,7 +199,7 @@ describe("ReviewManager", () => {
 		const result = await manager.runReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -229,7 +229,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -256,7 +256,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -289,7 +289,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -319,7 +319,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -370,7 +370,7 @@ describe("ReviewManager", () => {
 		const jobId = await manager.startReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -462,7 +462,7 @@ describe("ReviewManager", () => {
 		const result = await manager.runReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,
@@ -484,7 +484,7 @@ describe("ReviewManager", () => {
 		);
 		expect(mockRun).toHaveBeenCalledWith(
 			ctx,
-			"/tmp/test",
+			"/home/test",
 			expect.objectContaining({ id: "fallback" }),
 			expect.any(String),
 			expect.any(String),
@@ -537,7 +537,7 @@ describe("ReviewManager", () => {
 		const result = await manager.runReview(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			files,
 			diffs,
 			undefined,

@@ -182,13 +182,13 @@ describe("saveSessionLog", () => {
 
 describe("pathToFileLink", () => {
 	it("builds a file:// URL from an absolute path", () => {
-		const link = pathToFileLink("/tmp/foo.jsonl");
+		const link = pathToFileLink("/home/foo.jsonl");
 		expect(link.startsWith("file://")).toBe(true);
 		expect(link).toContain("foo.jsonl");
 	});
 
 	it("encodes special characters in the path", () => {
-		const link = pathToFileLink("/tmp/some dir/file.jsonl");
+		const link = pathToFileLink("/home/some dir/file.jsonl");
 		// Spaces and other unsafe characters should be percent-encoded.
 		expect(link).not.toMatch(/ /);
 	});

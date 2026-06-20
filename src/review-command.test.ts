@@ -238,7 +238,7 @@ describe("drykiss_autoreview tool", () => {
 			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
 		]);
 		const ctx = {
-			cwd: "/tmp/test",
+			cwd: "/home/test",
 			modelRegistry: { getAvailable: vi.fn().mockReturnValue([]) },
 		} as any;
 		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
@@ -272,7 +272,7 @@ describe("drykiss_autoreview tool", () => {
 		expect(manager.runReview).toHaveBeenCalledWith(
 			ctx,
 			pi,
-			"/tmp/test",
+			"/home/test",
 			expect.arrayContaining([expect.objectContaining({ path: "src/a.ts" })]),
 			expect.any(Map),
 			expect.any(Map),
@@ -300,7 +300,7 @@ describe("drykiss_autoreview tool", () => {
 		await expect(
 			executeDrykissAutoreviewTool(
 				{ mode: "local", maxFiles: 1 },
-				{ cwd: "/tmp/test" } as any,
+				{ cwd: "/home/test" } as any,
 				{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
 				manager,
 			),
@@ -318,7 +318,7 @@ describe("review command error handling", () => {
 		vi.clearAllMocks();
 
 		mockCtx = {
-			cwd: "/tmp/test",
+			cwd: "/home/test",
 			ui: {
 				notify: vi.fn(),
 				confirm: vi.fn().mockResolvedValue(true),

@@ -337,7 +337,7 @@ function extractExports(content: string, ext: string): string[] {
 	const seen = new Set<string>();
 
 	// TypeScript/JavaScript: export function/class/const/interface/type/enum name
-	// Handles optional 'async' keyword before function declarations
+	// Handles optional 'default', 'async', and generator (*) keywords.
 	const declRe =
 		/export\s+(?:default\s+)?(?:async\s+)?(?:function\s+(?:\*\s*)?|class\s+|const\s+|let\s+|var\s+|interface\s+|type\s+|enum\s+)(\w+)/g;
 	let m: RegExpExecArray | null;

@@ -189,7 +189,7 @@ describe("validateFinding — riskCode (Phase 1)", () => {
 
 describe("buildReviewResult", () => {
 	it("marks approve-with-no-findings as clean", () => {
-		const result = buildReviewResult(job({ reviewPath: "/tmp/review.json" }), {
+		const result = buildReviewResult(job({ reviewPath: "/home/review.json" }), {
 			target: { mode: "local", label: "local changes" },
 		});
 
@@ -197,7 +197,7 @@ describe("buildReviewResult", () => {
 		expect(result.status).toBe("done");
 		expect(result.verdict).toBe("Approve");
 		expect(result.target?.label).toBe("local changes");
-		expect(result.reportPath).toBe("/tmp/review.json");
+		expect(result.reportPath).toBe("/home/review.json");
 		expect(result.counts.total).toBe(0);
 		expect(result.errors).toEqual([]);
 	});
