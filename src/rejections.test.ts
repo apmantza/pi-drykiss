@@ -53,7 +53,7 @@ describe("tokenize", () => {
 	it("lower-cases and strips punctuation", () => {
 		const tokens = tokenize("Hello, World! Test123 alpha beta");
 		// 2-char tokens (ok, is, an, of) and stopwords (the, and, ...) are dropped
-		expect([...tokens].sort()).toEqual([
+		expect([...tokens].sort((a, b) => a.localeCompare(b))).toEqual([
 			"alpha",
 			"beta",
 			"hello",
@@ -64,7 +64,10 @@ describe("tokenize", () => {
 
 	it("drops short tokens and stopwords", () => {
 		const tokens = tokenize("the cat is on a mat");
-		expect([...tokens].sort()).toEqual(["cat", "mat"]);
+		expect([...tokens].sort((a, b) => a.localeCompare(b))).toEqual([
+			"cat",
+			"mat",
+		]);
 	});
 
 	it("returns an empty set for stopword-only input", () => {

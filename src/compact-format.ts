@@ -141,10 +141,11 @@ export function formatReviewResultCompact(
 		: "";
 	const findingsLine = `findings: ${counts.total} (${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low, ${counts.nit} nit${suppressedNote}${rejectedNote}${validatorNote})${validationNote}`;
 	const scoreLine = `health score: ${result.healthScore}/100`;
-	const trendLine =
-		result.prevScore != null
-			? `trend: ${result.prevScore} → ${result.healthScore} (${result.healthScore - result.prevScore >= 0 ? "+" : ""}${result.healthScore - result.prevScore})`
-			: "";
+	let trendLine = "";
+	if (result.prevScore != null) {
+		const diff = result.healthScore - result.prevScore;
+		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${diff >= 0 ? "+" : ""}${diff})`;
+	}
 	const qualityGate =
 		result.healthScore < threshold
 			? "⛔ quality gate: FAIL"

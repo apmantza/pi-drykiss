@@ -756,8 +756,10 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 		//   - `format` (output override)
 		const { DrykissAutoreviewParams } = await import("./review-command.js");
 		const props = Object.keys((DrykissAutoreviewParams as any).properties);
-		expect(props.sort()).toEqual(
-			["mode", "files", "base", "commit", "pr", "lenses", "format"].sort(),
+		expect(props.sort((a, b) => a.localeCompare(b))).toEqual(
+			["mode", "files", "base", "commit", "pr", "lenses", "format"].sort(
+				(a, b) => a.localeCompare(b),
+			),
 		);
 	});
 
@@ -768,16 +770,10 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 		const literals = modeSchema.anyOf.map((s: any) => s.const);
 		expect(literals).not.toContain("auto");
 		// Confirm the agent-facing modes are exactly these seven.
-		expect(literals.sort()).toEqual(
-			[
-				"local",
-				"staged",
-				"branch",
-				"commit",
-				"pr",
-				"full",
-				"files",
-			].sort(),
+		expect(literals.sort((a: string, b: string) => a.localeCompare(b))).toEqual(
+			["local", "staged", "branch", "commit", "pr", "full", "files"].sort(
+				(a, b) => a.localeCompare(b),
+			),
 		);
 	});
 
@@ -785,6 +781,8 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 		// Same slim-down principle for the single-lens tool.
 		const { DrykissReviewParams } = await import("./review-command.js");
 		const props = Object.keys((DrykissReviewParams as any).properties);
-		expect(props.sort()).toEqual(["lens", "files"].sort());
+		expect(props.sort((a, b) => a.localeCompare(b))).toEqual(
+			["lens", "files"].sort((a, b) => a.localeCompare(b)),
+		);
 	});
 });

@@ -155,7 +155,7 @@ function materializeBucket(b: InternalBucket): FindingBucket {
 			representative = m;
 		}
 	}
-	const contributingLenses = [...b.lenses].sort();
+	const contributingLenses = [...b.lenses].sort((a, b) => a.localeCompare(b));
 	return {
 		representative,
 		members: b.members,

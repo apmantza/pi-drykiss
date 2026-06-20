@@ -163,9 +163,9 @@ function applySuccessfulLensOutput(
 }
 
 export class ReviewManager {
-	private jobs = new Map<string, ReviewJob>();
-	private onUpdate?: OnReviewUpdate;
-	private onComplete?: OnReviewComplete;
+	private readonly jobs = new Map<string, ReviewJob>();
+	private readonly onUpdate?: OnReviewUpdate;
+	private readonly onComplete?: OnReviewComplete;
 
 	/** Queue of lens review tasks waiting for a slot. */
 	private taskQueue: {
@@ -182,10 +182,10 @@ export class ReviewManager {
 	private runningCount = 0;
 
 	/** Abort controllers per job for cancelling running sessions. */
-	private abortControllers = new Map<string, AbortController>();
+	private readonly abortControllers = new Map<string, AbortController>();
 
 	/** Locks to prevent concurrent synthesis runs for the same job. */
-	private synthesisLocks = new Set<string>();
+	private readonly synthesisLocks = new Set<string>();
 	/**
 	 * When a subagent fails with a model error (quota/auth/5xx), prompt the user to
 	 * select a different model and retry. If autorouting is configured, skip the prompt

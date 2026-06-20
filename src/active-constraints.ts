@@ -55,8 +55,11 @@ export function buildActiveConstraints(rt: RiskTargeting | undefined): string {
 	}
 
 	if (rt.ignore && rt.ignore.length > 0) {
+		const formatted = rt.ignore
+			.map((g) => `\`${sanitizeInline(g)}\``)
+			.join(", ");
 		lines.push(
-			`- IGNORED file globs (do NOT report findings in files matching): ${rt.ignore.map((g) => `\`${sanitizeInline(g)}\``).join(", ")}`,
+			`- IGNORED file globs (do NOT report findings in files matching): ${formatted}`,
 		);
 	}
 

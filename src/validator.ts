@@ -105,12 +105,14 @@ export function parseValidatorOutput(
 		if (typeof entry !== "object" || entry === null) continue;
 		const record = entry as Record<string, unknown>;
 		if (typeof record.id !== "number" || !Number.isInteger(record.id)) continue;
-		const verdict =
-			record.verdict === "real"
-				? "real"
-				: record.verdict === "false-positive"
-					? "false-positive"
-					: null;
+		let verdict: "real" | "false-positive" | null;
+		if (record.verdict === "real") {
+			verdict = "real";
+		} else if (record.verdict === "false-positive") {
+			verdict = "false-positive";
+		} else {
+			verdict = null;
+		}
 		if (!verdict) continue;
 		const confidence =
 			typeof record.confidence === "number" &&

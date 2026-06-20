@@ -94,7 +94,7 @@ export function collectModelPairs(
 		if (!prov && !name) continue;
 		pairs.add(prov && name ? `${prov}/${name}` : prov || name);
 	}
-	return [...pairs].sort();
+	return [...pairs].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -199,14 +199,15 @@ export function formatFinding(
 		}
 	}
 	if (finding.riskCode) {
-		lines.push(
-			`${indent}${theme.fg("dim", `[riskCode: ${finding.riskCode}]`)}`,
-		);
+		const riskTag = theme.fg("dim", `[riskCode: ${finding.riskCode}]`);
+		lines.push(`${indent}${riskTag}`);
 	}
 	if (finding._validatorJustification) {
-		lines.push(
-			`${indent}${theme.fg("dim", `Validator: ${stripAnsi(finding._validatorJustification)}`)}`,
+		const validatorMsg = theme.fg(
+			"dim",
+			`Validator: ${stripAnsi(finding._validatorJustification)}`,
 		);
+		lines.push(`${indent}${validatorMsg}`);
 	}
 	return lines.join("\n");
 }
@@ -239,7 +240,7 @@ type Theme = {
 
 export class ReviewProgressWidget {
 	private uiCtx: any;
-	private widgetKey = "drykiss-review";
+	private readonly widgetKey = "drykiss-review";
 	private widgetRegistered = false;
 	private tui: any;
 	private timer: ReturnType<typeof setInterval> | undefined;
@@ -335,22 +336,26 @@ export class ReviewProgressWidget {
 			}
 
 			if (job.synthesisStatus !== "idle") {
-				const icon =
-					job.synthesisStatus === "running"
-						? theme.fg("accent", frame)
-						: job.synthesisStatus === "error"
-							? theme.fg("error", "✗")
-							: theme.fg("success", "✓");
+				let icon;
+				if (job.synthesisStatus === "running") {
+					icon = theme.fg("accent", frame);
+				} else if (job.synthesisStatus === "error") {
+					icon = theme.fg("error", "✗");
+				} else {
+					icon = theme.fg("success", "✓");
+				}
 				const synthElapsed =
 					job.synthesisStatus === "running" && job.synthesisStartedAt
 						? ` · ${formatElapsed(Date.now() - job.synthesisStartedAt)}`
 						: "";
-				const statusText =
-					job.synthesisStatus === "running"
-						? theme.fg("accent", `running${synthElapsed}`)
-						: job.synthesisStatus === "error"
-							? theme.fg("error", "failed")
-							: theme.fg("dim", "done");
+				let statusText;
+				if (job.synthesisStatus === "running") {
+					statusText = theme.fg("accent", `running${synthElapsed}`);
+				} else if (job.synthesisStatus === "error") {
+					statusText = theme.fg("error", "failed");
+				} else {
+					statusText = theme.fg("dim", "done");
+				}
 				lines.push(
 					truncate(
 						`${theme.fg("dim", "└─")} ${icon} ${theme.bold("Synthesis")} · ${statusText}`,

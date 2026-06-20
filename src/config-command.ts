@@ -24,9 +24,10 @@ function formatAutoreview(
 	config: Awaited<ReturnType<typeof loadConfig>>,
 ): string[] {
 	const auto = config.autoreview;
+	const baseSuffix = auto?.base ? ` (base: ${auto.base})` : "";
 	return [
 		`**Autoreview at agent_end:** ${auto?.enabled === true ? "enabled" : "disabled"}`,
-		`**Autoreview mode:** ${auto?.mode ?? "local"}${auto?.base ? ` (base: ${auto.base})` : ""}`,
+		`**Autoreview mode:** ${auto?.mode ?? "local"}${baseSuffix}`,
 		`**Autoreview confirm:** ${auto?.confirmBeforeRun === false ? "disabled" : "enabled"}`,
 		`**Autoreview max files:** ${auto?.maxFiles ?? 20}`,
 		`**Autoreview cooldown:** ${auto?.cooldownMs ?? 60000}ms`,
@@ -333,8 +334,11 @@ export async function handleConfigCommand(
 			};
 			if (tokens[2]) config.autoreview.base = tokens[2];
 			await saveConfig(config);
+			const baseNote = config.autoreview.base
+				? ` (base: ${config.autoreview.base})`
+				: "";
 			ctx.ui.notify(
-				`Autoreview mode set to ${config.autoreview.mode}${config.autoreview.base ? ` (base: ${config.autoreview.base})` : ""}.`,
+				`Autoreview mode set to ${config.autoreview.mode}${baseNote}.`,
 				"info",
 			);
 		} catch (err) {
@@ -437,7 +441,7 @@ export async function handleSuppressCommand(
 	// Validate risk code
 	if (riskCode !== "*" && !VALID_RISK_CODES.has(riskCode)) {
 		ctx.ui.notify(
-			`Invalid risk code: ${riskCode}. Valid codes: ${[...VALID_RISK_CODES].sort().join(", ")} or "*" for all.`,
+			`Invalid risk code: ${riskCode}. Valid codes: ${[...VALID_RISK_CODES].sort((a, b) => a.localeCompare(b)).join(", ")} or "*" for all.`,
 			"error",
 		);
 		return;
@@ -504,8 +508,9 @@ export async function handleSuppressCommand(
 				? ` (${expiredIds.length} expired suppression(s) present)`
 				: "";
 
+		const expiresNote = expiresAt ? ` (expires ${expiresAt})` : "";
 		ctx.ui.notify(
-			`Suppression added: ${riskCode} on ${pattern} — "${reason}"${expiresAt ? ` (expires ${expiresAt})` : ""}${expiredMsg}`,
+			`Suppression added: ${riskCode} on ${pattern} — "${reason}"${expiresNote}${expiredMsg}`,
 			"info",
 		);
 	} catch (err) {

@@ -371,8 +371,10 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderCall(args: any, theme: any) {
-			const mode =
-				args.mode ?? (args.pr ? "pr" : args.files ? "files" : "local");
+			let mode = args.mode;
+			if (!mode) {
+				mode = args.pr ? "pr" : args.files ? "files" : "local";
+			}
 			const target = args.pr ?? args.base ?? args.commit ?? "";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("drykiss_autoreview ")) +
@@ -394,13 +396,12 @@ export default function (pi: ExtensionAPI): void {
 			// summary — 80/50 thresholds so the rule is learned once.
 			const hs = review?.healthScore;
 			const hasScore = typeof hs === "number";
-			const scoreText = hasScore
-				? (() => {
-						const scoreColor =
-							hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
-						return theme.fg(scoreColor, `, score ${hs}/100`);
-					})()
-				: "";
+			let scoreText = "";
+			if (hasScore) {
+				const scoreColor =
+					hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
+				scoreText = theme.fg(scoreColor, `, score ${hs}/100`);
+			}
 			return new Text(
 				`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
 					theme.fg(
@@ -471,12 +472,14 @@ export default function (pi: ExtensionAPI): void {
 				(f: any) => f.severity === "critical",
 			).length;
 			const high = findings.filter((f: any) => f.severity === "high").length;
-			const icon =
-				critical > 0
-					? theme.fg("error", "✗")
-					: high > 0
-						? theme.fg("warning", "◐")
-						: theme.fg("success", "✓");
+			let icon;
+			if (critical > 0) {
+				icon = theme.fg("error", "✗");
+			} else if (high > 0) {
+				icon = theme.fg("warning", "◐");
+			} else {
+				icon = theme.fg("success", "✓");
+			}
 			return new Text(
 				`${icon} ${theme.fg("accent", findings.length + " finding(s)")}` +
 					theme.fg("dim", ` (${critical} critical, ${high} high)`),

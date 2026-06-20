@@ -738,12 +738,14 @@ export async function handleJobsCommand(
 			const s = j.states.get(l)!;
 			return s.status === "done" || s.status === "error";
 		}).length;
-		const status =
-			j.overallStatus === "running"
-				? "● running"
-				: j.overallStatus === "error"
-					? "✗ error"
-					: "✓ done";
+		let status;
+		if (j.overallStatus === "running") {
+			status = "● running";
+		} else if (j.overallStatus === "error") {
+			status = "✗ error";
+		} else {
+			status = "✓ done";
+		}
 		const fileCount = j.files.length;
 		const dur = j.completedAt
 			? `${((j.completedAt - j.startedAt) / 1000).toFixed(1)}s`
@@ -827,14 +829,20 @@ export const DrykissAutoreviewParams = Type.Object({
 	),
 	base: Type.Optional(
 		Type.String({
-			description: "Base ref for branch reviews, e.g. origin/main (only when mode=branch)",
+			description:
+				"Base ref for branch reviews, e.g. origin/main (only when mode=branch)",
 		}),
 	),
 	commit: Type.Optional(
-		Type.String({ description: "Commit ref for commit reviews (only when mode=commit)" }),
+		Type.String({
+			description: "Commit ref for commit reviews (only when mode=commit)",
+		}),
 	),
 	pr: Type.Optional(
-		Type.String({ description: "GitHub PR URL, owner/repo#123, or PR number (only when mode=pr)" }),
+		Type.String({
+			description:
+				"GitHub PR URL, owner/repo#123, or PR number (only when mode=pr)",
+		}),
 	),
 	lenses: Type.Optional(
 		Type.Union([
@@ -1111,14 +1119,16 @@ function formatReviewProgress(job: ReviewJob): string {
 		(lens) => job.states.get(lens)?.status === "error",
 	).length;
 	const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
-	const synthesis =
-		job.synthesisStatus === "running"
-			? " · synthesis running"
-			: job.synthesisStatus === "done"
-				? " · synthesis done"
-				: job.synthesisStatus === "error"
-					? " · synthesis error"
-					: "";
+	let synthesis;
+	if (job.synthesisStatus === "running") {
+		synthesis = " · synthesis running";
+	} else if (job.synthesisStatus === "done") {
+		synthesis = " · synthesis done";
+	} else if (job.synthesisStatus === "error") {
+		synthesis = " · synthesis error";
+	} else {
+		synthesis = "";
+	}
 	const runningText = running.length ? ` · running: ${running.join(", ")}` : "";
 	const errorText = errored ? ` · ${errored} error(s)` : "";
 	return `DRYKISS autoreview progress: ${done}/${job.lenses.length} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
@@ -1147,10 +1157,12 @@ function formatReviewResultForTool(
 	const scoreLine = `health score: ${result.healthScore}/100`;
 	const breakdown = result.scoreBreakdown;
 	const scoreDetail = `(critical: ${breakdown.critical}, warning: ${breakdown.warning}, suggestion: ${breakdown.suggestion})`;
-	const trendLine =
-		result.prevScore != null
-			? `trend: ${result.prevScore} → ${result.healthScore} (${result.healthScore - result.prevScore >= 0 ? "+" : ""}${result.healthScore - result.prevScore})`
-			: "";
+	let trendLine = "";
+	if (result.prevScore != null) {
+		const diff = result.healthScore - result.prevScore;
+		const sign = diff >= 0 ? "+" : "";
+		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${sign}${diff})`;
+	}
 	const qualityGate =
 		result.healthScore < threshold
 			? "⛔ quality gate: FAIL"
@@ -1411,8 +1423,14 @@ async function runDeepAutoreview(
 			scoreBreakdown.warning * 5 -
 			scoreBreakdown.suggestion * 1,
 	);
-	const verdict: "Approve" | "Request changes" | "Needs security review" =
-		critical > 0 ? "Request changes" : high > 0 ? "Request changes" : "Approve";
+	let verdict: "Approve" | "Request changes" | "Needs security review";
+	if (critical > 0) {
+		verdict = "Request changes";
+	} else if (high > 0) {
+		verdict = "Request changes";
+	} else {
+		verdict = "Approve";
+	}
 
 	const reviewResult: ReviewResult = {
 		jobId: "deep",

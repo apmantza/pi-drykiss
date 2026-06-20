@@ -16,10 +16,10 @@ export class ConversationViewer implements Component {
 	private viewportHeight = 24;
 
 	constructor(
-		private tui: TUI,
-		private theme: any,
-		private done: (_result?: undefined) => void,
-		private job: ReviewJob,
+		private readonly tui: TUI,
+		private readonly theme: any,
+		private readonly done: (_result?: undefined) => void,
+		private readonly job: ReviewJob,
 	) {
 		this.rebuildLines();
 		this.viewportHeight = Math.max(10, (tui.terminal?.rows ?? 30) - 6);

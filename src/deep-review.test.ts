@@ -596,9 +596,7 @@ describe("runDeepReview (full pipeline)", () => {
 	});
 });
 
-// Reference PASS_PLAN to suppress the unused-import warning. It's
-// exported for use in production code that wants the same canned plan.
+// Re-export PASS_PLAN so it's reachable from production code that wants
+// the same canned plan. The export itself acts as the reference, so no
+// additional suppression is needed.
 export { PASS_PLAN };
-// Suppress unused-import warning when this file is loaded but PASS_PLAN
-// isn't used in production code paths.
-void PASS_PLAN;

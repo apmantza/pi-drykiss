@@ -73,10 +73,8 @@ export async function resolveModelSmart(
 			// Always save as default so remaining lenses don't re-prompt
 			config.defaultModel = `${selected.provider}/${selected.id}`;
 			await saveConfig(config);
-			ctx.ui.notify(
-				`Saved ${selected.name} as default${lens ? ` for ${lens}` : ""}.`,
-				"info",
-			);
+			const lensNote = lens ? ` for ${lens}` : "";
+			ctx.ui.notify(`Saved ${selected.name} as default${lensNote}.`, "info");
 			return selected;
 		}
 	}

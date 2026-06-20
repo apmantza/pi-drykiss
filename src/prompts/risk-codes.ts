@@ -215,5 +215,6 @@ export const VALID_RISK_CODES: ReadonlySet<string> = new Set(
 );
 
 /** All valid risk codes as a sorted array (alphabetical). */
-export const VALID_RISK_CODES_SORTED: readonly string[] =
-	Object.keys(RISK_CODES).sort();
+export const VALID_RISK_CODES_SORTED: readonly string[] = Object.keys(
+	RISK_CODES,
+).sort((a, b) => a.localeCompare(b));

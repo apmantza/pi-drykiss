@@ -282,9 +282,9 @@ describe("formatReviewResultCompact", () => {
 
 	it("includes the report path when present", () => {
 		const text = formatReviewResultCompact(
-			reviewResult({ reportPath: "/tmp/review.json" }),
+			reviewResult({ reportPath: "/home/user/review.json" }),
 		);
-		expect(text).toContain("report: /tmp/review.json");
+		expect(text).toContain("report: /home/user/review.json");
 	});
 
 	it("includes errors when present", () => {
