@@ -1,3 +1,4 @@
+import { extractBalancedJson } from "./json-extract.js";
 import { lenientJsonParse, sanitizeJsonString } from "./json-utils.js";
 import { parseFindingsArray, type Finding, type ReviewLens } from "./types.js";
 
@@ -81,50 +82,6 @@ function looksLikeFinding(obj: Record<string, unknown>): boolean {
 	if (!hasContent) return false;
 	const severity = String(obj.severity);
 	return ["critical", "high", "medium", "low", "nit"].includes(severity);
-}
-
-function extractBalancedJson(
-	raw: string,
-	open: string,
-	close: string,
-): string | null {
-	let start = -1;
-	for (let i = 0; i < raw.length; i++) {
-		if (raw[i] === open) {
-			start = i;
-			break;
-		}
-	}
-	if (start === -1) return null;
-
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	for (let i = start; i < raw.length; i++) {
-		const ch = raw[i];
-		if (escaped) {
-			escaped = false;
-			continue;
-		}
-		if (ch === "\\" && inString) {
-			escaped = true;
-			continue;
-		}
-		if (ch === '"' && !escaped) {
-			inString = !inString;
-			continue;
-		}
-		if (inString) continue;
-		if (ch === open) {
-			depth++;
-		} else if (ch === close) {
-			depth--;
-			if (depth === 0) {
-				return raw.slice(start, i + 1);
-			}
-		}
-	}
-	return null;
 }
 
 export function parseFindingsJson(

@@ -47,6 +47,12 @@ export interface ResolveReviewScopeOptions {
 	readonly needsProjectIndex?: boolean;
 	/** Glob patterns for files to exclude from the review scope. */
 	readonly ignorePatterns?: readonly string[];
+	/** Optional progress callback for per-file scope preparation. */
+	readonly onFileProgress?: (
+		completed: number,
+		total: number,
+		label: string,
+	) => void;
 }
 
 export interface ReviewScope {
@@ -95,9 +101,17 @@ export async function resolveReviewScope(
 		mode === "full"
 			? await getAllSourceFiles(cwd, options.ignorePatterns)
 			: await getChangedFiles(pi, cwd, reviewOptions, options.ignorePatterns);
-	const diffs = await gatherDiffs(pi, cwd, files, reviewOptions);
+	const diffs = await gatherDiffs(
+		pi,
+		cwd,
+		files,
+		reviewOptions,
+		options.onFileProgress,
+	);
 	const contents =
-		contextMode !== "diff" ? await gatherContents(cwd, files) : undefined;
+		contextMode !== "diff"
+			? await gatherContents(cwd, files, options.onFileProgress)
+			: undefined;
 	const projectIndex =
 		options.needsProjectIndex && contextMode !== "diff"
 			? await getProjectIndex(
@@ -153,15 +167,25 @@ async function gatherDiffs(
 	cwd: string,
 	files: ChangedFile[],
 	options: ReviewOptions,
+	onProgress?: (completed: number, total: number, label: string) => void,
 ): Promise<Map<string, string>> {
 	const diffs = new Map<string, string>();
+	let completed = 0;
 	for (const file of files) {
 		try {
 			diffs.set(file.path, await getFileDiff(pi, cwd, file.path, options));
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(`${LOG_PREFIX} Failed to get diff for ${file.path}:`, msg);
+			console.error(
+				"%s Failed to get diff for %s: %s",
+				LOG_PREFIX,
+				file.path,
+				msg,
+			);
 			diffs.set(file.path, "(diff unavailable)");
+		} finally {
+			completed += 1;
+			onProgress?.(completed, files.length, "Preparing diffs");
 		}
 	}
 	return diffs;
@@ -170,15 +194,25 @@ async function gatherDiffs(
 async function gatherContents(
 	cwd: string,
 	files: ChangedFile[],
+	onProgress?: (completed: number, total: number, label: string) => void,
 ): Promise<Map<string, FileContent>> {
 	const contents = new Map<string, FileContent>();
+	let completed = 0;
 	for (const file of files) {
 		try {
 			const result = await getFileContent(cwd, file.path);
 			if (result) contents.set(file.path, result);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(`${LOG_PREFIX} Skipping content for ${file.path}:`, msg);
+			console.warn(
+				"%s Skipping content for %s: %s",
+				LOG_PREFIX,
+				file.path,
+				msg,
+			);
+		} finally {
+			completed += 1;
+			onProgress?.(completed, files.length, "Loading file contents");
 		}
 	}
 	return contents;

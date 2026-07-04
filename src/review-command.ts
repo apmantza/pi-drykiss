@@ -48,7 +48,7 @@ export const TESTS_COMMAND_NAME = "drykiss-tests";
 export const SECURITY_COMMAND_NAME = "drykiss-security";
 export const DOCS_COMMAND_NAME = "drykiss-docs";
 
-const MAX_FILES = 20;
+const MAX_FILES = 40;
 
 export interface ParsedArgs extends ReviewOptions {
 	readonly model?: string;
@@ -294,13 +294,17 @@ async function prepareReview(
 
 function safeOnUpdate(
 	onUpdate:
-		| ((result: { content: Array<{ type: "text"; text: string }> }) => void)
+		| ((result: {
+				content: Array<{ type: "text"; text: string }>;
+				details?: unknown;
+		  }) => void)
 		| undefined,
 	text: string,
+	details?: unknown,
 ): void {
 	if (!onUpdate) return;
 	try {
-		onUpdate({ content: [{ type: "text", text }] });
+		onUpdate({ content: [{ type: "text", text }], details });
 	} catch (err) {
 		console.warn(
 			`${LOG_PREFIX} onUpdate callback failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -956,6 +960,7 @@ export async function executeDrykissAutoreviewTool(
 	signal?: AbortSignal,
 	onUpdate?: (result: {
 		content: Array<{ type: "text"; text: string }>;
+		details?: unknown;
 	}) => void,
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
@@ -972,6 +977,7 @@ export async function executeDrykissAutoreviewTool(
 	const contextMode =
 		params.contextMode ?? effectiveConfig.contextMode ?? "full";
 	const lenses = normalizeAutoreviewLenses(params.lenses);
+	const fileProgress = makeAutoreviewFileProgress(onUpdate);
 	const scope = await resolveReviewScope(
 		pi,
 		ctx.cwd,
@@ -987,18 +993,20 @@ export async function executeDrykissAutoreviewTool(
 			needsProjectIndex:
 				lenses.includes("deduplication") || lenses.includes("architecture"),
 			ignorePatterns: effectiveConfig.ignorePatterns,
+			onFileProgress: fileProgress,
 		},
 	);
 
-	const maxFiles = params.maxFiles ?? MAX_FILES;
+	const maxFiles =
+		params.maxFiles ?? effectiveConfig.autoreview?.maxFiles ?? MAX_FILES;
 	if (scope.files.length === 0) {
 		throw new Error("No files found for DRYKISS autoreview.");
 	}
-	if (scope.files.length > maxFiles) {
-		throw new Error(
-			`DRYKISS autoreview scope has ${scope.files.length} files, over the maxFiles limit (${maxFiles}). Narrow the scope or raise maxFiles.`,
-		);
-	}
+	const cappedScope = capReviewScope(scope, maxFiles);
+	const capNote =
+		cappedScope.files.length < scope.files.length
+			? ` · capped to ${cappedScope.files.length}/${scope.files.length} file(s) by autoreview.maxFiles`
+			: "";
 
 	// Deep mode: Bugbot-style pipeline for a single lens. Skips the
 	// standard multi-lens flow and synthesis entirely; returns the
@@ -1008,13 +1016,13 @@ export async function executeDrykissAutoreviewTool(
 			content: [
 				{
 					type: "text",
-					text: `Starting DRYKISS deep-${params.deep} review for ${scope.label} (${scope.files.length} file(s))...`,
+					text: `Starting DRYKISS deep-${params.deep} review for ${cappedScope.label} (${cappedScope.files.length} file(s))${capNote}...`,
 				},
 			],
 		});
 		return runDeepAutoreview(
 			ctx,
-			scope,
+			cappedScope,
 			{
 				deep: params.deep,
 				deepPasses: params.deepPasses,
@@ -1030,7 +1038,7 @@ export async function executeDrykissAutoreviewTool(
 
 	safeOnUpdate(
 		onUpdate,
-		`DRYKISS autoreview progress: [${"░".repeat(10)}] 0/${lenses.length} lens(es) complete · starting ${scope.label} (${scope.files.length} file(s))`,
+		`DRYKISS autoreview progress: [${"░".repeat(10)}] 0/${lenses.length} lens(es) complete · starting ${cappedScope.label} (${cappedScope.files.length} file(s))${capNote}`,
 	);
 
 	// Build active risk-targeting constraints for the lens system prompts.
@@ -1048,17 +1056,17 @@ export async function executeDrykissAutoreviewTool(
 		ctx,
 		pi,
 		ctx.cwd,
-		scope.files,
-		scope.diffs,
-		scope.contents,
-		scope.projectIndex,
+		cappedScope.files,
+		cappedScope.diffs,
+		cappedScope.contents,
+		cappedScope.projectIndex,
 		{
 			model: params.model,
 			lenses,
 			target: {
-				mode: scope.mode,
-				label: scope.label,
-				metadata: scope.metadata,
+				mode: cappedScope.mode,
+				label: cappedScope.label,
+				metadata: cappedScope.metadata,
 			},
 			severityOverrides: effectiveConfig.riskTargeting?.severity,
 			suppressions,
@@ -1144,6 +1152,62 @@ function normalizeAutoreviewLenses(
 	return value.length > 0 ? value : [...LENS_NAMES];
 }
 
+function renderAutoreviewFileProgress(
+	completed: number,
+	total: number,
+	label: string,
+): string {
+	const pct =
+		total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+	const width = 20;
+	const filled = Math.round((pct / 100) * width);
+	const bar = "█".repeat(filled) + "░".repeat(Math.max(0, width - filled));
+	return `${label}… [${bar}] ${completed}/${total} (${pct}%)`;
+}
+
+function makeAutoreviewFileProgress(
+	onUpdate:
+		| ((result: {
+				content: Array<{ type: "text"; text: string }>;
+				details?: unknown;
+		  }) => void)
+		| undefined,
+): ((completed: number, total: number, label: string) => void) | undefined {
+	if (!onUpdate) return undefined;
+	let lastEmit = 0;
+	return (completed, total, label) => {
+		const now = Date.now();
+		if (completed < total && now - lastEmit < 250) return;
+		lastEmit = now;
+		safeOnUpdate(
+			onUpdate,
+			renderAutoreviewFileProgress(completed, total, label),
+			{ phase: "scoping", completed, total, label },
+		);
+	};
+}
+
+function capReviewScope(scope: ReviewScope, maxFiles: number): ReviewScope {
+	const limit = Math.max(1, Math.floor(maxFiles));
+	if (scope.files.length <= limit) return scope;
+	const files = scope.files.slice(0, limit);
+	const allowed = new Set(files.map((file) => file.path));
+	return {
+		...scope,
+		label: `${scope.label} (first ${limit} of ${scope.files.length} files)`,
+		files,
+		diffs: new Map([...scope.diffs].filter(([path]) => allowed.has(path))),
+		contents: scope.contents
+			? new Map([...scope.contents].filter(([path]) => allowed.has(path)))
+			: undefined,
+		metadata: {
+			...scope.metadata,
+			cappedFromFileCount: scope.files.length,
+			maxFiles: limit,
+		},
+	};
+}
+
 function formatReviewProgress(job: ReviewJob): string {
 	const total = job.lenses.length;
 	const done = job.lenses.filter((lens) => {
@@ -1215,7 +1279,7 @@ function formatReviewResultForTool(
 	const breakdown = result.scoreBreakdown;
 	const scoreDetail = `(critical: ${breakdown.critical}, warning: ${breakdown.warning}, suggestion: ${breakdown.suggestion})`;
 	let trendLine = "";
-	if (result.prevScore != null) {
+	if (result.prevScore !== null && result.prevScore !== undefined) {
 		const diff = result.healthScore - result.prevScore;
 		const sign = diff >= 0 ? "+" : "";
 		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${sign}${diff})`;

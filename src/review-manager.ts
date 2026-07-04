@@ -354,9 +354,7 @@ export class ReviewManager {
 			}
 
 			// Start draining
-			this.drain(ctx, pi, cwd).catch((err) => {
-				console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
-			});
+			this.drain(ctx, pi, cwd).catch(this.logDrainFailure);
 			return id;
 		} catch (err) {
 			// If anything fails after adding the job, clean up so no stale
@@ -399,12 +397,14 @@ export class ReviewManager {
 					 * runningCount bookkeeping. Without the re-drain call here
 					 * the queue would stall as soon as any task rejected. */
 					this.runningCount--;
-					this.drain(ctx, pi, cwd).catch((err) => {
-						console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
-					});
+					this.drain(ctx, pi, cwd).catch(this.logDrainFailure);
 				});
 		}
 	}
+
+	private readonly logDrainFailure = (err: unknown): void => {
+		console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
+	};
 
 	private async runLens(
 		ctx: ExtensionContext,
@@ -454,7 +454,9 @@ export class ReviewManager {
 			state.logPath = await saveSessionLog(job.id, task.lens, result.session);
 		} catch (err) {
 			console.warn(
-				`${LOG_PREFIX} Failed to save session log for ${task.lens}:`,
+				"%s Failed to save session log for %s: %s",
+				LOG_PREFIX,
+				task.lens,
 				err instanceof Error ? err.message : String(err),
 			);
 		}
@@ -510,7 +512,9 @@ export class ReviewManager {
 						);
 					} catch (err) {
 						console.warn(
-							`${LOG_PREFIX} Failed to save session log for ${task.lens}:`,
+							"%s Failed to save session log for %s: %s",
+							LOG_PREFIX,
+							task.lens,
 							err instanceof Error ? err.message : String(err),
 						);
 					}
@@ -585,7 +589,7 @@ export class ReviewManager {
 
 		// Keep draining - catch errors to prevent unhandled rejections
 		this.drain(ctx, pi, cwd).catch((err) => {
-			console.warn(`${LOG_PREFIX} Review queue drain failed:`, err);
+			console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
 		});
 	}
 
@@ -617,7 +621,8 @@ export class ReviewManager {
 				await buildBucketedSynthesisPrompt(lensReviews));
 		} catch (err) {
 			console.warn(
-				`${LOG_PREFIX} Bucketed synthesis prompt failed, falling back to raw:`,
+				"%s Bucketed synthesis prompt failed, falling back to raw:",
+				LOG_PREFIX,
 				err,
 			);
 			({ systemPrompt, userPrompt } = await buildSynthesisPrompt(

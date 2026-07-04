@@ -111,7 +111,7 @@ export interface DrykissAutoreviewConfig {
 		| "tests"
 		| "security"
 	>;
-	/** Maximum files allowed for automatic review. Defaults to 20. */
+	/** Maximum files reviewed per autoreview run. Defaults to 40. */
 	maxFiles?: number;
 	/** Override context mode for automatic reviews. */
 	contextMode?: "diff" | "full";
@@ -233,11 +233,14 @@ export async function loadConfig(): Promise<DrykissConfig> {
  * the original loadConfig behaviour).
  */
 /** Default config values used when no config file exists. */
-const DEFAULT_CONFIG: Pick<DrykissConfig, "interactive" | "confirmBeforeRun"> =
-	{
-		interactive: true,
-		confirmBeforeRun: true,
-	};
+const DEFAULT_CONFIG: Pick<
+	DrykissConfig,
+	"interactive" | "confirmBeforeRun" | "autoreview"
+> = {
+	interactive: true,
+	confirmBeforeRun: true,
+	autoreview: { maxFiles: 40 },
+};
 
 /**
  * Deduplicate suppression entries by id (preferred) or by riskCode+pattern.
@@ -270,9 +273,15 @@ export async function loadEffectiveConfig(
 		const projectPath = getProjectConfigPath(cwd);
 		const projectConfig = await loadConfigFile(projectPath, warnings);
 		if (projectConfig) {
+			const baseConfig = globalConfig ?? DEFAULT_CONFIG;
 			config = {
-				...(globalConfig ?? DEFAULT_CONFIG),
+				...baseConfig,
 				...projectConfig,
+				autoreview: {
+					...DEFAULT_CONFIG.autoreview,
+					...baseConfig.autoreview,
+					...projectConfig.autoreview,
+				},
 				suppressions: deduplicateSuppressions([
 					...(globalConfig?.suppressions ?? []),
 					...(projectConfig.suppressions ?? []),
@@ -347,6 +356,10 @@ export async function loadEffectiveConfig(
 	return {
 		config: {
 			...config,
+			autoreview: {
+				...DEFAULT_CONFIG.autoreview,
+				...config.autoreview,
+			},
 			...(rt
 				? {
 						riskTargeting: {

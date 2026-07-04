@@ -137,13 +137,14 @@ async function removeOldSentinels(dir: string): Promise<void> {
 	try {
 		const entries = await readdir(dir);
 		await Promise.all(
-			entries
-				.filter(
-					(name) =>
-						name.startsWith(SENTINEL_PREFIX) &&
-						name !== `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`,
-				)
-				.map((name) =>
+			entries.flatMap((name) => {
+				if (
+					!name.startsWith(SENTINEL_PREFIX) ||
+					name === `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`
+				) {
+					return [];
+				}
+				return [
 					writeFile(join(dir, name), "", "utf8")
 						.then(() => undefined)
 						.catch((err) => {
@@ -152,7 +153,8 @@ async function removeOldSentinels(dir: string): Promise<void> {
 							);
 							return undefined;
 						}),
-				),
+				];
+			}),
 		);
 	} catch (err) {
 		if (getNodeErrorCode(err) !== "ENOENT") {

@@ -24,6 +24,19 @@ export interface PromptSource {
 	readonly dir: string;
 }
 
+function requirePromptContent(
+	raw: string | null | undefined,
+	path: string,
+	kind: string,
+): string {
+	if (raw === null || raw === undefined) {
+		throw Object.assign(new Error(`${kind} returned null: ${path}`), {
+			code: "ENOENT" as const,
+		});
+	}
+	return raw;
+}
+
 /** Returns the bundled `src/prompts/` directory as an absolute path. */
 export function bundledPromptsDir(): string {
 	// jiti + tsx resolve `import.meta.url` to the source file's URL.
@@ -65,12 +78,7 @@ export async function loadPromptFile(
 	const path = join(source.dir, `${name}.md`);
 	const raw = await readFile(path, "utf8");
 	// Treat null/undefined as missing (test mocks may return these)
-	if (raw == null) {
-		throw Object.assign(new Error(`prompt file returned null: ${path}`), {
-			code: "ENOENT" as const,
-		});
-	}
-	return raw;
+	return requirePromptContent(raw, path, "prompt file");
 }
 
 /**
@@ -82,12 +90,7 @@ export async function loadSharedFragment(
 ): Promise<string> {
 	const path = join(source.dir, "_shared", `${name}.md`);
 	const raw = await readFile(path, "utf8");
-	if (raw == null) {
-		throw Object.assign(new Error(`shared fragment returned null: ${path}`), {
-			code: "ENOENT" as const,
-		});
-	}
-	return raw;
+	return requirePromptContent(raw, path, "shared fragment");
 }
 
 /**

@@ -39,7 +39,7 @@ export interface ComposeOptions {
 function substitute(template: string, vars: Record<string, string>): string {
 	return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
 		const v = vars[key];
-		return v != null ? v : `{{${key}}}`;
+		return v ?? `{{${key}}}`;
 	});
 }
 

@@ -386,6 +386,10 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderResult(result: any, _options: any, theme: any) {
+			if (result.details?.phase === "scoping") {
+				const text = result.content?.[0]?.text ?? "Preparing review scope…";
+				return new Text(theme.fg("dim", text), 0, 0);
+			}
 			const review = result.details?.result;
 			const progress = result.details?.progress;
 			const clean = review?.clean === true;

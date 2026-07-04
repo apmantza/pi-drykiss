@@ -42,7 +42,8 @@
     "test": "vitest run",
     "lint": "eslint src/",
     "check:no-prompt-literals": "tsx scripts/check-no-prompt-literals.ts",
-    "check": "vitest run && tsc --noEmit && tsx scripts/check-no-prompt-literals.ts"
+    "check:audit": "npm audit --audit-level=high --omit=dev",
+    "check": "vitest run && tsc --noEmit && npm run check:audit && tsx scripts/check-no-prompt-literals.ts"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.49"

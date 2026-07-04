@@ -289,23 +289,50 @@ describe("drykiss_autoreview tool", () => {
 		expect(result.content[0].text).toContain("local changes");
 	});
 
-	it("enforces maxFiles before running the manager", async () => {
+	it("caps maxFiles before running the manager", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([
 			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
 			{ path: "src/b.ts", status: "modified", language: "TypeScript" },
 		]);
-		const manager = { runReview: vi.fn() } as any;
+		const manager = {
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clean: true,
+				status: "done",
+				verdict: "Approve",
+				target: { mode: "local", label: "local changes (first 1 of 2 files)" },
+				files: ["src/a.ts"],
+				counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+				findings: [],
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			}),
+		} as any;
 
-		await expect(
-			executeDrykissAutoreviewTool(
-				{ mode: "local", maxFiles: 1 },
-				{ cwd: "/home/test" } as any,
-				{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
-				manager,
-			),
-		).rejects.toThrow("over the maxFiles limit");
-		expect(manager.runReview).not.toHaveBeenCalled();
+		await executeDrykissAutoreviewTool(
+			{ mode: "local", maxFiles: 1 },
+			{ cwd: "/home/test" } as any,
+			{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
+			manager,
+		);
+
+		expect(manager.runReview).toHaveBeenCalled();
+		expect(manager.runReview.mock.calls[0][3]).toEqual([
+			expect.objectContaining({ path: "src/a.ts" }),
+		]);
+		expect(manager.runReview.mock.calls[0][7].target).toEqual(
+			expect.objectContaining({
+				label: "local changes (first 1 of 2 files)",
+				metadata: expect.objectContaining({
+					cappedFromFileCount: 2,
+					maxFiles: 1,
+				}),
+			}),
+		);
 	});
 
 	it("renders a progress bar and running model names via onUpdate", async () => {
@@ -388,6 +415,13 @@ describe("drykiss_autoreview tool", () => {
 			undefined,
 			onUpdate,
 		);
+
+		const scopingCalls = onUpdate.mock.calls.filter(
+			(call) => call[0].details?.phase === "scoping",
+		);
+		expect(scopingCalls.length).toBeGreaterThan(0);
+		expect(scopingCalls[0][0].content[0].text).toMatch(/\[█+\]/);
+		expect(scopingCalls[0][0].content[0].text).toContain("1/1 (100%)");
 
 		const progressCalls = onUpdate.mock.calls.filter((call) =>
 			call[0].content[0].text.includes("DRYKISS autoreview progress:"),

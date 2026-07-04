@@ -223,6 +223,7 @@ function validatorTagStyle(
 		case "false-positive":
 			return theme.fg("warning", "[✗ validator: false-positive]");
 		case "unverified":
+		default:
 			return theme.fg("dim", "[? validator: unverified]");
 	}
 }

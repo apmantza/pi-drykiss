@@ -22,6 +22,7 @@
  *     judgment — the same "never hide" principle as the rejection store.
  */
 
+import { extractBalancedJsonArray } from "./json-extract.js";
 import { callLLM } from "./llm.js";
 import { bundledPromptsDir } from "./prompt-loader.js";
 import { join } from "node:path";
@@ -134,38 +135,6 @@ export function parseValidatorOutput(
 }
 
 /**
- * Extract the first balanced top-level JSON array from arbitrary model
- * output, tolerating surrounding prose or ```json fences. Mirrors the
- * extractor in `parse-findings.ts` but kept local so the validator is
- * self-contained. Pure.
- */
-export function extractBalancedJsonArray(text: string): string | null {
-	const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-	const haystack = fenced ? fenced[1] : text;
-	const start = haystack.indexOf("[");
-	if (start === -1) return null;
-	let depth = 0;
-	let inString = false;
-	let escaped = false;
-	for (let index = start; index < haystack.length; index += 1) {
-		const ch = haystack[index];
-		if (inString) {
-			if (escaped) escaped = false;
-			else if (ch === "\\") escaped = true;
-			else if (ch === '"') inString = false;
-			continue;
-		}
-		if (ch === '"') inString = true;
-		else if (ch === "[") depth += 1;
-		else if (ch === "]") {
-			depth -= 1;
-			if (depth === 0) return haystack.slice(start, index + 1);
-		}
-	}
-	return null;
-}
-
-/**
  * Apply verdicts to a findings list. Each verdict maps to a finding by
  * its index in the input array. Findings without a verdict are tagged
  * "unverified" so the renderer can surface that. Pure.
@@ -214,7 +183,7 @@ export async function runValidator(
 	} catch (err) {
 		// Missing prompt file shouldn't be possible in a built extension,
 		// but if it is, fail open.
-		console.warn(`${LOG_PREFIX} Validator prompt not found, skipping:`, err);
+		console.warn("%s Validator prompt not found, skipping:", LOG_PREFIX, err);
 		return {
 			findings: findings.map((f) => ({
 				...f,
@@ -249,7 +218,8 @@ export async function runValidator(
 		// Fail open: surface findings unverified rather than dropping them.
 		const msg = err instanceof Error ? err.message : String(err);
 		console.warn(
-			`${LOG_PREFIX} Validator call failed, marking unverified:`,
+			"%s Validator call failed, marking unverified: %s",
+			LOG_PREFIX,
 			msg,
 		);
 		return {

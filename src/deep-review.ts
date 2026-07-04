@@ -33,8 +33,9 @@
  * helper and tolerates model errors.
  */
 
+import { toErrorMessage } from "./error-utils.js";
+import { extractBalancedJsonArray } from "./json-extract.js";
 import { loadSharedFragment } from "./prompt-loader.js";
-import { extractBalancedJsonArray } from "./validator.js";
 import { jaccard, tokenize } from "./rejections.js";
 import { findModelByHint } from "./model-utils.js";
 import type { Model, Api } from "@earendil-works/pi-ai";
@@ -469,8 +470,8 @@ export async function runDeepReview(
 			});
 			passOutcomes.push({ findings: parseDeepFindings(text), failed: false });
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(`${LOG_PREFIX} Deep pass ${i + 1} failed:`, msg);
+			const msg = toErrorMessage(err);
+			console.warn("%s Deep pass %d failed: %s", LOG_PREFIX, i + 1, msg);
 			passOutcomes.push({ findings: [], failed: true, error: msg });
 		}
 	}
@@ -521,9 +522,10 @@ export async function runDeepReview(
 		droppedFalsePositives = rejected.length;
 	} catch (err) {
 		// Fail open: surface candidates unvalidated rather than lose them.
-		const msg = err instanceof Error ? err.message : String(err);
+		const msg = toErrorMessage(err);
 		console.warn(
-			`${LOG_PREFIX} Deep validator failed, surfacing unvalidated:`,
+			"%s Deep validator failed, surfacing unvalidated: %s",
+			LOG_PREFIX,
 			msg,
 		);
 		validated = kept.map((candidate) => ({

@@ -222,7 +222,7 @@ function safeGetRejectionsPath(cwd: string): string | undefined {
 	try {
 		return getRejectionsPath(cwd);
 	} catch (err) {
-		console.warn(`${LOG_PREFIX} Failed to resolve rejection store path:`, err);
+		console.warn("%s Failed to resolve rejection store path:", LOG_PREFIX, err);
 		return undefined;
 	}
 }
@@ -258,14 +258,14 @@ export async function loadRejections(
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException | undefined)?.code;
 		if (code === "ENOENT") return [];
-		console.warn(`${LOG_PREFIX} Failed to stat rejection store:`, err);
+		console.warn("%s Failed to stat rejection store:", LOG_PREFIX, err);
 		return [];
 	}
 	let text: string;
 	try {
 		text = await readFile(actualPath, "utf8");
 	} catch (err) {
-		console.warn(`${LOG_PREFIX} Failed to read rejection store:`, err);
+		console.warn("%s Failed to read rejection store:", LOG_PREFIX, err);
 		return [];
 	}
 	const records: RejectionRecord[] = [];
@@ -464,6 +464,6 @@ async function doAppendRejections(
 		// unlink of the half-written tmp file so it doesn't linger on
 		// disk and confuse a human looking at the project dir.
 		unlink(tmpPath).catch(() => undefined);
-		console.warn(`${LOG_PREFIX} Failed to persist rejections:`, err);
+		console.warn("%s Failed to persist rejections:", LOG_PREFIX, err);
 	}
 }

@@ -29,7 +29,7 @@ function formatAutoreview(
 		`**Autoreview at agent_end:** ${auto?.enabled === true ? "enabled" : "disabled"}`,
 		`**Autoreview mode:** ${auto?.mode ?? "local"}${baseSuffix}`,
 		`**Autoreview confirm:** ${auto?.confirmBeforeRun === false ? "disabled" : "enabled"}`,
-		`**Autoreview max files:** ${auto?.maxFiles ?? 20}`,
+		`**Autoreview max files:** ${auto?.maxFiles ?? 40}`,
 		`**Autoreview cooldown:** ${auto?.cooldownMs ?? 60000}ms`,
 	];
 }
@@ -117,6 +117,7 @@ export async function handleConfigCommand(
 			"  /drykiss-config model-scope <scope|clear>",
 			"  /drykiss-config autoreview <on|off>",
 			"  /drykiss-config autoreview-mode <local|staged|branch|full|files> [base]",
+			"  /drykiss-config autoreview-max-files <number>",
 			"  /drykiss-config autoreview-confirm <on|off>",
 			"  /drykiss-config reset-prompts",
 		];
@@ -282,6 +283,28 @@ export async function handleConfigCommand(
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			ctx.ui.notify(`Failed to update autoreview: ${msg}`, "error");
+		}
+		return;
+	}
+
+	if (subcommand === "autoreview-max-files") {
+		try {
+			const raw = tokens[1];
+			const maxFiles = Number(raw);
+			if (!Number.isInteger(maxFiles) || maxFiles < 1) {
+				ctx.ui.notify(
+					"Usage: /drykiss-config autoreview-max-files <positive-integer>",
+					"warning",
+				);
+				return;
+			}
+			const config = await loadConfig();
+			config.autoreview = { ...config.autoreview, maxFiles };
+			await saveConfig(config);
+			ctx.ui.notify(`Autoreview max files set to ${maxFiles}.`, "info");
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			ctx.ui.notify(`Failed to set autoreview max files: ${msg}`, "error");
 		}
 		return;
 	}

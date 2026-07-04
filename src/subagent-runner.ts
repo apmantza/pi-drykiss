@@ -122,7 +122,12 @@ export async function runLensSubagent(
 		// This is critical for the session to be visible in Pi's UI
 		await session.bindExtensions({
 			onError: (err) => {
-				console.error(`${LOG_PREFIX} Extension error in ${displayName}:`, err);
+				console.error(
+					"%s Extension error in %s:",
+					LOG_PREFIX,
+					displayName,
+					err,
+				);
 			},
 		});
 
