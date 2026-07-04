@@ -959,7 +959,7 @@ export async function executeDrykissAutoreviewTool(
 	}) => void,
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
-	details: { result: ReviewResult };
+	details: { result: ReviewResult; progress?: string };
 }> {
 	await ensureDefaultPrompts(ctx.cwd);
 	const { config: effectiveConfig, warnings } = await loadEffectiveConfig(
@@ -1130,7 +1130,10 @@ export async function executeDrykissAutoreviewTool(
 
 	return {
 		content: [{ type: "text", text }],
-		details: { result: finalResult },
+		details: {
+			result: finalResult,
+			progress: progressLine.trimEnd() || undefined,
+		},
 	};
 }
 

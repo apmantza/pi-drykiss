@@ -387,6 +387,7 @@ export default function (pi: ExtensionAPI): void {
 
 		renderResult(result: any, _options: any, theme: any) {
 			const review = result.details?.result;
+			const progress = result.details?.progress;
 			const clean = review?.clean === true;
 			const counts = review?.counts ?? {};
 			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
@@ -402,12 +403,14 @@ export default function (pi: ExtensionAPI): void {
 					hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
 				scoreText = theme.fg(scoreColor, `, score ${hs}/100`);
 			}
-			return new Text(
+			const summary =
 				`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
-					theme.fg(
-						"dim",
-						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
-					),
+				theme.fg(
+					"dim",
+					` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
+				);
+			return new Text(
+				progress ? `${theme.fg("dim", progress)}\n${summary}` : summary,
 				0,
 				0,
 			);
