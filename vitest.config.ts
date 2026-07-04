@@ -1,8 +1,10 @@
-import path from "path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // Peer deps are not installed locally; mock them so tests resolve.
-const peerMock = path.resolve(__dirname, "vitest-peer-mock.js");
+const peerMock = fileURLToPath(
+	new URL("./vitest-peer-mock.js", import.meta.url),
+);
 
 export default defineConfig({
 	test: {

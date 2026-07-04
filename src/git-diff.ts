@@ -1,5 +1,4 @@
 import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
-import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
 import { LOG_PREFIX, getNodeErrorCode, assertSafeGitRef } from "./constants.js";
@@ -203,7 +202,7 @@ async function getSourceDirs(cwd: string): Promise<string[]> {
 	const dirsToWalk: string[] = [];
 	for (const d of SOURCE_DIRS) {
 		try {
-			const s = await stat(path.join(cwd, d));
+			const s = await stat(assertPathInRoot(d, cwd));
 			if (s.isDirectory()) dirsToWalk.push(d);
 		} catch {
 			// skip
@@ -306,7 +305,9 @@ export interface ProjectIndexEntry {
 async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
 	let entries: import("fs").Dirent[];
 	try {
-		entries = await readdir(path.join(cwd, dir), { withFileTypes: true });
+		entries = await readdir(assertPathInRoot(dir, cwd), {
+			withFileTypes: true,
+		});
 	} catch (err) {
 		// Skip unreadable directories to avoid blocking the entire file scan
 		const msg = err instanceof Error ? err.message : String(err);
@@ -320,13 +321,15 @@ async function* walkDir(cwd: string, dir: string): AsyncGenerator<string> {
 		// contents (or its recursive contents, for symlink-to-dir) shipped
 		// to the LLM. We never recurse into a symlinked subtree.
 		if (entry.isSymbolicLink()) continue;
+		const childPath = dir === "." ? entry.name : `${dir}/${entry.name}`;
+		assertPathInRoot(childPath, cwd);
 		if (entry.isDirectory()) {
 			if (SKIP_DIRS.has(entry.name)) continue;
-			yield* walkDir(cwd, path.join(dir, entry.name));
+			yield* walkDir(cwd, childPath);
 		} else if (entry.isFile()) {
 			const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
 			if (CODE_EXTS.has(ext)) {
-				yield path.join(dir, entry.name);
+				yield childPath;
 			}
 		}
 	}
@@ -436,7 +439,7 @@ export async function getProjectIndex(
 		if (entries.length >= maxFiles) break;
 
 		try {
-			const raw = await readFile(path.join(cwd, normalized), "utf8");
+			const raw = await readFile(assertPathInRoot(normalized, cwd), "utf8");
 			const ext = normalized.split(".").pop()?.toLowerCase() ?? "";
 			const exports = extractExports(raw, ext);
 			if (exports.length > 0) {

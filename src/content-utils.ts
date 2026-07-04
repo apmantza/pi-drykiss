@@ -24,10 +24,12 @@ export function extractAssistantText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return content
-		.filter(
-			(c: any): c is { type: "text"; text: string } =>
-				!!c && typeof c === "object" && c.type === "text",
-		)
-		.map((c: { type: string; text: string }) => c.text ?? "")
+		.flatMap((block: unknown) => {
+			if (!block || typeof block !== "object") return [];
+			const maybeText = block as { type?: unknown; text?: unknown };
+			return maybeText.type === "text" && typeof maybeText.text === "string"
+				? [maybeText.text]
+				: [];
+		})
 		.join("");
 }

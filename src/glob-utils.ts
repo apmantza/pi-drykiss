@@ -2,9 +2,12 @@
  * Compile a list of glob patterns into regex matchers.
  * Silently skips invalid patterns so a single bad pattern doesn't crash the review.
  */
+const MAX_GLOB_PATTERN_LENGTH = 512;
+
 export function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
 	const matchers: RegExp[] = [];
 	for (const p of patterns) {
+		if (p.length > MAX_GLOB_PATTERN_LENGTH) continue;
 		try {
 			matchers.push(globToRegex(p));
 		} catch {
@@ -52,5 +55,8 @@ function globToRegex(pattern: string): RegExp {
 		}
 	}
 	regex += "$";
-	return new RegExp(regex);
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+	// Safe: literals are escaped, glob wildcards expand to linear fragments,
+	// and compileGlobMatchers caps pattern length before calling this helper.
+	return new RegExp(regex); // nosemgrep
 }

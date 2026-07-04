@@ -107,7 +107,7 @@ const BUNDLED_SHARED_FILES = [
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "4"; // bump to force re-seed (v4: synthesis verdict consistency rule)
+const CURRENT_SEED_VERSION = "5"; // bump to force re-seed (v5: language-agnostic review taxonomy)
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);

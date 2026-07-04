@@ -316,7 +316,7 @@ export interface EditedFile {
  * meaningful.
  */
 export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
-	if (raw == null || typeof raw !== "object") {
+	if (raw === null || raw === undefined || typeof raw !== "object") {
 		return {
 			file: "unknown",
 			severity: "medium",

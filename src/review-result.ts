@@ -213,7 +213,9 @@ export function buildReviewResult(
 		validationIssues: validation.issues,
 		healthScore: hs.score,
 		scoreBreakdown: hs.breakdown,
-		...(options.prevScore != null ? { prevScore: options.prevScore } : {}),
+		...(options.prevScore !== null && options.prevScore !== undefined
+			? { prevScore: options.prevScore }
+			: {}),
 		...(synthesis?.mermaidGraph
 			? { mermaidGraph: synthesis.mermaidGraph }
 			: {}),

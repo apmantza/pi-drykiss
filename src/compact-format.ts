@@ -142,7 +142,7 @@ export function formatReviewResultCompact(
 	const findingsLine = `findings: ${counts.total} (${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low, ${counts.nit} nit${suppressedNote}${rejectedNote}${validatorNote})${validationNote}`;
 	const scoreLine = `health score: ${result.healthScore}/100`;
 	let trendLine = "";
-	if (result.prevScore != null) {
+	if (result.prevScore !== null && result.prevScore !== undefined) {
 		const diff = result.healthScore - result.prevScore;
 		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${diff >= 0 ? "+" : ""}${diff})`;
 	}
