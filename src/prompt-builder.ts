@@ -146,11 +146,20 @@ async function removeOldSentinels(dir: string): Promise<void> {
 				.map((name) =>
 					writeFile(join(dir, name), "", "utf8")
 						.then(() => undefined)
-						.catch(() => undefined),
+						.catch((err) => {
+							console.warn(
+								`${LOG_PREFIX} Failed to clear old sentinel ${name}: ${err instanceof Error ? err.message : String(err)}`,
+							);
+							return undefined;
+						}),
 				),
 		);
-	} catch {
-		// dir doesn't exist yet — nothing to clean
+	} catch (err) {
+		if (getNodeErrorCode(err) !== "ENOENT") {
+			console.warn(
+				`${LOG_PREFIX} Failed to list old sentinels: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
 	}
 }
 
@@ -326,7 +335,9 @@ export async function loadProjectReviewGuidelines(
 			return content.trim() || null;
 		} catch (err) {
 			if (getNodeErrorCode(err) !== "ENOENT") {
-				console.warn(`${LOG_PREFIX} Could not read review guidelines: ${p}`);
+				console.warn(
+					`${LOG_PREFIX} Could not read review guidelines ${p}: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 		}
 	}

@@ -1,10 +1,9 @@
 import { lenientJsonParse, isPlainObject } from "./json-utils.js";
-
-const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "nit"]);
+import { SEVERITY_VALUES } from "./constants.js";
 
 function normalizeSeverity(raw: unknown): Severity {
 	const s = typeof raw === "string" ? raw : "medium";
-	return VALID_SEVERITIES.has(s) ? (s as Severity) : "medium";
+	return SEVERITY_VALUES.has(s) ? (s as Severity) : "medium";
 }
 
 const VALID_PRIORITIES = new Set(["P0", "P1", "P2", "P3"]);
@@ -173,6 +172,14 @@ export interface Finding {
 	 * Optional: only populated when the validator returned a verdict.
 	 */
 	readonly _validatorJustification?: string;
+}
+
+export function shouldApproveEmptyReview(
+	findingCount: number,
+	errorCount = 0,
+	validationIssueCount = 0,
+): boolean {
+	return findingCount === 0 && errorCount === 0 && validationIssueCount === 0;
 }
 
 export interface SynthesisResult {
@@ -405,10 +412,11 @@ export function parseSynthesis(raw: string): SynthesisResult {
 		// non-approving verdict. This prevents a confused synthesizer from
 		// emitting "Needs security review" or "Request changes" when it has
 		// no evidence to support that verdict.
-		const verdict =
-			findings.length === 0
-				? "Approve"
-				: (String(parsed.verdict ?? "Request changes") as SynthesisResult["verdict"]);
+		const verdict = shouldApproveEmptyReview(findings.length)
+			? "Approve"
+			: (String(
+					parsed.verdict ?? "Request changes",
+				) as SynthesisResult["verdict"]);
 		const summary =
 			findings.length === 0 && !String(parsed.summary ?? "").trim()
 				? "No issues found"

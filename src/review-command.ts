@@ -293,7 +293,9 @@ async function prepareReview(
 }
 
 function safeOnUpdate(
-	onUpdate: ((result: { content: Array<{ type: "text"; text: string }> }) => void) | undefined,
+	onUpdate:
+		| ((result: { content: Array<{ type: "text"; text: string }> }) => void)
+		| undefined,
 	text: string,
 ): void {
 	if (!onUpdate) return;
@@ -1026,14 +1028,10 @@ export async function executeDrykissAutoreviewTool(
 		);
 	}
 
-	onUpdate?.({
-		content: [
-			{
-				type: "text",
-				text: `Starting DRYKISS autoreview for ${scope.label} (${scope.files.length} file(s), ${lenses.length} lens(es))...`,
-			},
-		],
-	});
+	safeOnUpdate(
+		onUpdate,
+		`DRYKISS autoreview progress: [${"░".repeat(10)}] 0/${lenses.length} lens(es) complete · starting ${scope.label} (${scope.files.length} file(s))`,
+	);
 
 	// Build active risk-targeting constraints for the lens system prompts.
 	// Previously dropped on this path, so risk-targeting config was silently
@@ -1070,10 +1068,7 @@ export async function executeDrykissAutoreviewTool(
 			// When neither is set, defaults to false (current behavior).
 			validate: params.validate ?? effectiveConfig.validate ?? false,
 			onProgress: onUpdate
-				? (job) =>
-						onUpdate({
-							content: [{ type: "text", text: formatReviewProgress(job) }],
-						})
+				? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
 				: undefined,
 		},
 		signal,
@@ -1115,14 +1110,23 @@ export async function executeDrykissAutoreviewTool(
 			: result;
 
 	const formatMode = params.format ?? "compact";
+	const jobs =
+		typeof (manager as { listJobs?: unknown }).listJobs === "function"
+			? (manager as { listJobs: () => ReviewJob[] }).listJobs()
+			: [];
+	const finalProgress = jobs.find((job) => job.id === finalResult.jobId);
+	const progressLine = finalProgress
+		? `${formatReviewProgress(finalProgress)}\n`
+		: "";
 	const text =
-		formatMode === "compact"
+		progressLine +
+		(formatMode === "compact"
 			? formatReviewResultCompact(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
 				})
 			: formatReviewResultForTool(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
-				});
+				}));
 
 	return {
 		content: [{ type: "text", text }],
@@ -1154,23 +1158,22 @@ function formatReviewProgress(job: ReviewJob): string {
 	// Visual progress bar: 10 segments, filled proportionally to completed lenses.
 	const barWidth = 10;
 	const filled =
-		total === 0
-			? 0
-			: Math.min(barWidth, Math.round((done / total) * barWidth));
+		total === 0 ? 0 : Math.min(barWidth, Math.round((done / total) * barWidth));
 	const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
 
 	// Show which model is running each active lens so the user can see the
-	// review is making progress and which provider/model is doing work.
+	// review is making progress and which provider/model is doing work. When
+	// no lens is active (including the final persisted tool output), keep a
+	// compact model summary so the bar remains visible after completion.
+	const formatLensModel = (lens: ReviewLens): string => {
+		const state = job.states.get(lens);
+		const modelName = state?.modelName ?? "unknown";
+		const provider = state?.provider ? `${state.provider}/` : "";
+		return `${lens} (${provider}${modelName})`;
+	};
 	const runningText = running.length
-		? ` · running: ${running
-				.map((lens) => {
-					const state = job.states.get(lens);
-					const modelName = state?.modelName ?? "unknown";
-					const provider = state?.provider ? `${state.provider}/` : "";
-					return `${lens} (${provider}${modelName})`;
-				})
-				.join(", ")}`
-		: "";
+		? ` · running: ${running.map(formatLensModel).join(", ")}`
+		: ` · models: ${job.lenses.map(formatLensModel).join(", ")}`;
 	let synthesis;
 	if (job.synthesisStatus === "running") {
 		synthesis = " · synthesis running";

@@ -1,10 +1,18 @@
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
-import { computeHealthScore } from "./types.js";
+import { computeHealthScore, shouldApproveEmptyReview } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
 import { compileGlobMatchers, matchesAnyGlob } from "./glob-utils.js";
 import { LOG_PREFIX, SEVERITY_VALUES } from "./constants.js";
 import { applyRejections, type RejectionRecord } from "./rejections.js";
+
+const REQUIRED_FINDING_STRING_FIELDS = [
+	"category",
+	"summary",
+	"detail",
+	"suggestion",
+] as const;
+const OPTIONAL_FINDING_STRING_FIELDS = ["consequence", "source"] as const;
 
 export interface ReviewResultTarget {
 	readonly mode?: string;
@@ -28,7 +36,7 @@ export interface ReviewResultCounts {
 	readonly previouslyRejected: number;
 	/**
 	 * Validator stage output. Populated only when the review ran with
-	 * `validate: true`; otherwise all three are 0 / undefined.
+	 * `validate: true`; otherwise all three are undefined.
 	 *
 	 * `validatorReal` = number of findings the validator confirmed.
 	 * `validatorFalsePositive` = number of findings the validator
@@ -161,10 +169,13 @@ export function buildReviewResult(
 	// what a confused synthesizer emitted. This prevents the UI from showing
 	// "Request changes" or "Needs security review" alongside an empty
 	// findings list and a perfect health score.
-	const verdict =
-		activeFresh.length === 0 && errors.length === 0 && !droppedByValidation
-			? "Approve"
-			: (synthesis?.verdict ?? "Request changes");
+	const verdict = shouldApproveEmptyReview(
+		activeFresh.length,
+		errors.length,
+		validation.issues.length,
+	)
+		? "Approve"
+		: (synthesis?.verdict ?? "Request changes");
 	const status = job.overallStatus;
 	const clean =
 		status === "done" &&
@@ -250,12 +261,7 @@ function validateFinding(
 	if (finding.line !== undefined && !isPositiveInteger(finding.line)) {
 		return issue(index, `invalid line: ${String(finding.line)}`, finding);
 	}
-	for (const field of [
-		"category",
-		"summary",
-		"detail",
-		"suggestion",
-	] as const) {
+	for (const field of REQUIRED_FINDING_STRING_FIELDS) {
 		if (
 			typeof finding[field] !== "string" ||
 			finding[field].trim().length === 0
@@ -265,7 +271,7 @@ function validateFinding(
 	}
 	// consequence and source: undefined is allowed (backward compat with
 	// legacy persisted findings). When present, must be a non-empty string.
-	for (const field of ["consequence", "source"] as const) {
+	for (const field of OPTIONAL_FINDING_STRING_FIELDS) {
 		const value = finding[field];
 		if (value === undefined) continue;
 		if (typeof value !== "string" || value.trim().length === 0) {
@@ -297,13 +303,8 @@ function countFindings(
 		nit: findings.filter((f) => f.severity === "nit").length,
 		suppressed: suppressedCount,
 		previouslyRejected: previouslyRejectedCount,
-		// Validator counts default to 0 here and get overwritten by
-		// `runReview` when the validator stage runs. The type uses
-		// optional `?` so reviews that didn't run the validator can
-		// still serialize cleanly.
-		validatorReal: 0,
-		validatorFalsePositive: 0,
-		validatorUnverified: 0,
+		// Validator counts are only populated when the validator stage runs.
+		// Leaving them undefined makes it clear the stage did not run.
 	};
 }
 
