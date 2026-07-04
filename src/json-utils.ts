@@ -122,7 +122,13 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	}
 
 	// Final attempt
-	return JSON.parse(fixed) as T;
+	try {
+		return JSON.parse(fixed) as T;
+	} catch (err) {
+		throw new Error(
+			`Failed to parse repaired JSON: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 }
 
 /**

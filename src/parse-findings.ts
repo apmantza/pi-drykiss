@@ -43,6 +43,46 @@ function findWrapperArray(obj: Record<string, unknown>): unknown[] | undefined {
 	return undefined;
 }
 
+/**
+ * Required fields that identify a plain object as a single finding.
+ * Used as a last-rescue fallback when the LLM emits one finding object
+ * instead of the required JSON array. We intentionally only require the
+ * minimal identity fields (file + severity + some textual content). The
+ * validator downstream will reject malformed findings with empty required
+ * fields, but treating the object as a finding here prevents a parse error
+ * from swallowing the lens output entirely.
+ */
+const FINDING_REQUIRED_FIELDS: readonly string[] = [
+	"file",
+	"severity",
+	"summary",
+];
+const FINDING_CONTENT_FIELDS: readonly string[] = [
+	"summary",
+	"category",
+	"detail",
+	"suggestion",
+];
+
+function looksLikeFinding(obj: Record<string, unknown>): boolean {
+	const hasIdentity = FINDING_REQUIRED_FIELDS.every(
+		(field) =>
+			Object.hasOwn(obj, field) &&
+			typeof obj[field] === "string" &&
+			String(obj[field]).trim().length > 0,
+	);
+	if (!hasIdentity) return false;
+	const hasContent = FINDING_CONTENT_FIELDS.some(
+		(field) =>
+			Object.hasOwn(obj, field) &&
+			typeof obj[field] === "string" &&
+			String(obj[field]).trim().length > 0,
+	);
+	if (!hasContent) return false;
+	const severity = String(obj.severity);
+	return ["critical", "high", "medium", "low", "nit"].includes(severity);
+}
+
 function extractBalancedJson(
 	raw: string,
 	open: string,
@@ -92,7 +132,23 @@ export function parseFindingsJson(
 	lens?: ReviewLens,
 ): ParseFindingsResult {
 	try {
-		const jsonText = extractBalancedJson(raw, "[", "]") ?? raw;
+		// Some lenses wrap the whole array in an object; some emit a single
+		// finding object. Extract the largest balanced JSON structure so we
+		// can parse either shape instead of assuming an array.
+		const arrExtract = extractBalancedJson(raw, "[", "]");
+		const objExtract = extractBalancedJson(raw, "{", "}");
+		let jsonText = raw;
+		if (arrExtract) {
+			// A balanced array is the canonical lens output shape. Prefer it
+			// over an object so we recover findings nested inside wrapper
+			// objects (e.g. { "lens_output": { "findings": [...] } }).
+			jsonText = arrExtract;
+		} else if (objExtract) {
+			// No array found: fall back to the object, which may be a single
+			// finding or a wrapper object with a non-enumerated key.
+			jsonText = objExtract;
+		}
+
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(jsonText);
@@ -109,10 +165,11 @@ export function parseFindingsJson(
 		//   2. Object -> look for a known wrapper key (findings, results,
 		//      issues, violations, defects, problems, items, data, output,
 		//      review, lens_findings) holding an array.
-		//   3. Object -> fall back to scanning for the first array-typed
+		//   3. Object -> if it looks like a single finding, wrap it in an array.
+		//   4. Object -> fall back to scanning for the first array-typed
 		//      property (last-ditch recovery from LLM drift to a new
 		//      wrapper key we haven't enumerated yet).
-		//   4. Anything else -> return a parse error.
+		//   5. Anything else -> return a parse error.
 		let findingsSource: unknown = parsed;
 		if (
 			typeof parsed === "object" &&
@@ -123,6 +180,8 @@ export function parseFindingsJson(
 			const wrapper = findWrapperArray(obj);
 			if (wrapper) {
 				findingsSource = wrapper;
+			} else if (looksLikeFinding(obj)) {
+				findingsSource = [obj];
 			} else {
 				// Last-ditch: pick the first array-typed property.
 				const firstArray = Object.values(obj).find((v) => Array.isArray(v));

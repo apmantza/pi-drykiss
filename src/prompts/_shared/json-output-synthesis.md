@@ -37,6 +37,7 @@ Example (do NOT include any surrounding text or fences):
 }
 
 Rules:
+
 - Output ONLY the JSON object. No markdown code fences, no extra commentary.
 - Findings must be sorted by severity (critical first, then high, medium, low, nit)
 - confidence must be one of: confirmed, likely, suspect
@@ -50,4 +51,5 @@ Rules:
 - Optionally set `priority` (P0–P3) on synthesized findings. If individual lens findings include priority tags, propagate the highest priority. If omitted, the UI will infer it from severity.
 - The `mermaidGraph` field is **optional**. Include a Mermaid `graph TD` string only when the architecture lens produced one or when you have enough structural context to draw meaningful file relationships. When absent, omit the field entirely.
 - The `files`, `nextSteps`, `notDone`, and `extensions` fields are **optional**. Include them only when they add value. `files` should list files actually inspected; `nextSteps` should list concrete follow-ups; `notDone` should surface incomplete lens work; `extensions` is for lens-specific structured data such as an architecture dependency graph.
+- **CRITICAL: the verdict must be consistent with the findings list.** If `findings` is empty, the verdict MUST be `Approve`. Do not emit `Request changes` or `Needs security review` when no findings are present. A non-approving verdict requires at least one actionable finding.
 - When the architecture lens supplies a dependency graph, prefer placing it in `extensions.mermaidGraph` and only duplicate it at the top-level `mermaidGraph` if it is the most useful visualization for the report.

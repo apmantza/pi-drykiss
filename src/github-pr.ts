@@ -163,7 +163,24 @@ async function fetchPrMetadata(
 		],
 		{ cwd },
 	);
-	const data = JSON.parse(stdout);
+	let data: unknown;
+	try {
+		data = JSON.parse(stdout);
+	} catch (err) {
+		throw new Error(
+			`Failed to parse gh PR metadata JSON: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+	if (
+		typeof data !== "object" ||
+		data === null ||
+		!("title" in data) ||
+		!("headRefOid" in data) ||
+		typeof data.title !== "string" ||
+		typeof data.headRefOid !== "string"
+	) {
+		throw new Error("gh PR metadata JSON is missing title or headRefOid");
+	}
 	return {
 		title: data.title,
 		headSha: data.headRefOid,

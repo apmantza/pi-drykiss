@@ -10,6 +10,16 @@ import {
 	saveProjectConfig,
 } from "./config.js";
 
+function parseTestJson(value: string): unknown {
+	try {
+		return JSON.parse(value);
+	} catch (err) {
+		throw new Error(
+			`Test fixture wrote invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
 vi.mock("node:fs/promises", () => {
 	const mockFileHandle = {
 		stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
@@ -85,7 +95,7 @@ describe("saveConfig", () => {
 		expect(mkdirPath).toMatch(/\.pi[/\\]drykiss$/);
 		expect(writeFile).toHaveBeenCalled();
 		const written = vi.mocked(writeFile).mock.calls[0][1] as string;
-		const parsed = JSON.parse(written);
+		const parsed = parseTestJson(written) as Record<string, unknown>;
 		expect(parsed.defaultModel).toBe("haiku");
 		expect(parsed.interactive).toBe(false);
 	});
@@ -127,7 +137,9 @@ describe("setLensModel", () => {
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
 		await setLensModel("clarity", "sonnet");
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Record<string, unknown>;
 		expect(written.lensModels).toEqual({
 			simplicity: "haiku",
 			clarity: "sonnet",
@@ -143,7 +155,9 @@ describe("setDefaultModel", () => {
 		);
 		vi.mocked(writeFile).mockResolvedValue(undefined);
 		await setDefaultModel("sonnet");
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Record<string, unknown>;
 		expect(written.defaultModel).toBe("sonnet");
 	});
 
@@ -291,15 +305,18 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 			expect(dirArg).toContain(".pi");
 			expect(dirArg).toContain("drykiss");
 			expect(writeFile).toHaveBeenCalledTimes(1);
-			const written = JSON.parse(
+			const written = parseTestJson(
 				vi.mocked(writeFile).mock.calls[0][1] as string,
-			);
+			) as Record<string, unknown>;
 			// Existing field preserved
 			expect(written.defaultModel).toBe("sonnet");
 			// Suppressions added
-			expect(written.suppressions).toHaveLength(1);
-			expect(written.suppressions[0].id).toBe("s1");
-			expect(written.suppressions[0].riskCode).toBe("K1");
+			const suppressions = written.suppressions as Array<
+				Record<string, unknown>
+			>;
+			expect(suppressions).toHaveLength(1);
+			expect(suppressions[0].id).toBe("s1");
+			expect(suppressions[0].riskCode).toBe("K1");
 		});
 
 		it("creates project config when no existing file", async () => {
@@ -313,9 +330,9 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 			});
 
 			expect(writeFile).toHaveBeenCalledTimes(1);
-			const written = JSON.parse(
+			const written = parseTestJson(
 				vi.mocked(writeFile).mock.calls[0][1] as string,
-			);
+			) as Record<string, unknown>;
 			expect(written.suppressions).toEqual([]);
 			expect(written.defaultModel).toBeUndefined();
 		});

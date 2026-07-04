@@ -409,4 +409,27 @@ describe("parseSynthesis", () => {
 		expect(result.notDone).toHaveLength(1);
 		expect(result.extensions).toEqual({ mermaidGraph: "graph TD" });
 	});
+
+	it("overrides a non-approving verdict to Approve when findings are empty", () => {
+		const raw = JSON.stringify({
+			findings: [],
+			summary: "",
+			verdict: "Needs security review",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.verdict).toBe("Approve");
+		expect(result.summary).toBe("No issues found");
+		expect(result.findings).toEqual([]);
+	});
+
+	it("preserves a non-approving verdict when findings are present", () => {
+		const raw = JSON.stringify({
+			findings: [{ file: "a.ts", severity: "high", summary: "issue" }],
+			summary: "Found an issue",
+			verdict: "Needs security review",
+		});
+		const result = parseSynthesis(raw);
+		expect(result.verdict).toBe("Needs security review");
+		expect(result.summary).toBe("Found an issue");
+	});
 });

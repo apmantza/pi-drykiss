@@ -307,6 +307,97 @@ describe("drykiss_autoreview tool", () => {
 		).rejects.toThrow("over the maxFiles limit");
 		expect(manager.runReview).not.toHaveBeenCalled();
 	});
+
+	it("renders a progress bar and running model names via onUpdate", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const onUpdate = vi.fn();
+		const manager = {
+			runReview: vi.fn().mockImplementation((...args: any[]) => {
+				const options = args[7];
+				if (options?.onProgress) {
+					options.onProgress({
+						id: "job-1",
+						files: ["src/a.ts"],
+						lenses: ["simplicity", "security"],
+						states: new Map([
+							[
+								"simplicity",
+								{
+									status: "done",
+									modelName: "claude-3-haiku",
+									provider: "anthropic",
+									durationMs: 100,
+									findingsCount: 0,
+									rawOutput: "[]",
+								},
+							],
+							[
+								"security",
+								{
+									status: "running",
+									modelName: "gpt-4o-mini",
+									provider: "openai",
+									durationMs: 0,
+									findingsCount: 0,
+									rawOutput: "[]",
+									startedAt: Date.now() - 300,
+								},
+							],
+						]),
+						synthesisStatus: "idle",
+						overallStatus: "running",
+						startedAt: Date.now() - 500,
+					} as any);
+				}
+				return Promise.resolve({
+					jobId: "job-1",
+					clean: true,
+					status: "done",
+					verdict: "Approve",
+					findings: [],
+					counts: {
+						total: 0,
+						critical: 0,
+						high: 0,
+						medium: 0,
+						low: 0,
+						nit: 0,
+						suppressed: 0,
+						previouslyRejected: 0,
+						validatorReal: 0,
+						validatorFalsePositive: 0,
+						validatorUnverified: 0,
+					},
+					summary: "Clean.",
+					errors: [],
+					validationIssues: [],
+					healthScore: 100,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				});
+			}),
+		} as any;
+
+		await executeDrykissAutoreviewTool(
+			{ mode: "local" },
+			{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
+			{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
+			manager,
+			undefined,
+			onUpdate,
+		);
+
+		const progressCalls = onUpdate.mock.calls.filter((call) =>
+			call[0].content[0].text.includes("DRYKISS autoreview progress:"),
+		);
+		expect(progressCalls.length).toBeGreaterThan(0);
+		const lastProgress = progressCalls.at(-1)![0].content[0].text as string;
+		expect(lastProgress).toMatch(/\[█+░+\]/); // progress bar rendered
+		expect(lastProgress).toContain("1/2 lens(es) complete");
+		expect(lastProgress).toContain("security (openai/gpt-4o-mini)");
+	});
 });
 
 describe("review command error handling", () => {

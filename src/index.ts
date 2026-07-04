@@ -431,8 +431,8 @@ export default function (pi: ExtensionAPI): void {
 		async execute(
 			_toolCallId: string,
 			params: Record<string, unknown>,
-			_signal: AbortSignal,
-			_onUpdate: any,
+			signal: AbortSignal,
+			onUpdate: any,
 			ctx: any,
 		) {
 			return executeDrykissReviewTool(
@@ -450,6 +450,8 @@ export default function (pi: ExtensionAPI): void {
 				},
 				ctx,
 				pi,
+				signal,
+				onUpdate,
 			);
 		},
 

@@ -162,6 +162,49 @@ describe("parseFindingsJson", () => {
 		});
 	});
 
+	describe("single-object fallback", () => {
+		it("wraps a bare finding object in an array", () => {
+			const raw = JSON.stringify({
+				file: "src/a.ts",
+				line: 10,
+				severity: "high",
+				category: "Bug",
+				summary: "Duplicate code",
+				detail: "This block is repeated.",
+				suggestion: "Extract a helper.",
+			});
+			const { findings, parseError } = parseFindingsJson(raw, "deduplication");
+			expect(parseError).toBeUndefined();
+			expect(findings).toHaveLength(1);
+			expect(findings[0].file).toBe("src/a.ts");
+			expect(findings[0].severity).toBe("high");
+			expect(findings[0].lens).toBe("deduplication");
+		});
+
+		it("wraps a bare finding object that omits category", () => {
+			const raw = JSON.stringify({
+				file: "src/a.ts",
+				line: 10,
+				severity: "medium",
+				summary: "Missing test coverage",
+				detail: "No tests for this branch.",
+				suggestion: "Add a test.",
+			});
+			const { findings, parseError } = parseFindingsJson(raw, "tests");
+			expect(parseError).toBeUndefined();
+			expect(findings).toHaveLength(1);
+			expect(findings[0].file).toBe("src/a.ts");
+			expect(findings[0].category).toBe("");
+		});
+
+		it("does not treat an unrelated object as a finding", () => {
+			const raw = JSON.stringify({ message: "no findings to report" });
+			const { findings, parseError } = parseFindingsJson(raw);
+			expect(findings).toEqual([]);
+			expect(parseError).toContain("Expected array");
+		});
+	});
+
 	describe("error reporting", () => {
 		it("includes the parsed object's key list in the error when it has no array", () => {
 			const raw = JSON.stringify({ message: "oops", code: 42 });

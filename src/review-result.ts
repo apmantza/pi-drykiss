@@ -144,8 +144,6 @@ export function buildReviewResult(
 		previouslyRejected.length,
 	);
 	const errors = collectErrors(job);
-	const verdict = synthesis?.verdict ?? "Request changes";
-	const status = job.overallStatus;
 	// A failed review (any lens errored or synthesis errored) must
 	// never look "clean" — that misleads users into thinking the
 	// review ran successfully and produced no findings. A failed
@@ -158,6 +156,16 @@ export function buildReviewResult(
 	// surfaced via `validationIssues`, so the user can see them,
 	// but the review should not look pristine in that case.
 	const droppedByValidation = validation.issues.length > 0;
+	// Safety net: if the review has no actionable findings, no lens errors,
+	// and no validation drops, the verdict must be "Approve" regardless of
+	// what a confused synthesizer emitted. This prevents the UI from showing
+	// "Request changes" or "Needs security review" alongside an empty
+	// findings list and a perfect health score.
+	const verdict =
+		activeFresh.length === 0 && errors.length === 0 && !droppedByValidation
+			? "Approve"
+			: (synthesis?.verdict ?? "Request changes");
+	const status = job.overallStatus;
 	const clean =
 		status === "done" &&
 		errors.length === 0 &&

@@ -401,12 +401,22 @@ export function parseSynthesis(raw: string): SynthesisResult {
 			? (parsed.findings as any[]).map((f) => mapRawToFinding(f))
 			: [];
 		const hs = computeHealthScore(findings);
+		// Safety override: an empty findings list must never claim a
+		// non-approving verdict. This prevents a confused synthesizer from
+		// emitting "Needs security review" or "Request changes" when it has
+		// no evidence to support that verdict.
+		const verdict =
+			findings.length === 0
+				? "Approve"
+				: (String(parsed.verdict ?? "Request changes") as SynthesisResult["verdict"]);
+		const summary =
+			findings.length === 0 && !String(parsed.summary ?? "").trim()
+				? "No issues found"
+				: String(parsed.summary ?? "");
 		return {
 			findings,
-			summary: String(parsed.summary ?? ""),
-			verdict: String(
-				parsed.verdict ?? "Request changes",
-			) as SynthesisResult["verdict"],
+			summary,
+			verdict,
 			criticalCount: findings.filter((f) => f.severity === "critical").length,
 			highCount: findings.filter((f) => f.severity === "high").length,
 			mediumCount: findings.filter((f) => f.severity === "medium").length,

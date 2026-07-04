@@ -202,6 +202,33 @@ describe("buildReviewResult", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	it("overrides a confused synthesizer verdict to Approve when there are no actionable findings", () => {
+		// Regression guard: the synthesizer sometimes emits
+		// "Needs security review" or "Request changes" even with an
+		// empty findings list. Treat an empty actionable-finding set
+		// with no errors or validation drops as a clean review.
+		const result = buildReviewResult(
+			job({
+				synthesisResult: {
+					findings: [],
+					summary: "No issues found",
+					verdict: "Needs security review",
+					criticalCount: 0,
+					highCount: 0,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: 100,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				},
+			}),
+		);
+
+		expect(result.verdict).toBe("Approve");
+		expect(result.healthScore).toBe(100);
+		expect(result.clean).toBe(true);
+	});
+
 	it("marks the result non-clean + score 0 when validation drops every finding", () => {
 		// Regression guard: previously, when the LLM produced findings
 		// that the validator dropped (e.g. all missing the required

@@ -37,6 +37,10 @@ vi.mock("./prompt-builder.js", () => ({
 		systemPrompt: "synthesis system",
 		userPrompt: "synthesis user",
 	}),
+	buildBucketedSynthesisPrompt: vi.fn().mockResolvedValue({
+		systemPrompt: "synthesis system",
+		userPrompt: "synthesis user",
+	}),
 }));
 
 vi.mock("./persist.js", () => ({

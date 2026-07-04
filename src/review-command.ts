@@ -292,6 +292,20 @@ async function prepareReview(
 	};
 }
 
+function safeOnUpdate(
+	onUpdate: ((result: { content: Array<{ type: "text"; text: string }> }) => void) | undefined,
+	text: string,
+): void {
+	if (!onUpdate) return;
+	try {
+		onUpdate({ content: [{ type: "text", text }] });
+	} catch (err) {
+		console.warn(
+			`${LOG_PREFIX} onUpdate callback failed: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
 async function runLensReview(
 	ctx: ExtensionContext,
 	cwd: string,
@@ -306,6 +320,12 @@ async function runLensReview(
 		>;
 		projectIndex?: import("./git-diff.js").ProjectIndexEntry[];
 		commands?: { test?: string; lint?: string };
+		/** Optional streaming callback for tool-mode progress display. */
+		onUpdate?: (result: {
+			content: Array<{ type: "text"; text: string }>;
+		}) => void;
+		/** Optional abort signal for tool-mode cancellation. */
+		signal?: AbortSignal;
 	} = {},
 ): Promise<{
 	lens: ReviewLens;
@@ -331,6 +351,11 @@ async function runLensReview(
 			(await resolveModel(ctx, lens)))
 		: await resolveModel(ctx, lens);
 
+	safeOnUpdate(
+		options.onUpdate,
+		`Starting DRYKISS ${lens} review for ${files.length} file(s) with ${model.provider ? `${model.provider}/` : ""}${model.name}...`,
+	);
+
 	ctx.ui.notify(
 		`${LOG_PREFIX} Launching ${lens} subagent with ${model.name}...`,
 		"info",
@@ -343,6 +368,7 @@ async function runLensReview(
 		prompt.systemPrompt,
 		prompt.userPrompt,
 		lens,
+		options.signal,
 	);
 
 	const rawOutput = result.errorMessage
@@ -355,6 +381,10 @@ async function runLensReview(
 			"warning",
 		);
 	}
+	safeOnUpdate(
+		options.onUpdate,
+		`DRYKISS ${lens} review complete: ${findings.length} finding(s).`,
+	);
 	return { lens, findings, rawOutput, modelName: result.modelName };
 }
 
@@ -1108,6 +1138,7 @@ function normalizeAutoreviewLenses(
 }
 
 function formatReviewProgress(job: ReviewJob): string {
+	const total = job.lenses.length;
 	const done = job.lenses.filter((lens) => {
 		const state = job.states.get(lens);
 		return state?.status === "done" || state?.status === "error";
@@ -1119,6 +1150,27 @@ function formatReviewProgress(job: ReviewJob): string {
 		(lens) => job.states.get(lens)?.status === "error",
 	).length;
 	const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+
+	// Visual progress bar: 10 segments, filled proportionally to completed lenses.
+	const barWidth = 10;
+	const filled =
+		total === 0
+			? 0
+			: Math.min(barWidth, Math.round((done / total) * barWidth));
+	const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+
+	// Show which model is running each active lens so the user can see the
+	// review is making progress and which provider/model is doing work.
+	const runningText = running.length
+		? ` · running: ${running
+				.map((lens) => {
+					const state = job.states.get(lens);
+					const modelName = state?.modelName ?? "unknown";
+					const provider = state?.provider ? `${state.provider}/` : "";
+					return `${lens} (${provider}${modelName})`;
+				})
+				.join(", ")}`
+		: "";
 	let synthesis;
 	if (job.synthesisStatus === "running") {
 		synthesis = " · synthesis running";
@@ -1129,9 +1181,8 @@ function formatReviewProgress(job: ReviewJob): string {
 	} else {
 		synthesis = "";
 	}
-	const runningText = running.length ? ` · running: ${running.join(", ")}` : "";
 	const errorText = errored ? ` · ${errored} error(s)` : "";
-	return `DRYKISS autoreview progress: ${done}/${job.lenses.length} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
+	return `DRYKISS autoreview progress: [${bar}] ${done}/${total} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
 }
 
 function formatReviewResultForTool(
@@ -1220,6 +1271,10 @@ export async function executeDrykissReviewTool(
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
+	signal?: AbortSignal,
+	onUpdate?: (result: {
+		content: Array<{ type: "text"; text: string }>;
+	}) => void,
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
 	details: { findings: Finding[] };
@@ -1256,6 +1311,8 @@ export async function executeDrykissReviewTool(
 			contents,
 			projectIndex,
 			commands: config.commands,
+			onUpdate,
+			signal,
 		},
 	);
 

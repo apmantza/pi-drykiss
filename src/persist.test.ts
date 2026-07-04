@@ -12,6 +12,16 @@ import {
 import type { SynthesisResult } from "./types.js";
 import type { ReviewHistoryEntry } from "./persist.js";
 
+function parseTestJson(value: string): unknown {
+	try {
+		return JSON.parse(value);
+	} catch (err) {
+		throw new Error(
+			`Test fixture wrote invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+}
+
 vi.mock("node:fs/promises", () => ({
 	mkdir: vi.fn().mockResolvedValue(undefined),
 	writeFile: vi.fn().mockResolvedValue(undefined),
@@ -54,7 +64,9 @@ describe("saveReview", () => {
 		expect(path).toContain(".json");
 		expect(mkdir).toHaveBeenCalled();
 
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Record<string, unknown>;
 		expect(written.files).toEqual(["src/app.ts"]);
 		expect(written.summary).toBe("Top concern: SQL injection");
 		expect(written.verdict).toBe("Request changes");
@@ -362,7 +374,9 @@ describe("appendHistory", () => {
 		await appendHistory(mockEntry);
 		expect(mkdir).toHaveBeenCalled();
 		expect(writeFile).toHaveBeenCalledTimes(1);
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Array<Record<string, unknown>>;
 		expect(written).toHaveLength(1);
 		expect(written[0].score).toBe(74);
 	});
@@ -387,7 +401,9 @@ describe("appendHistory", () => {
 		];
 		vi.mocked(readFile).mockResolvedValue(JSON.stringify(existing) as any);
 		await appendHistory(mockEntry);
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Array<Record<string, unknown>>;
 		expect(written).toHaveLength(2);
 		expect(written[1].score).toBe(74);
 	});
@@ -403,7 +419,9 @@ describe("appendHistory", () => {
 		}));
 		vi.mocked(readFile).mockResolvedValue(JSON.stringify(existing) as any);
 		await appendHistory(mockEntry);
-		const written = JSON.parse(vi.mocked(writeFile).mock.calls[0][1] as string);
+		const written = parseTestJson(
+			vi.mocked(writeFile).mock.calls[0][1] as string,
+		) as Array<Record<string, unknown>>;
 		expect(written).toHaveLength(100);
 		// Oldest entry (2026-06-01) should be dropped
 		expect(written[0].date).not.toBe("2026-06-01");

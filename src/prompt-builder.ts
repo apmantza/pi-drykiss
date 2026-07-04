@@ -107,7 +107,7 @@ const BUNDLED_SHARED_FILES = [
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "3"; // bump to force re-seed (v3: mode-context fragments)
+const CURRENT_SEED_VERSION = "4"; // bump to force re-seed (v4: synthesis verdict consistency rule)
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);
@@ -178,6 +178,7 @@ async function copyBundledPrompts(
 					`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+			return undefined;
 		}),
 	);
 
@@ -192,6 +193,7 @@ async function copyBundledPrompts(
 					`Failed to seed shared fragment ${filename}: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}
+			return undefined;
 		}),
 	);
 }
