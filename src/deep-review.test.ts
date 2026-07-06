@@ -671,6 +671,36 @@ describe("loadFocusSeeds", () => {
 			spy.mockRestore();
 		}
 	});
+
+	it("skips numbered items with no text after the number", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockResolvedValue(
+				"1. **TRUST BOUNDARIES.** Real content here.\n" +
+				"2. \n" +
+				"3. **CONTROL FLOW.** More content.",
+			);
+		try {
+			const seeds = await loadFocusSeeds();
+			expect(seeds).toHaveLength(2);
+			expect(seeds[0]).toBe("TRUST BOUNDARIES. Real content here.");
+			expect(seeds[1]).toBe("CONTROL FLOW. More content.");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("returns an empty array for a blank/whitespace-only file", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockResolvedValue("   \n\n  \n");
+		try {
+			const seeds = await loadFocusSeeds();
+			expect(seeds).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });
 
 // Re-export PASS_PLAN so it's reachable from production code that wants

@@ -3,11 +3,12 @@
  *
  * Pipeline position: lenses → synthesis → **validate** → score/render.
  *
- * The validator runs a separate LLM call whose system prompt is sourced
- * from `src/prompts/_shared/validator.md` and whose user prompt lists the
- * synthesized findings plus the diff. The LLM returns a JSON array of
- * per-finding verdicts ("real" or "false-positive" + a confidence and a
- * one-sentence justification).
+ * The validator runs a separate LLM call whose system prompt is loaded by
+ * `loadValidatorSystemPrompt()` (resolves the user-customized
+ * `_shared/validator.md` first, then the bundled default) and whose user
+ * prompt lists the synthesized findings plus the diff. The LLM returns a
+ * JSON array of per-finding verdicts ("real" or "false-positive" + a
+ * confidence and a one-sentence justification).
  *
  * Design notes:
  *   - "Fail open": if the validator errors or returns no parseable output,
@@ -268,9 +269,15 @@ export async function runValidator(
 }
 
 /**
- * Load the validator system prompt from the bundled prompts dir.
- * The prompt is a project-shared fragment at
- * `src/prompts/_shared/validator.md` — see `prompt-architecture.md`.
+ * Load the validator system prompt.
+ *
+ * Resolution order: user-customized `_shared/validator.md` (under
+ * `~/.pi/drykiss/prompts/`) is tried first; if absent, the bundled
+ * default at `src/prompts/_shared/validator.md` is used. See
+ * `prompt-architecture.md`.
+ *
+ * Propagates errors from the underlying loader (e.g. missing file) so
+ * callers can fail open.
  */
 export async function loadValidatorSystemPrompt(): Promise<string> {
 	// Resolution order: user dir → bundled defaults (same as loadPromptBody).

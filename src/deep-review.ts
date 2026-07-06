@@ -230,7 +230,8 @@ export async function loadFocusSeeds(): Promise<string[]> {
 		if (numberedMatch) {
 			// Start a new seed item
 			if (current !== null) {
-				seeds.push(current.join(" ").replace(/\s+/g, " ").trim());
+				const joined = current.join(" ").replace(/\s+/g, " ").trim();
+				if (joined.length > 0) seeds.push(joined);
 			}
 			// Strip bold markers (**text**) — keep the text, remove the **
 			const text = numberedMatch[1].replace(/\*\*(.*?)\*\*/g, "$1");
@@ -241,7 +242,8 @@ export async function loadFocusSeeds(): Promise<string[]> {
 		}
 	}
 	if (current !== null) {
-		seeds.push(current.join(" ").replace(/\s+/g, " ").trim());
+		const joined = current.join(" ").replace(/\s+/g, " ").trim();
+		if (joined.length > 0) seeds.push(joined);
 	}
 
 	return seeds.length > 0 ? seeds : [];

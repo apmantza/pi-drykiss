@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as promptLoader from "./prompt-loader.js";
 import {
 	applyValidatorVerdicts,
 	buildValidatorUserPrompt,
+	loadValidatorSystemPrompt,
 	parseValidatorOutput,
 	runValidator,
 	type ValidatorVerdict,
@@ -254,5 +256,41 @@ describe("runValidator — fail-open behavior", () => {
 		expect(result.droppedFalsePositives).toBe(0);
 		expect(result.confirmedReal).toBe(0);
 		expect(result.errorMessage).toBeDefined();
+	});
+});
+
+describe("loadValidatorSystemPrompt", () => {
+	it("resolves the bundled validator.md by default", async () => {
+		const prompt = await loadValidatorSystemPrompt();
+		expect(typeof prompt).toBe("string");
+		expect(prompt.length).toBeGreaterThan(0);
+		// The bundled validator.md opens with an H1 title.
+		expect(prompt).toContain("# Validator");
+	});
+
+	it("delegates to loadPromptBody (user dir → bundled)", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockResolvedValue("CUSTOM VALIDATOR PROMPT");
+		try {
+			const prompt = await loadValidatorSystemPrompt();
+			expect(prompt).toBe("CUSTOM VALIDATOR PROMPT");
+			expect(spy).toHaveBeenCalledWith("validator", "shared");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("propagates errors when loadPromptBody fails (no file)", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockRejectedValue(new Error("missing validator.md"));
+		try {
+			await expect(loadValidatorSystemPrompt()).rejects.toThrow(
+				"missing validator.md",
+			);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 });
