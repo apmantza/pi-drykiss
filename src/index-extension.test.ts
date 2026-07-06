@@ -61,41 +61,14 @@ vi.mock("./auto-inject.js", () => ({
 	buildAutoInjectBlock,
 }));
 
-vi.mock("./persist.js", () => ({
-	listReviews: vi.fn().mockResolvedValue([]),
-}));
-
-const commandExports = {
-	handleDrykissCommand: vi.fn(),
-	handleKissCommand: vi.fn(),
-	handleDryCommand: vi.fn(),
-	handleResilienceCommand: vi.fn(),
-	handleArchCommand: vi.fn(),
-	handleTestsCommand: vi.fn(),
-	handleSecurityCommand: vi.fn(),
-	handleJobsCommand: vi.fn(),
-	handleEndReviewCommand: vi.fn(),
+const toolExports = {
 	executeDrykissReviewTool: vi.fn(),
 	executeDrykissAutoreviewTool: vi.fn(),
 	DrykissReviewParams: {},
 	DrykissAutoreviewParams: {},
-	COMMAND_NAME: "drykiss",
-	KISS_COMMAND_NAME: "drykiss-kiss",
-	DRY_COMMAND_NAME: "drykiss-dry",
-	RESILIENCE_COMMAND_NAME: "drykiss-resilience",
-	ARCH_COMMAND_NAME: "drykiss-arch",
-	TESTS_COMMAND_NAME: "drykiss-tests",
-	SECURITY_COMMAND_NAME: "drykiss-security",
-	DOCS_COMMAND_NAME: "drykiss-docs",
 };
 
-vi.mock("./review-command.js", () => commandExports);
-vi.mock("./config-command.js", () => ({
-	handleConfigCommand: vi.fn(),
-	handleSuppressCommand: vi.fn(),
-	handleListSuppressionsCommand: vi.fn(),
-	handleUnsuppressCommand: vi.fn(),
-}));
+vi.mock("./review-command.js", () => toolExports);
 
 const { default: registerDrykiss } = await import("./index.js");
 
@@ -142,7 +115,7 @@ function completedJob() {
 	};
 }
 
-describe("extension event wiring", () => {
+describe("extension registration", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		managerOnComplete = undefined;
@@ -151,6 +124,20 @@ describe("extension event wiring", () => {
 		trackerTrackEdit.mockReturnValue(undefined);
 		buildAutoInjectBlock.mockReturnValue("\nAUTO-INJECT");
 		loadConfig.mockResolvedValue({});
+	});
+
+	it("registers only tools, no commands", () => {
+		const { pi } = makePi();
+		registerDrykiss(pi as any);
+
+		expect(pi.registerCommand).not.toHaveBeenCalled();
+		expect(pi.registerTool).toHaveBeenCalledTimes(2);
+		expect(pi.registerTool).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "drykiss_autoreview" }),
+		);
+		expect(pi.registerTool).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "drykiss_review" }),
+		);
 	});
 
 	it("attaches the review widget on tool execution start", () => {
