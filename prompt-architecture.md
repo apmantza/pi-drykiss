@@ -165,40 +165,38 @@ export async function loadSharedFragment(
 
 ```ts
 // src/prompt-composer.ts
-import { loadPromptFile, loadSharedFragment, type PromptSource } from "./prompt-loader.js";
+import { loadPromptBody } from "./prompt-loader.js";
 
 export interface ComposeOptions {
-  readonly source: PromptSource;
   readonly activeConstraints?: string;  // Injected disable/severity/ignore/focus block
-  readonly onDemandSections?: {
-    readonly fix?: boolean;
-    readonly interactive?: boolean;
-    readonly sinceRef?: string;
-  };
 }
 
 export async function composeLensPrompt(
   lens: Exclude<ReviewLens, "all">,
   options: ComposeOptions,
 ): Promise<string> {
-  const [ironLaw, jsonOutput, grounding, lensBody, activeConstraints] =
+  const [ironLaw, lensBody, jsonOutput, grounding, activeTemplate] =
     await Promise.all([
-      loadSharedFragment(options.source, "iron-law"),
-      loadSharedFragment(options.source, "json-output"),
-      loadSharedFragment(options.source, "grounding-rules"),
-      loadPromptFile(options.source, lens),
+      loadPromptBody("iron-law", "shared"),
+      loadPromptBody(lens, "lens"),
+      loadPromptBody("json-output", "shared"),
+      loadPromptBody("grounding-rules", "shared"),
       options.activeConstraints
-        ? loadSharedFragment(options.source, "active-constraints")
+        ? loadPromptBody("active-constraints", "shared")
         : Promise.resolve(""),
     ]);
 
-  return [
-    ironLaw,
-    lensBody,
-    activeConstraints,
-    jsonOutput,
-    grounding,
-  ].filter(Boolean).join("\n\n");
+  const sections = [ironLaw, lensBody];
+  if (activeTemplate && options.activeConstraints) {
+    sections.push(
+      substitute(activeTemplate, {
+        active_constraints: options.activeConstraints,
+      }),
+    );
+  }
+  sections.push(jsonOutput, grounding);
+
+  return sections.filter(Boolean).join("\n\n");
 }
 
 export async function composeSynthesisPrompt(

@@ -59,7 +59,7 @@ When reviewing code, also verify these fundamental quality aspects. Each lens sh
 
 ### Synthesis Calibration
 
-These rules apply only at the synthesis (final-filter) stage, not to individual lens reviews.
+These rules apply ONLY at the synthesis (final-filter) stage, after all lens reviews have produced their findings. Individual lens reviews MUST NOT apply them to their own output — they govern how the synthesizer evaluates and merges the findings the lenses produced, not how a lens should grade its own work.
 
 - You are the final filter. Cheap model reviewers may over-report; remove or down-rank noisy findings.
 - Keep only findings with concrete evidence and a minimal actionable fix.

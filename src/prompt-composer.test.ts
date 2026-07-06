@@ -175,3 +175,44 @@ describe("simplicity lens body (bundled prompt structure)", () => {
 		expect(content).toMatch(/## Output Discipline/);
 	});
 });
+
+/**
+ * Structure tests for the merged `grounding-rules.md` shared fragment.
+ * Reads the real bundled file and asserts the expected sections are
+ * present and that the synthesis-only rules are clearly scoped so they
+ * don't leak into lens behavior (no cross-contamination).
+ */
+describe("grounding-rules.md (bundled prompt structure)", () => {
+	it("contains the lens grounding, Quick Self-Check, and Synthesis Calibration sections", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile(
+			"src/prompts/_shared/grounding-rules.md",
+			"utf8",
+		);
+		expect(content).toContain("### 🔍 Code Examination Protocol");
+		expect(content).toContain("### Severity Calibration");
+		expect(content).toContain("### Anti-Noise Rules");
+		expect(content).toContain("### Quick Self-Check");
+		expect(content).toContain("### Synthesis Calibration");
+	});
+
+	it("scopes the Synthesis Calibration rules to the synthesis stage only", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile(
+			"src/prompts/_shared/grounding-rules.md",
+			"utf8",
+		);
+		const idx = content.indexOf("### Synthesis Calibration");
+		expect(idx).toBeGreaterThan(-1);
+		const section = content.slice(idx);
+		// The synthesis-only rules must be explicitly framed as not
+		// applying to individual lens reviews, so a lens won't
+		// downgrade or merge its own output unsupervised.
+		expect(section).toMatch(
+			/apply.*only at the synthesis|synthesis \(final-filter\) stage/i,
+		);
+		expect(section).toMatch(
+			/MUST NOT apply them to their own output|not to individual lens reviews/i,
+		);
+	});
+});

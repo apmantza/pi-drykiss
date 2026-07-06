@@ -259,7 +259,7 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].systemPrompt).toContain("Output ONLY the JSON array");
 	});
 
-	it("includes KISS/DRY checklist in system prompts", async () => {
+	it("includes the Quick Self-Check (merged from kiss-dry-checklist) in system prompts", async () => {
 		const prompts = await buildReviewPrompts(
 			"/cwd",
 			mockFiles,

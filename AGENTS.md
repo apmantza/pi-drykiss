@@ -53,8 +53,9 @@ scripts/
   - `auto-injector.test.ts` — checklist injection logic
   - `git-diff.test.ts` — diff parsing edge cases
   - `prompt-builder.test.ts` — prompt composition (mocks the loader/composer layer)
+  - `prompt-composer.test.ts` — lens/synthesis prompt assembly
   - `model-selector.test.ts` — model hint resolution and fallback
-  - `config-command.test.ts` — config persistence
+  - `review-command.test.ts` — drykiss_autoreview tool handler + deep review
   - `scripts/check-no-prompt-literals.test.ts` — CI guard tests
   - `index.test.ts` — extension registration smoke test
 
