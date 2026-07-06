@@ -62,9 +62,7 @@ vi.mock("./auto-inject.js", () => ({
 }));
 
 const toolExports = {
-	executeDrykissReviewTool: vi.fn(),
 	executeDrykissAutoreviewTool: vi.fn(),
-	DrykissReviewParams: {},
 	DrykissAutoreviewParams: {},
 };
 
@@ -126,17 +124,14 @@ describe("extension registration", () => {
 		loadConfig.mockResolvedValue({});
 	});
 
-	it("registers only tools, no commands", () => {
+	it("registers only one tool, no commands", () => {
 		const { pi } = makePi();
 		registerDrykiss(pi as any);
 
 		expect(pi.registerCommand).not.toHaveBeenCalled();
-		expect(pi.registerTool).toHaveBeenCalledTimes(2);
+		expect(pi.registerTool).toHaveBeenCalledTimes(1);
 		expect(pi.registerTool).toHaveBeenCalledWith(
 			expect.objectContaining({ name: "drykiss_autoreview" }),
-		);
-		expect(pi.registerTool).toHaveBeenCalledWith(
-			expect.objectContaining({ name: "drykiss_review" }),
 		);
 	});
 

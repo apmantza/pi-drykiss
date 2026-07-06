@@ -263,21 +263,14 @@ describe("drykiss_autoreview tool", () => {
 });
 
 describe("tool parameter schemas (LLM-facing surface)", () => {
-	it("DrykissAutoreviewParams exposes only scope-related params", async () => {
-		// Regression guard for the slim-down: the LLM-facing schema
-		// should expose ONLY the params an agent needs to pick a
-		// scope and override output format. Removed from the
-		// schema (now config-driven or internal-only):
-		//   - `model`, `contextMode`, `maxFiles`, `validate`,
-		//     `deep`, `deepPasses`, `deepMinVotes`, `deepValidate`
-		// Kept:
-		//   - `mode`, `files`, `base`, `commit`, `pr` (scope picks)
-		//   - `lenses` (which lenses to run)
-		//   - `format` (output override)
+	it("DrykissAutoreviewParams exposes scope + lens params", async () => {
 		const { DrykissAutoreviewParams } = await import("./review-command.js");
 		const props = Object.keys((DrykissAutoreviewParams as any).properties);
+		// `lens` was added when the separate drykiss_review tool was
+		// consolidated into drykiss_autoreview. Accepts a single lens
+		// name or "all". Overrides `lenses` if both are set.
 		expect(props.sort((a, b) => a.localeCompare(b))).toEqual(
-			["mode", "files", "base", "commit", "pr", "lenses", "format"].sort(
+			["mode", "files", "base", "commit", "pr", "lens", "lenses", "format"].sort(
 				(a, b) => a.localeCompare(b),
 			),
 		);
@@ -297,12 +290,12 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 		);
 	});
 
-	it("DrykissReviewParams exposes only lens + files", async () => {
-		// Same slim-down principle for the single-lens tool.
-		const { DrykissReviewParams } = await import("./review-command.js");
-		const props = Object.keys((DrykissReviewParams as any).properties);
-		expect(props.sort((a, b) => a.localeCompare(b))).toEqual(
-			["lens", "files"].sort((a, b) => a.localeCompare(b)),
-		);
+	it("DrykissAutoreviewParams `lens` param accepts single lens name or 'all'", async () => {
+		const { DrykissAutoreviewParams } = await import("./review-command.js");
+		const lensSchema = (DrykissAutoreviewParams as any).properties.lens;
+		const literals = lensSchema.anyOf.map((s: any) => s.const);
+		expect(literals).toContain("all");
+		expect(literals).toContain("security");
+		expect(literals).toContain("simplicity");
 	});
 });

@@ -4,14 +4,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
-import { buildReviewPrompts, ensureDefaultPrompts } from "./prompt-builder.js";
+import { ensureDefaultPrompts } from "./prompt-builder.js";
 
 import { loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
-import { findModelByHint } from "./llm.js";
-import type { ReviewLens, ChangedFile, Finding, Severity } from "./types.js";
+import type { ReviewLens, Finding, Severity } from "./types.js";
 import { LENS_NAMES } from "./types.js";
-import { parseFindingsJson } from "./parse-findings.js";
 import {
 	resolveReviewScope,
 	type ReviewMode,
@@ -22,7 +20,6 @@ import type { ReviewResult } from "./review-result.js";
 import { filterIgnored } from "./review-result.js";
 import { formatReviewResultCompact } from "./compact-format.js";
 import { LOG_PREFIX } from "./constants.js";
-import { toErrorMessage } from "./error-utils.js";
 
 const MAX_FILES = 40;
 
@@ -46,88 +43,6 @@ function safeOnUpdate(
 	}
 }
 
-async function runLensReview(
-	ctx: ExtensionContext,
-	cwd: string,
-	files: ChangedFile[],
-	diffs: Map<string, string>,
-	lens: ReviewLens,
-	options: {
-		modelHint?: string;
-		contents?: Map<
-			string,
-			{ content: string; lineCount: number; truncated: boolean }
-		>;
-		projectIndex?: import("./git-diff.js").ProjectIndexEntry[];
-		commands?: { test?: string; lint?: string };
-		/** Optional streaming callback for tool-mode progress display. */
-		onUpdate?: (result: {
-			content: Array<{ type: "text"; text: string }>;
-		}) => void;
-		/** Optional abort signal for tool-mode cancellation. */
-		signal?: AbortSignal;
-	} = {},
-): Promise<{
-	lens: ReviewLens;
-	findings: Finding[];
-	rawOutput: string;
-	modelName: string;
-}> {
-	const prompts = await buildReviewPrompts(cwd, files, diffs, lens, {
-		contents: options.contents,
-		projectIndex: options.projectIndex,
-		commands: options.commands,
-	});
-	const prompt = prompts[0];
-	if (!prompt) return { lens, findings: [], rawOutput: "", modelName: "none" };
-
-	// Use subagent runner for visible Pi subagent spawning
-	const { resolveModel, runLensSubagent } = await import(
-		"./subagent-runner.js"
-	);
-	const available = ctx.modelRegistry.getAvailable();
-	const model = options.modelHint
-		? (findModelByHint(available, options.modelHint) ??
-			(await resolveModel(ctx, lens)))
-		: await resolveModel(ctx, lens);
-
-	safeOnUpdate(
-		options.onUpdate,
-		`Starting DRYKISS ${lens} review for ${files.length} file(s) with ${model.provider ? `${model.provider}/` : ""}${model.name}...`,
-	);
-
-	ctx.ui.notify(
-		`${LOG_PREFIX} Launching ${lens} subagent with ${model.name}...`,
-		"info",
-	);
-
-	const result = await runLensSubagent(
-		ctx,
-		cwd,
-		model,
-		prompt.systemPrompt,
-		prompt.userPrompt,
-		lens,
-		options.signal,
-	);
-
-	const rawOutput = result.errorMessage
-		? `ERROR: ${result.errorMessage}`
-		: result.text || "[]";
-	const { findings, parseError } = parseFindingsJson(rawOutput, lens);
-	if (parseError && !result.errorMessage) {
-		ctx.ui.notify(
-			`${LOG_PREFIX} ${lens} lens output could not be parsed. Check console for raw output.`,
-			"warning",
-		);
-	}
-	safeOnUpdate(
-		options.onUpdate,
-		`DRYKISS ${lens} review complete: ${findings.length} finding(s).`,
-	);
-	return { lens, findings, rawOutput, modelName: result.modelName };
-}
-
 // ── Tool parameter schema ─────────────────────────────────
 
 const LensParam = Type.Union(
@@ -144,23 +59,6 @@ const LensParam = Type.Union(
 		description: "Which review lens to apply",
 	},
 );
-
-export const DrykissReviewParams = Type.Object({
-	lens: LensParam,
-	files: Type.Array(Type.String(), {
-		description: "File paths to review (relative to cwd)",
-	}),
-	// Note: the previous schema exposed a `model` parameter so the
-	// LLM could pin the review to a specific model. We removed it
-	// from the LLM-facing schema because letting the agent override
-	// model selection at review time conflicts with the user's
-	// config-driven model choices (per-lens overrides, autoroute,
-	// quality gate thresholds, etc.). If the user wants a different
-	// model, they should change the config file — not pass it
-	// through the tool. Internal callers (tests, the autoreview
-	// orchestrator) still accept `model` directly on the function
-	// signature.
-});
 
 export const DrykissAutoreviewParams = Type.Object({
 	// ── Scope (the only thing you should think about) ────────
@@ -199,6 +97,24 @@ export const DrykissAutoreviewParams = Type.Object({
 				"GitHub PR URL, owner/repo#123, or PR number (only when mode=pr)",
 		}),
 	),
+	lens: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("all"),
+				Type.Literal("simplicity"),
+				Type.Literal("deduplication"),
+				Type.Literal("clarity"),
+				Type.Literal("resilience"),
+				Type.Literal("architecture"),
+				Type.Literal("tests"),
+				Type.Literal("security"),
+			],
+			{
+				description:
+					"Single lens to run, or 'all' for all lenses. Overrides `lenses` if both are set. Default: all.",
+			},
+		),
+	),
 	lenses: Type.Optional(
 		Type.Union([
 			Type.Literal("all"),
@@ -208,24 +124,13 @@ export const DrykissAutoreviewParams = Type.Object({
 	// Note: the previous schema exposed `model`, `contextMode`,
 	// `maxFiles`, `validate`, and `deep*` parameters. We removed
 	// them from the LLM-facing schema because:
-	//   - `model`     → config-driven only (per-lens overrides, autoroute,
-	//                   quality gate). LLM shouldn't override the user's
-	//                   model policy.
-	//   - `contextMode` → config setting; LLM shouldn't override
-	//                     full-file context on a per-call basis.
-	//   - `maxFiles`   → config setting.
-	//   - `validate`   → adversarial validator; advanced, opt-in via
-	//                    config.validate or a future dedicated tool.
+	//   - `model`     → config-driven only
+	//   - `contextMode` → config setting
+	//   - `maxFiles`   → config setting
+	//   - `validate`   → config opt-in
 	//   - `deep*`      → Bugbot deep-mode pipeline; deserves its own
-	//                    tool surface, not buried in autoreview.
-	// Internal callers (runDeepAutoreview, runReview, tests) still
-	// accept these parameters directly on the function signature.
+	//                    tool surface
 	// ── Output (rare override) ──
-	// The compact format (default) emits one line per finding in
-	// kiss-check style. The structured format includes the full
-	// markdown report + JSON dump of all findings, suitable for
-	// post-processing. Either way, the structured `details` payload
-	// is always populated with the full ReviewResult.
 	format: Type.Optional(
 		Type.Union([Type.Literal("compact"), Type.Literal("structured")]),
 	),
@@ -238,6 +143,7 @@ export async function executeDrykissAutoreviewTool(
 		base?: string;
 		commit?: string;
 		pr?: string;
+		lens?: "all" | Exclude<ReviewLens, "all">;
 		lenses?: "all" | Exclude<ReviewLens, "all">[];
 		/**
 		 * Internal-only: callers (deep-mode pipeline, tests) may pass
@@ -294,7 +200,7 @@ export async function executeDrykissAutoreviewTool(
 	const suppressions = effectiveConfig.suppressions ?? [];
 	const contextMode =
 		params.contextMode ?? effectiveConfig.contextMode ?? "full";
-	const lenses = normalizeAutoreviewLenses(params.lenses);
+	const lenses = resolveLenses(params.lens, params.lenses);
 	const fileProgress = makeAutoreviewFileProgress(onUpdate);
 	const scope = await resolveReviewScope(
 		pi,
@@ -459,11 +365,23 @@ export async function executeDrykissAutoreviewTool(
 	};
 }
 
-function normalizeAutoreviewLenses(
-	value: "all" | Exclude<ReviewLens, "all">[] | undefined,
+/**
+ * Resolve the list of lenses to run from the `lens` and `lenses` params.
+ *
+ * - If `lens` is provided (single value or "all"), it wins.
+ * - Otherwise falls back to `lenses`.
+ * - Default: all lenses.
+ */
+function resolveLenses(
+	single: "all" | Exclude<ReviewLens, "all"> | undefined,
+	multi: "all" | Exclude<ReviewLens, "all">[] | undefined,
 ): Exclude<ReviewLens, "all">[] {
-	if (!value || value === "all") return [...LENS_NAMES];
-	return value.length > 0 ? value : [...LENS_NAMES];
+	if (single) {
+		if (single === "all") return [...LENS_NAMES];
+		return [single];
+	}
+	if (!multi || multi === "all") return [...LENS_NAMES];
+	return multi.length > 0 ? multi : [...LENS_NAMES];
 }
 
 function renderAutoreviewFileProgress(
@@ -638,72 +556,6 @@ function formatReviewResultForTool(
 		lines.push("", JSON.stringify(result.findings, null, 2));
 	}
 	return lines.join("\n");
-}
-
-export async function executeDrykissReviewTool(
-	params: {
-		lens:
-			| "simplicity"
-			| "deduplication"
-			| "clarity"
-			| "resilience"
-			| "architecture"
-			| "tests"
-			| "security";
-		files: string[];
-		model?: string;
-	},
-	ctx: ExtensionContext,
-	pi: ExtensionAPI,
-	signal?: AbortSignal,
-	onUpdate?: (result: {
-		content: Array<{ type: "text"; text: string }>;
-	}) => void,
-): Promise<{
-	content: Array<{ type: "text"; text: string }>;
-	details: { findings: Finding[] };
-}> {
-	await ensureDefaultPrompts(ctx.cwd);
-	const { config, warnings } = await loadEffectiveConfig(ctx.cwd);
-	for (const warning of warnings) {
-		console.warn(`${LOG_PREFIX} ${warning}`);
-	}
-	const contextMode = config.contextMode ?? "full";
-	const needsProjectIndex =
-		params.lens === "deduplication" || params.lens === "architecture";
-
-	const scope = await resolveReviewScope(
-		pi,
-		ctx.cwd,
-		{ mode: "files", files: params.files },
-		{
-			contextMode,
-			needsProjectIndex,
-			ignorePatterns: config.ignorePatterns,
-		},
-	);
-	const { files: filesToReview, diffs, contents, projectIndex } = scope;
-
-	const review = await runLensReview(
-		ctx,
-		ctx.cwd,
-		filesToReview,
-		diffs,
-		params.lens,
-		{
-			modelHint: params.model,
-			contents,
-			projectIndex,
-			commands: config.commands,
-			onUpdate,
-			signal,
-		},
-	);
-
-	return {
-		content: [{ type: "text", text: JSON.stringify(review.findings, null, 2) }],
-		details: { findings: review.findings },
-	};
 }
 
 /**

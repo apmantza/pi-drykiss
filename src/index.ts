@@ -4,9 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
-	executeDrykissReviewTool,
 	executeDrykissAutoreviewTool,
-	DrykissReviewParams,
 	DrykissAutoreviewParams,
 } from "./review-command.js";
 import { applyReviewState, setReviewInProgress } from "./review-session.js";
@@ -152,7 +150,7 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	// ── drykiss_autoreview tool — Programmatic multi-lens review ─────
+	// ── drykiss_autoreview tool — Programmatic review ─────
 	pi.registerTool({
 		name: "drykiss_autoreview",
 		label: "DRYKISS Autoreview",
@@ -163,7 +161,8 @@ export default function (pi: ExtensionAPI): void {
 		promptGuidelines: [
 			"Use drykiss_autoreview for closeout code reviews, git diff reviews, PR reviews, full-codebase scans, or when the user asks for autoreview.",
 			"Pick exactly one scope via the `mode` field: 'local' for uncommitted changes, 'staged' for staged changes, 'branch' with `base` for branch reviews, 'commit' with `commit` for single commits, 'pr' with `pr` for GitHub PRs, 'full' for the entire codebase, 'files' with `files` for explicit paths. Omit `mode` to use a smart default (staged → local).",
-			"Optional: pass `lenses` to run a subset (default is all). Pass `format: 'structured'` if you need the full markdown report; default 'compact' is one line per finding.",
+			"Optional: pass `lens` (single lens or 'all') or `lenses` (array) to run a subset. Default is all lenses. Pass `lens: 'security'` for a focused single-lens review.",
+			"Optional: pass `format: 'structured'` if you need the full markdown report; default 'compact' is one line per finding.",
 			"Model selection, context mode, max files, validator, and deep mode are config-driven via ~/.pi/drykiss/config.json — not exposed as tool parameters.",
 			"Treat drykiss_autoreview findings as advisory: verify real code before fixing, reject speculative findings, and rerun focused tests after any review-triggered fix.",
 		],
@@ -192,10 +191,15 @@ export default function (pi: ExtensionAPI): void {
 				mode = args.pr ? "pr" : args.files ? "files" : "local";
 			}
 			const target = args.pr ?? args.base ?? args.commit ?? "";
+			const lensInfo = args.lens
+				? ` ${args.lens}`
+				: args.lenses
+					? ` ${Array.isArray(args.lenses) ? args.lenses.join(",") : args.lenses}`
+					: " all";
 			return new Text(
 				theme.fg("toolTitle", theme.bold("drykiss_autoreview ")) +
 					theme.fg("accent", mode) +
-					theme.fg("dim", target ? ` ${target}` : ""),
+					theme.fg("dim", `${target ? ` ${target}` : ""}${lensInfo}`),
 				0,
 				0,
 			);
@@ -211,10 +215,6 @@ export default function (pi: ExtensionAPI): void {
 			const clean = review?.clean === true;
 			const counts = review?.counts ?? {};
 			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
-			// Surface the health score in the same one-liner so users
-			// see the bottom line without expanding. Same color bands
-			// as the message renderer / notification body / widget
-			// summary — 80/50 thresholds so the rule is learned once.
 			const hs = review?.healthScore;
 			const hasScore = typeof hs === "number";
 			let scoreText = "";
@@ -231,83 +231,6 @@ export default function (pi: ExtensionAPI): void {
 				);
 			return new Text(
 				progress ? `${theme.fg("dim", progress)}\n${summary}` : summary,
-				0,
-				0,
-			);
-		},
-	});
-
-	// ── drykiss_review tool — Programmatic lens review ─────
-	pi.registerTool({
-		name: "drykiss_review",
-		label: "DRYKISS Review",
-		description:
-			"Review code changes through a specific DRYKISS lens. Returns structured JSON findings. Use for focused reviews on specific files. Model selection is config-driven.",
-		promptSnippet: "Run a focused DRYKISS lens review on code changes",
-		promptGuidelines: [
-			"Use drykiss_review when the user asks for a focused code quality, simplicity, duplication, resilience, architecture, tests, or security review on specific files.",
-			"Pass one lens ('simplicity', 'deduplication', 'clarity', 'resilience', 'architecture', 'tests', or 'security') and the file paths to review.",
-			"Model selection is config-driven (per-lens overrides, autoroute). Edit ~/.pi/drykiss/config.json to change models — the tool does not accept a model parameter.",
-		],
-		parameters: DrykissReviewParams,
-
-		async execute(
-			_toolCallId: string,
-			params: Record<string, unknown>,
-			signal: AbortSignal,
-			onUpdate: any,
-			ctx: any,
-		) {
-			return executeDrykissReviewTool(
-				params as {
-					lens:
-						| "simplicity"
-						| "deduplication"
-						| "clarity"
-						| "resilience"
-						| "architecture"
-						| "tests"
-						| "security";
-					files: string[];
-					model?: string;
-				},
-				ctx,
-				pi,
-				signal,
-				onUpdate,
-			);
-		},
-
-		renderCall(args: any, theme: any) {
-			return new Text(
-				theme.fg("toolTitle", theme.bold("drykiss_review ")) +
-					theme.fg("accent", args.lens) +
-					theme.fg(
-						"dim",
-						` ${args.files.length} file(s)${args.model ? " @" + args.model : ""}`,
-					),
-				0,
-				0,
-			);
-		},
-
-		renderResult(result: any, _options: any, theme: any) {
-			const findings = result.details?.findings ?? [];
-			const critical = findings.filter(
-				(f: any) => f.severity === "critical",
-			).length;
-			const high = findings.filter((f: any) => f.severity === "high").length;
-			let icon;
-			if (critical > 0) {
-				icon = theme.fg("error", "✗");
-			} else if (high > 0) {
-				icon = theme.fg("warning", "◐");
-			} else {
-				icon = theme.fg("success", "✓");
-			}
-			return new Text(
-				`${icon} ${theme.fg("accent", findings.length + " finding(s)")}` +
-					theme.fg("dim", ` (${critical} critical, ${high} high)`),
 				0,
 				0,
 			);
