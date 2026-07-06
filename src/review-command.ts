@@ -45,7 +45,8 @@ function safeOnUpdate(
 
 // ── Tool parameter schema ─────────────────────────────────
 
-const LensParam = Type.Union(
+/** Shared TypeBox union of the seven DRYKISS lens names (no "all"). */
+const LensNameParam = Type.Union(
 	[
 		Type.Literal("simplicity"),
 		Type.Literal("deduplication"),
@@ -56,7 +57,7 @@ const LensParam = Type.Union(
 		Type.Literal("security"),
 	],
 	{
-		description: "Which review lens to apply",
+		description: "A single DRYKISS lens name",
 	},
 );
 
@@ -99,16 +100,7 @@ export const DrykissAutoreviewParams = Type.Object({
 	),
 	lens: Type.Optional(
 		Type.Union(
-			[
-				Type.Literal("all"),
-				Type.Literal("simplicity"),
-				Type.Literal("deduplication"),
-				Type.Literal("clarity"),
-				Type.Literal("resilience"),
-				Type.Literal("architecture"),
-				Type.Literal("tests"),
-				Type.Literal("security"),
-			],
+			[Type.Literal("all") as any, ...(LensNameParam as any).anyOf],
 			{
 				description:
 					"Single lens to run, or 'all' for all lenses. Overrides `lenses` if both are set. Default: all.",
@@ -118,7 +110,7 @@ export const DrykissAutoreviewParams = Type.Object({
 	lenses: Type.Optional(
 		Type.Union([
 			Type.Literal("all"),
-			Type.Array(LensParam, { description: "Subset of DRYKISS lenses to run" }),
+			Type.Array(LensNameParam, { description: "Subset of DRYKISS lenses to run" }),
 		]),
 	),
 	// Note: the previous schema exposed `model`, `contextMode`,

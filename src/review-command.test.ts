@@ -117,6 +117,115 @@ describe("drykiss_autoreview tool", () => {
 		expect(result.content[0].text).toContain("local changes");
 	});
 
+	it("uses single `lens` param to select one lens", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
+		const manager = {
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clean: true,
+				status: "done",
+				verdict: "Approve",
+				target: { mode: "local", label: "local changes" },
+				files: ["src/a.ts"],
+				counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+				findings: [],
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			}),
+		} as any;
+
+		await executeDrykissAutoreviewTool(
+			{ mode: "local", lens: "resilience" },
+			{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
+			pi,
+			manager,
+		);
+
+		expect(manager.runReview).toHaveBeenCalledTimes(1);
+		// Argument index 7 is the options object.
+		expect(manager.runReview.mock.calls[0][7]).toEqual(
+			expect.objectContaining({ lenses: ["resilience"] }),
+		);
+	});
+
+	it("`lens` param with 'all' runs all lenses", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
+		const manager = {
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clean: true,
+				status: "done",
+				verdict: "Approve",
+				findings: [],
+				counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			}),
+		} as any;
+
+		await executeDrykissAutoreviewTool(
+			{ mode: "local", lens: "all" },
+			{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
+			pi,
+			manager,
+		);
+
+		expect(manager.runReview).toHaveBeenCalledTimes(1);
+		const args = manager.runReview.mock.calls[0][7] as any;
+		expect(args.lenses.sort()).toEqual(
+			["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests", "security", "docs"].sort(),
+		);
+	});
+
+	it("`lens` overrides `lenses` when both are set", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
+		const manager = {
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-1",
+				clean: true,
+				status: "done",
+				verdict: "Approve",
+				findings: [],
+				counts: { total: 0, critical: 0, high: 0, medium: 0, low: 0, nit: 0 },
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			}),
+		} as any;
+
+		await executeDrykissAutoreviewTool(
+			{ mode: "local", lens: "security", lenses: ["simplicity", "architecture"] },
+			{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
+			pi,
+			manager,
+		);
+
+		expect(manager.runReview).toHaveBeenCalledTimes(1);
+		expect(manager.runReview.mock.calls[0][7]).toEqual(
+			expect.objectContaining({ lenses: ["security"] }),
+		);
+	});
+
 	it("caps maxFiles before running the manager", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([
@@ -263,26 +372,31 @@ describe("drykiss_autoreview tool", () => {
 });
 
 describe("tool parameter schemas (LLM-facing surface)", () => {
-	it("DrykissAutoreviewParams exposes scope + lens params", async () => {
+	it("DrykissAutoreviewParams exposes scope + lens + lenses + format", async () => {
 		const { DrykissAutoreviewParams } = await import("./review-command.js");
 		const props = Object.keys((DrykissAutoreviewParams as any).properties);
 		// `lens` was added when the separate drykiss_review tool was
 		// consolidated into drykiss_autoreview. Accepts a single lens
 		// name or "all". Overrides `lenses` if both are set.
 		expect(props.sort((a, b) => a.localeCompare(b))).toEqual(
-			["mode", "files", "base", "commit", "pr", "lens", "lenses", "format"].sort(
-				(a, b) => a.localeCompare(b),
-			),
+			[
+				"mode",
+				"files",
+				"base",
+				"commit",
+				"pr",
+				"lens",
+				"lenses",
+				"format",
+			].sort((a, b) => a.localeCompare(b)),
 		);
 	});
 
 	it("DrykissAutoreviewParams `mode` enum excludes 'auto' (smart default only)", async () => {
 		const { DrykissAutoreviewParams } = await import("./review-command.js");
 		const modeSchema = (DrykissAutoreviewParams as any).properties.mode;
-		// Type.Union produces a `anyOf` array of literals.
 		const literals = modeSchema.anyOf.map((s: any) => s.const);
 		expect(literals).not.toContain("auto");
-		// Confirm the agent-facing modes are exactly these seven.
 		expect(literals.sort((a: string, b: string) => a.localeCompare(b))).toEqual(
 			["local", "staged", "branch", "commit", "pr", "full", "files"].sort(
 				(a, b) => a.localeCompare(b),
