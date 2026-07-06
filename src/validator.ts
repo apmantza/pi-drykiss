@@ -24,9 +24,7 @@
 
 import { extractBalancedJsonArray } from "./json-extract.js";
 import { callLLM } from "./llm.js";
-import { bundledPromptsDir } from "./prompt-loader.js";
-import { join } from "node:path";
-import { readFile } from "node:fs/promises";
+import { loadPromptBody } from "./prompt-loader.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Finding } from "./types.js";
 import { LOG_PREFIX } from "./constants.js";
@@ -275,6 +273,6 @@ export async function runValidator(
  * `src/prompts/_shared/validator.md` — see `prompt-architecture.md`.
  */
 export async function loadValidatorSystemPrompt(): Promise<string> {
-	const path = join(bundledPromptsDir(), "_shared", "validator.md");
-	return readFile(path, "utf8");
+	// Resolution order: user dir → bundled defaults (same as loadPromptBody).
+	return loadPromptBody("validator", "shared");
 }

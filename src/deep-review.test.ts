@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as promptLoader from "./prompt-loader.js";
 import {
 	bucketDeepFindings,
 	loadFocusSeeds,
@@ -595,6 +596,29 @@ describe("runDeepReview (full pipeline)", () => {
 		});
 		expect(result.findings).toEqual([]);
 	});
+
+	it("does not throw when focus seeds are empty (uses neutral fallback)", async () => {
+		const focusSpy = vi
+			.spyOn(await import("./deep-review.js"), "loadFocusSeeds")
+			.mockResolvedValue([]);
+		try {
+			const { caller } = makeCaller([
+				{ stage: /^pass-/, text: "[]" },
+				{ stage: /^validate$/, text: "[]" },
+			]);
+			const result = await runDeepReview({
+				baseUserPrompt: "base",
+				config,
+				plan: basePlan,
+				passSystem: PASS_SYSTEM,
+				validatorSystem: VALIDATOR_SYSTEM,
+				caller,
+			});
+			expect(result.findings).toEqual([]);
+		} finally {
+			focusSpy.mockRestore();
+		}
+	});
 });
 
 describe("loadFocusSeeds", () => {
@@ -614,6 +638,37 @@ describe("loadFocusSeeds", () => {
 		for (const seed of seeds) {
 			expect(seed).not.toMatch(/^\d+\.\s+/);
 			expect(seed).not.toContain("**");
+		}
+	});
+
+	it("joins continuation lines into a single string (mocked input)", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockResolvedValue(
+				"1. **TRUST BOUNDARIES.** First part of the line\n   Second part continues.\n" +
+				"2. **CONTROL FLOW.** Single line only.",
+			);
+		try {
+			const seeds = await loadFocusSeeds();
+			expect(seeds).toHaveLength(2);
+			expect(seeds[0]).toBe(
+				"TRUST BOUNDARIES. First part of the line Second part continues.",
+			);
+			expect(seeds[1]).toBe("CONTROL FLOW. Single line only.");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("returns an empty array when loadPromptBody throws (never throws)", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockRejectedValue(new Error("file missing"));
+		try {
+			const seeds = await loadFocusSeeds();
+			expect(seeds).toEqual([]);
+		} finally {
+			spy.mockRestore();
 		}
 	});
 });

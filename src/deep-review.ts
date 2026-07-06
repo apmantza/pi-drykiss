@@ -35,6 +35,7 @@
 
 import { toErrorMessage } from "./error-utils.js";
 import { extractBalancedJsonArray } from "./json-extract.js";
+import { loadPromptBody } from "./prompt-loader.js";
 import { jaccard, tokenize } from "./rejections.js";
 import { findModelByHint } from "./model-utils.js";
 import type { Model, Api } from "@earendil-works/pi-ai";
@@ -202,10 +203,21 @@ export function buildModelPlan(options: {
  * lines into a single string suitable for the PASS FOCUS block.
  *
  * Resolution order: user dir → bundled defaults (same as loadPromptBody).
+ * On any read/parse error, returns an empty array so the pipeline can
+ * fall back to a neutral focus string (honors the "never throws" contract).
  */
 export async function loadFocusSeeds(): Promise<string[]> {
-	const { loadPromptBody } = await import("./prompt-loader.js");
-	const raw = await loadPromptBody("focuses", "shared");
+	let raw: string;
+	try {
+		raw = await loadPromptBody("focuses", "shared");
+	} catch (err) {
+		console.warn(
+			"%s Failed to load focus seeds: %s",
+			LOG_PREFIX,
+			toErrorMessage(err),
+		);
+		return [];
+	}
 
 	// Parse numbered list items: lines starting with `N. ` where N is a digit.
 	// Continuation lines are indented (start with spaces). Join them.
@@ -238,7 +250,6 @@ export async function loadFocusSeeds(): Promise<string[]> {
 /** Load the deep-mode pass system prompt. Cached by the caller. */
 export async function loadDeepPassSystemPrompt(): Promise<string> {
 	// Resolution order: user dir → bundled defaults (same as loadPromptBody).
-	const { loadPromptBody } = await import("./prompt-loader.js");
 	return loadPromptBody("pass-system", "shared");
 }
 

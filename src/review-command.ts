@@ -8,6 +8,7 @@ import { ensureDefaultPrompts } from "./prompt-builder.js";
 
 import { loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
+import { loadValidatorSystemPrompt } from "./validator.js";
 import type { ReviewLens, Finding, Severity } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import {
@@ -622,7 +623,7 @@ async function runDeepAutoreview(
 	const baseUserPrompt = `# Deep Review (${params.deep} lens)\n\n${diffBlock}`;
 
 	const passSystem = await loadDeepPassSystemPrompt();
-	const validatorSystem = await readValidatorSystemPrompt();
+	const validatorSystem = await loadValidatorSystemPrompt();
 
 	const config: import("./deep-review.js").DeepReviewConfig = {
 		passes: params.deepPasses ?? 5,
@@ -770,11 +771,3 @@ function formatDiffsForDeepAutoreview(scope: ReviewScope): string {
 	return `# Diff Under Review\n\n${blocks.join("\n\n")}`;
 }
 
-/** Load the deep-mode validator system prompt. */
-async function readValidatorSystemPrompt(): Promise<string> {
-	const { bundledPromptsDir } = await import("./prompt-loader.js");
-	const { readFile } = await import("node:fs/promises");
-	const { join } = await import("node:path");
-	const path = join(bundledPromptsDir(), "_shared", "validator.md");
-	return readFile(path, "utf8");
-}
