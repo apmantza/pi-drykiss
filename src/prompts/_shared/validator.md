@@ -81,3 +81,14 @@ Output ONLY a JSON array, no prose, no markdown fences:
 
 `confidence` is a float in [0, 1] representing how sure you are of your
 verdict. 1.0 = ironclad, 0.5 = best guess.
+
+---
+
+> **Note for deep-review (Bugbot) callers:** When this validator is invoked
+> from the deep-review pipeline, the candidate findings come from several
+> parallel adversarial passes rather than a single lens. The same
+> falsification rules apply. The input format is identical — a numbered
+> list of candidates — and the output format is the same JSON array.
+> The only difference is that candidates may have a `votes` count
+> indicating how many independent passes surfaced the same finding;
+> use this as a signal but still apply the same concrete-trigger test.

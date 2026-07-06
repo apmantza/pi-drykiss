@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	bucketDeepFindings,
+	loadFocusSeeds,
 	parseDeepFindings,
 	parseDeepVerdicts,
 	runDeepReview,
@@ -593,6 +594,27 @@ describe("runDeepReview (full pipeline)", () => {
 			caller,
 		});
 		expect(result.findings).toEqual([]);
+	});
+});
+
+describe("loadFocusSeeds", () => {
+	it("loads and parses the 8 focus seeds from focuses.md", async () => {
+		const seeds = await loadFocusSeeds();
+		expect(seeds).toHaveLength(8);
+		// Each seed should be a non-empty string mentioning its area.
+		expect(seeds[0]).toContain("TRUST BOUNDARIES");
+		expect(seeds[1]).toContain("CONTROL FLOW");
+		expect(seeds[7]).toContain("CONTRACT");
+		// Continuation lines should be joined into a single string.
+		expect(seeds[0]).not.toContain("\n");
+	});
+
+	it("strips markdown bold markers and leading numbers", async () => {
+		const seeds = await loadFocusSeeds();
+		for (const seed of seeds) {
+			expect(seed).not.toMatch(/^\d+\.\s+/);
+			expect(seed).not.toContain("**");
+		}
 	});
 });
 

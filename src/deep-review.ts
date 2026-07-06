@@ -35,7 +35,6 @@
 
 import { toErrorMessage } from "./error-utils.js";
 import { extractBalancedJsonArray } from "./json-extract.js";
-import { loadSharedFragment } from "./prompt-loader.js";
 import { jaccard, tokenize } from "./rejections.js";
 import { findModelByHint } from "./model-utils.js";
 import type { Model, Api } from "@earendil-works/pi-ai";
@@ -192,33 +191,55 @@ export function buildModelPlan(options: {
 	};
 }
 
-// ── Focus seeds (loaded once, cached for the run) ─────────────────────────
+// ── Focus seeds (loaded from focuses.md) ─────────────────────────────────
 
-/** Eight per-pass focus seeds. Rotated round-robin across passes. */
-export const FOCUS_SEEDS: readonly string[] = [
-	"TRUST BOUNDARIES & INPUT VALIDATION: every value crossing an external, disk, wire, or user boundary; every decode/parse. Construct edge inputs (null/undefined/NaN/Infinity/-0/empty/huge/negative/duplicate/out-of-order/unicode) and ask what breaks. Numeric-type guards that NaN or Infinity defeat. Missing auth checks on internal endpoints.",
-	"CONTROL FLOW & BRANCHES: every new conditional, guard, early return, and switch — find the missed case, the inverted condition, the off-by-one. Audit any if/else against a truth table covering boundary values, not just the happy path.",
-	"ASYNC LIFECYCLE & CONCURRENCY: await ordering, missing await, unhandled rejection, fire-and-forget, races, cancellation/abort handling, stale writes after unmount/navigation. Shared state without locks. Promise.all on mixed-resolve/reject sources.",
-	"TYPES & INVARIANTS: type-narrowing escapes, unsafe casts, non-null assertions on absent values, non-exhaustive unions, any comment/test claim that the code does not actually honor. Generic widening. Implicit any. Schema drift between a producer and its consumer.",
-	"STATE & DATA INTEGRITY: in-memory or UI mutation with no matching durable write (lost on reload), wrong id/key space in a lookup, a projection clobbering the source of truth, read-before-write ordering. Lost updates on optimistic concurrency. Cache invalidation gaps.",
-	"ERROR HANDLING & SECURITY: swallowed/empty catches, leaked secrets, injection, path traversal / zip-slip, trusting unsanitized external data, missing validation before a side effect, error paths that leak stack traces or PII.",
-	"RESOURCE & PERFORMANCE: unbounded loops/polls, N+1 IO, memory leaks, missing cleanup of timers/listeners/streams, growing data structures without bounds, large allocations on hot paths.",
-	"CONTRACT & COMPATIBILITY: signature/shape drift, breaking changes to a wire/format contract, mismatched assumptions between a producer and its consumer, version negotiation gaps, deprecated paths that should be removed.",
-];
+/**
+ * Load the per-pass focus seeds from `focuses.md`.
+ *
+ * The file contains a numbered list (1–8) of focus areas. Each item may
+ * span multiple lines. This parser extracts the text of each item,
+ * stripping the leading number, bold markers, and joining continuation
+ * lines into a single string suitable for the PASS FOCUS block.
+ *
+ * Resolution order: user dir → bundled defaults (same as loadPromptBody).
+ */
+export async function loadFocusSeeds(): Promise<string[]> {
+	const { loadPromptBody } = await import("./prompt-loader.js");
+	const raw = await loadPromptBody("focuses", "shared");
+
+	// Parse numbered list items: lines starting with `N. ` where N is a digit.
+	// Continuation lines are indented (start with spaces). Join them.
+	const lines = raw.split("\n");
+	const seeds: string[] = [];
+	let current: string[] | null = null;
+
+	for (const line of lines) {
+		const numberedMatch = line.match(/^\d+\.\s+(.*)/);
+		if (numberedMatch) {
+			// Start a new seed item
+			if (current !== null) {
+				seeds.push(current.join(" ").replace(/\s+/g, " ").trim());
+			}
+			// Strip bold markers (**text**) — keep the text, remove the **
+			const text = numberedMatch[1].replace(/\*\*(.*?)\*\*/g, "$1");
+			current = [text];
+		} else if (current !== null && line.trim().length > 0) {
+			// Continuation line of the current seed
+			current.push(line.trim());
+		}
+	}
+	if (current !== null) {
+		seeds.push(current.join(" ").replace(/\s+/g, " ").trim());
+	}
+
+	return seeds.length > 0 ? seeds : [];
+}
 
 /** Load the deep-mode pass system prompt. Cached by the caller. */
 export async function loadDeepPassSystemPrompt(): Promise<string> {
-	// The shared fragment loader will try the user dir first, then the
-	// bundled defaults. Bundled lives at src/prompts/_shared/pass-system.md.
-	return loadSharedFragment(
-		{ dir: "user-prompts" } as never,
-		"pass-system",
-	).catch(async () => {
-		// Fallback: the file is bundled, so a missing shared fragment
-		// means the bundled default is the only copy. Re-fetch via
-		// the loader's normal fallback path.
-		return loadSharedFragment({ dir: "bundled" } as never, "pass-system");
-	});
+	// Resolution order: user dir → bundled defaults (same as loadPromptBody).
+	const { loadPromptBody } = await import("./prompt-loader.js");
+	return loadPromptBody("pass-system", "shared");
 }
 
 // ── Parsing ───────────────────────────────────────────────────────────────
@@ -449,13 +470,17 @@ export async function runDeepReview(
 
 	// Stage 1: parallel adversarial passes.
 	hooks?.onStage?.(`running ${config.passes} passes`);
+	const focusSeeds = await loadFocusSeeds();
 	const passOutcomes: Array<{
 		findings: DeepFinding[];
 		failed: boolean;
 		error?: string;
 	}> = [];
 	for (let i = 0; i < config.passes; i++) {
-		const focus = FOCUS_SEEDS[i % FOCUS_SEEDS.length];
+		const focus =
+			focusSeeds.length > 0
+				? focusSeeds[i % focusSeeds.length]
+				: "(no focus seed available)";
 		const assignment = plan.passes[i];
 		const temperature = config.temperature + (i % 4) * 0.1;
 		try {

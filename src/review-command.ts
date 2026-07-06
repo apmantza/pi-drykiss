@@ -99,18 +99,17 @@ export const DrykissAutoreviewParams = Type.Object({
 		}),
 	),
 	lens: Type.Optional(
-		Type.Union(
-			[Type.Literal("all") as any, ...(LensNameParam as any).anyOf],
-			{
-				description:
-					"Single lens to run, or 'all' for all lenses. Overrides `lenses` if both are set. Default: all.",
-			},
-		),
+		Type.Union([Type.Literal("all") as any, ...(LensNameParam as any).anyOf], {
+			description:
+				"Single lens to run, or 'all' for all lenses. Overrides `lenses` if both are set. Default: all.",
+		}),
 	),
 	lenses: Type.Optional(
 		Type.Union([
 			Type.Literal("all"),
-			Type.Array(LensNameParam, { description: "Subset of DRYKISS lenses to run" }),
+			Type.Array(LensNameParam, {
+				description: "Subset of DRYKISS lenses to run",
+			}),
 		]),
 	),
 	// Note: the previous schema exposed `model`, `contextMode`,
@@ -776,6 +775,6 @@ async function readValidatorSystemPrompt(): Promise<string> {
 	const { bundledPromptsDir } = await import("./prompt-loader.js");
 	const { readFile } = await import("node:fs/promises");
 	const { join } = await import("node:path");
-	const path = join(bundledPromptsDir(), "_shared", "validator-bugbot.md");
+	const path = join(bundledPromptsDir(), "_shared", "validator.md");
 	return readFile(path, "utf8");
 }

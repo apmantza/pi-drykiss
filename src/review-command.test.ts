@@ -187,7 +187,16 @@ describe("drykiss_autoreview tool", () => {
 		expect(manager.runReview).toHaveBeenCalledTimes(1);
 		const args = manager.runReview.mock.calls[0][7] as any;
 		expect(args.lenses.sort()).toEqual(
-			["simplicity", "deduplication", "clarity", "resilience", "architecture", "tests", "security", "docs"].sort(),
+			[
+				"simplicity",
+				"deduplication",
+				"clarity",
+				"resilience",
+				"architecture",
+				"tests",
+				"security",
+				"docs",
+			].sort(),
 		);
 	});
 
@@ -214,7 +223,11 @@ describe("drykiss_autoreview tool", () => {
 		} as any;
 
 		await executeDrykissAutoreviewTool(
-			{ mode: "local", lens: "security", lenses: ["simplicity", "architecture"] },
+			{
+				mode: "local",
+				lens: "security",
+				lenses: ["simplicity", "architecture"],
+			},
 			{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
 			pi,
 			manager,
