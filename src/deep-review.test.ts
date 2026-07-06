@@ -701,6 +701,18 @@ describe("loadFocusSeeds", () => {
 			spy.mockRestore();
 		}
 	});
+
+	it("returns an empty array when all numbered items are empty", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockResolvedValue("1. \n2. \n3. ");
+		try {
+			const seeds = await loadFocusSeeds();
+			expect(seeds).toEqual([]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });
 
 // Re-export PASS_PLAN so it's reachable from production code that wants

@@ -257,6 +257,23 @@ describe("runValidator — fail-open behavior", () => {
 		expect(result.confirmedReal).toBe(0);
 		expect(result.errorMessage).toBeDefined();
 	});
+
+	it("fails open when the validator prompt fails to load: findings become 'unverified'", async () => {
+		const spy = vi
+			.spyOn(promptLoader, "loadPromptBody")
+			.mockRejectedValue(new Error("missing validator.md"));
+		try {
+			const findings = [finding(), finding({ file: "b.ts" })];
+			const result = await runValidator(ctx() as never, findings, "diff");
+			expect(result.findings).toHaveLength(2);
+			expect(
+				result.findings.every((f) => f._validatorVerdict === "unverified"),
+			).toBe(true);
+			expect(result.unverified).toBe(2);
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });
 
 describe("loadValidatorSystemPrompt", () => {
