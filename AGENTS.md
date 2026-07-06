@@ -8,8 +8,8 @@ A Pi extension that runs multi-lens code reviews (KISS, DRY, resilience, archite
 
 ```
 src/
-  index.ts            # Extension entry point — registers commands, tools, event handlers
-  review-command.ts   # Command handlers (/drykiss, /drykiss-kiss, etc.) + review orchestration
+  index.ts            # Extension entry point — registers the drykiss_autoreview tool + event handlers
+  review-command.ts   # drykiss_autoreview tool handler + review orchestration (runDeepAutoreview)
   review-manager.ts   # Manages review jobs, parallel lens execution, synthesis
   subagent-runner.ts  # Spawns lens reviews as Pi agent sessions
   llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
@@ -17,14 +17,13 @@ src/
   prompt-composer.ts  # Composes a lens system prompt from shared fragments + per-lens body
   prompt-builder.ts   # Thin orchestrator: ties loader + composer together; user-prompt context; seed lifecycle
   prompts/            # The bundled default prompt text — the source of truth (see prompt-architecture.md)
-    _shared/          # iron-law, json-output, grounding-rules, kiss-dry-checklist, active-constraints
+    _shared/          # iron-law, json-output, json-output-synthesis, grounding-rules (incl. Quick Self-Check + Synthesis Calibration), active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
     simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, synthesis.md
   model-selector.ts   # Resolves model hints, interactive selection, isModelError detection
   git-diff.ts         # Git diff parsing, file status detection, project index generation
   edit-tracker.ts     # Tracks file edits across turns via tool_execution_end events
   auto-inject.ts      # Builds the KISS/DRY checklist injected after editing turns
   config.ts           # Per-project config (.pi/drykiss/config.json) persistence
-  config-command.ts   # /drykiss-config command handler
   free-models.ts      # Free-model detection (isFreeModel) and auto-routing (selectFreeModel)
   persist.ts          # Saves review results to .pi/drykiss/reviews/ and session transcripts to .pi/drykiss/sessions/
   types.ts            # Shared domain types (Finding, SynthesisResult, ReviewLens, etc.)

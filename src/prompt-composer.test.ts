@@ -6,18 +6,15 @@ import {
 
 // Mock prompt-loader so we don't hit the filesystem
 vi.mock("./prompt-loader.js", () => ({
-	loadPromptBody: vi.fn(async (name: string, kind: string) => {
+	loadPromptBody: vi.fn(async (name: string, _kind: string) => {
 		if (name === "iron-law") return "### Iron Law\nNever violate KISS/DRY.";
 		if (name === "simplicity") return "# Simplicity Auditor\nFind complexity.";
 		if (name === "synthesis") return "# Synthesizer\nMerge findings.";
 		if (name === "json-output") return "```json\n{ findings: [] }\n```";
 		if (name === "json-output-synthesis")
 			return '```json\n{ summary: "" }\n```';
-		if (name === "grounding-rules") return "## Grounding\nBe specific.";
-		if (name === "grounding-rules-synthesis")
-			return "## Synthesis Grounding\nCross-validate.";
-		if (name === "kiss-dry-checklist")
-			return "## KISS/DRY Checklist\n- [ ] KISS";
+		if (name === "grounding-rules")
+			return "## Grounding\nBe specific.\n### Quick Self-Check\n- [ ] KISS";
 		if (name === "active-constraints")
 			return "## Active Constraints\n{{active_constraints}}";
 		throw new Error(`Unknown prompt: ${name}`);
@@ -33,7 +30,7 @@ describe("composeLensPrompt", () => {
 		expect(result).toContain("# Simplicity Auditor");
 		expect(result).toContain("```json");
 		expect(result).toContain("## Grounding");
-		expect(result).toContain("## KISS/DRY Checklist");
+		expect(result).toContain("### Quick Self-Check");
 	});
 
 	it("includes active constraints when provided", async () => {
@@ -63,7 +60,7 @@ describe("composeLensPrompt", () => {
 		// (only {{active_constraints}} is substituted)
 		const { loadPromptBody } = await import("./prompt-loader.js");
 		vi.mocked(loadPromptBody).mockImplementationOnce(
-			async (name: string) => `### Iron Law\n{{other_placeholder}}`,
+			async (_name: string) => `### Iron Law\n{{other_placeholder}}`,
 		);
 		const result = await composeLensPrompt("simplicity");
 		expect(result).toContain("{{other_placeholder}}");
@@ -71,12 +68,12 @@ describe("composeLensPrompt", () => {
 });
 
 describe("composeSynthesisPrompt", () => {
-	it("composes a synthesis prompt with synthesis-specific fragments", async () => {
+	it("composes a synthesis prompt with the shared grounding rules", async () => {
 		const result = await composeSynthesisPrompt();
 		expect(result).toContain("### Iron Law");
 		expect(result).toContain("# Synthesizer");
 		expect(result).toContain("```json");
-		expect(result).toContain("## Synthesis Grounding");
+		expect(result).toContain("## Grounding");
 	});
 
 	it("includes active constraints when provided", async () => {
@@ -87,9 +84,10 @@ describe("composeSynthesisPrompt", () => {
 		expect(result).toContain("## Active Constraints");
 	});
 
-	it("omits kiss-dry-checklist (not used in synthesis)", async () => {
+	it("includes the grounding rules (with Quick Self-Check) in synthesis", async () => {
 		const result = await composeSynthesisPrompt();
-		expect(result).not.toContain("KISS/DRY Checklist");
+		expect(result).toContain("## Grounding");
+		expect(result).toContain("### Quick Self-Check");
 	});
 
 	it("omits active constraints section when not provided", async () => {
@@ -134,9 +132,9 @@ describe("simplicity lens body (bundled prompt structure)", () => {
 	});
 
 	it("does not duplicate cross-cutting content from shared fragments", async () => {
-		// The composer stitches iron-law, grounding-rules, and
-		// kiss-dry-checklist into every lens. The lens body should
-		// NOT re-state their content. This test catches a common
+		// The composer stitches iron-law and grounding-rules (which now
+		// also embeds the Quick Self-Check) into every lens. The lens body
+		// should NOT re-state their content. This test catches a common
 		// regression where the lens prompt grows to duplicate the
 		// shared fragments and the prompt balloons.
 		const { readFile } = await import("node:fs/promises");

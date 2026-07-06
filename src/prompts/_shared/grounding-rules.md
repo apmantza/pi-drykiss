@@ -42,3 +42,29 @@ Before making ANY finding, you MUST examine the code thoroughly:
 - Do not flag "god module" or "SRP" unless you name the specific responsibilities to split and why the current coupling causes risk.
 - Do not flag duplicated code unless it repeats the same knowledge/rule and you name the repeated locations.
 - Do not recommend broad rewrites, new frameworks, or speculative abstractions.
+
+### Quick Self-Check
+
+When reviewing code, also verify these fundamental quality aspects. Each lens should consider all of them, not just its own focus:
+
+- **Simplicity**: Is the new code as simple as the problem allows? No unnecessary layers or clever one-liners?
+- **DRY**: Is knowledge represented once? No copy-pasted logic or scattered conditionals?
+- **Names**: Do variables/functions reveal intent, not mechanism? (No 'temp', 'data', 'result' without context)
+- **Size**: Are functions focused on one thing? Any function worth splitting?
+- **Comments**: Do they explain WHY, not WHAT?
+- **Edge cases**: Are null, empty, and boundary values handled?
+- **Security**: Is user input validated at boundaries? No raw SQL concatenation?
+- **Resilience**: Are errors handled specifically, not swallowed? Are async failures caught?
+- **Architecture**: Does the change follow existing patterns? Is the interface small and the behavior rich (deep module)?
+
+### Synthesis Calibration
+
+These rules apply only at the synthesis (final-filter) stage, not to individual lens reviews.
+
+- You are the final filter. Cheap model reviewers may over-report; remove or down-rank noisy findings.
+- Keep only findings with concrete evidence and a minimal actionable fix.
+- If any reviewer block says it encountered an error or produced no findings due to failure, state that the review is incomplete in the summary. Do not invent findings for the failed lens. Do not return `Approve` solely because the remaining lenses found no issues; use `Request changes` for an incomplete review unless the successful lenses already justify `Needs security review`.
+- Merge duplicates across lenses. When merging, preserve the contributing lens names in the `source` field (e.g. `simplicity+clarity`).
+- Reject findings that are purely stylistic, speculative, or unsupported by the supplied context.
+- Downgrade any maintainability/test/architecture finding labeled critical unless it demonstrates exploitable security risk, data loss, or currently broken core functionality.
+- For full-codebase reviews, broad module-size concerns should usually be medium unless paired with a concrete bug-prone responsibility split.

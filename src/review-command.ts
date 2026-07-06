@@ -770,4 +770,3 @@ function formatDiffsForDeepAutoreview(scope: ReviewScope): string {
 	}
 	return `# Diff Under Review\n\n${blocks.join("\n\n")}`;
 }
-

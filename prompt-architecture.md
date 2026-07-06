@@ -5,12 +5,14 @@ This is a hard constraint that governs every change to DRYKISS's prompt text:
 > **All prompt text MUST live in `.md` files. TypeScript modules MUST NOT contain prompt text as string literals.**
 
 This applies to:
+
 - The system prompt for each lens (simplicity, deduplication, clarity, resilience, architecture, tests, security, synthesis)
 - The shared framework text (Iron Law, Report Template, Health Score, KISS/DRY checklist, JSON output instructions, grounding rules)
 - Per-lens overlays (severity calibration, "do not flag" clauses, examples)
 - The synthesis prompt
 
 The TypeScript prompt code may:
+
 - Read `.md` files from disk (`readFile`)
 - Concatenate strings (compose a prompt from multiple `.md` fragments)
 - Substitute variables (insert active constraints, file paths, etc.)
@@ -18,6 +20,7 @@ The TypeScript prompt code may:
 - Run the first-use seed from the bundled `.md` files into `~/.pi/drykiss/prompts/`
 
 The TypeScript prompt code may NOT:
+
 - Contain a backtick-delimited template literal that is a sentence or paragraph of English instructions to a model
 - Contain a hardcoded prompt body as a `const x = "..."` or `const x = \`...\``
 - Reference `DEFAULT_*_PROMPT` as a TS-exported constant string
@@ -40,13 +43,16 @@ pi-drykiss/
 │   ├── prompts/                     # Bundled defaults — the source of truth
 │   │   ├── _shared/
 │   │   │   ├── iron-law.md          # "NEVER suggest fixes before completing risk diagnosis..."
-│   │   │   ├── report-template.md   # The full report format
 │   │   │   ├── json-output.md       # JSON output instructions for lens prompts
 │   │   │   ├── json-output-synthesis.md  # JSON output instructions for synthesis
-│   │   │   ├── grounding-rules.md   # REVIEW_GROUNDING_RULES content
-│   │   │   ├── grounding-rules-synthesis.md  # SYNTHESIS_GROUNDING_RULES content
-│   │   │   ├── kiss-dry-checklist.md
+│   │   │   ├── grounding-rules.md   # Severity calibration + Quick Self-Check (merged from kiss-dry-checklist) + Synthesis Calibration (merged from grounding-rules-synthesis)
 │   │   │   ├── active-constraints.md  # Placeholder for the disable/severity/ignore/focus block
+│   │   │   ├── mode-context-proposed.md  # Proposed-change framing (injected into lens user prompt)
+│   │   │   ├── mode-context-audit.md      # Full-codebase audit framing (injected into lens user prompt)
+│   │   │   ├── validator.md        # Optional adversarial validator pass prompt
+│   │   │   ├── pass-system.md       # Deep (multi-pass) review system prompt
+│   │   │   ├── focuses.md           # Per-pass focus seeds for deep review rotation
+│   │   │   ├── risk-codes.md        # Human-readable risk-code catalogue (not a model prompt)
 │   │   │   └── README.md            # What each file is for
 │   │   ├── simplicity.md
 │   │   ├── deduplication.md
@@ -150,6 +156,7 @@ export async function loadSharedFragment(
 ```
 
 `source.dir` resolves in this order:
+
 1. `process.env.DRYKISS_PROMPTS_DIR` (debug override)
 2. `~/.pi/drykiss/prompts/` (user-customized)
 3. Bundled `src/prompts/` (the fallback resolved via `new URL("./prompts/", import.meta.url)`)
@@ -174,12 +181,11 @@ export async function composeLensPrompt(
   lens: Exclude<ReviewLens, "all">,
   options: ComposeOptions,
 ): Promise<string> {
-  const [ironLaw, jsonOutput, grounding, kissDry, lensBody, activeConstraints] =
+  const [ironLaw, jsonOutput, grounding, lensBody, activeConstraints] =
     await Promise.all([
       loadSharedFragment(options.source, "iron-law"),
       loadSharedFragment(options.source, "json-output"),
       loadSharedFragment(options.source, "grounding-rules"),
-      loadSharedFragment(options.source, "kiss-dry-checklist"),
       loadPromptFile(options.source, lens),
       options.activeConstraints
         ? loadSharedFragment(options.source, "active-constraints")
@@ -192,7 +198,6 @@ export async function composeLensPrompt(
     activeConstraints,
     jsonOutput,
     grounding,
-    kissDry,
   ].filter(Boolean).join("\n\n");
 }
 

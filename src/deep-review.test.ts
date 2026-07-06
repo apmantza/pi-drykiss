@@ -646,7 +646,7 @@ describe("loadFocusSeeds", () => {
 			.spyOn(promptLoader, "loadPromptBody")
 			.mockResolvedValue(
 				"1. **TRUST BOUNDARIES.** First part of the line\n   Second part continues.\n" +
-				"2. **CONTROL FLOW.** Single line only.",
+					"2. **CONTROL FLOW.** Single line only.",
 			);
 		try {
 			const seeds = await loadFocusSeeds();
@@ -677,8 +677,8 @@ describe("loadFocusSeeds", () => {
 			.spyOn(promptLoader, "loadPromptBody")
 			.mockResolvedValue(
 				"1. **TRUST BOUNDARIES.** Real content here.\n" +
-				"2. \n" +
-				"3. **CONTROL FLOW.** More content.",
+					"2. \n" +
+					"3. **CONTROL FLOW.** More content.",
 			);
 		try {
 			const seeds = await loadFocusSeeds();

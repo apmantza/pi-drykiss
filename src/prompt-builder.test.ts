@@ -67,7 +67,7 @@ const mockDiffs = new Map<string, string>([
 
 /**
  * The fixture strings for each lens. Each is the *full composed system prompt*
- * (iron-law + lens body + json-output + grounding-rules + kiss-dry-checklist).
+ * (iron-law + lens body + json-output + grounding-rules which now also embeds the Quick Self-Check).
  * Tests assert substrings on these.
  */
 const LENS_PROMPTS: Record<string, string> = {
@@ -706,11 +706,11 @@ describe("prompt template management", () => {
 
 				await ensureDefaultPrompts("/cwd");
 
-				// 8 lens + 9 shared + 1 sentinel = 18 files
+				// 8 lens + 7 shared + 1 sentinel = 16 files
 				const entries = await readdir(userDir);
 				const sharedEntries = await readdir(join(userDir, "_shared"));
 				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
-				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(9);
+				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(7);
 				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
 					true,
 				);

@@ -99,8 +99,6 @@ const BUNDLED_SHARED_FILES = [
 	"json-output.md",
 	"json-output-synthesis.md",
 	"grounding-rules.md",
-	"grounding-rules-synthesis.md",
-	"kiss-dry-checklist.md",
 	"active-constraints.md",
 	...Object.values(MODE_CONTEXT_FRAGMENT_NAMES).map((name) => `${name}.md`),
 ] as const;
