@@ -305,20 +305,32 @@ export class ReviewProgressWidget {
 			const fileCount = theme.fg("dim", `${job.files.length} file(s)`);
 
 			let activeCount = 0;
-			let doneCount = 0;
+			let completedOrErrorCount = 0;
 			for (const lens of job.lenses) {
 				const s = job.states.get(lens)!;
 				if (s.status === "running") activeCount++;
-				else if (s.status === "done" || s.status === "error") doneCount++;
+				else if (s.status === "done" || s.status === "error")
+					completedOrErrorCount++;
 			}
 			const totalLenses = job.lenses.length;
 			const elapsed =
 				job.overallStatus === "running" && job.startedAt
 					? ` · running ${formatElapsed(Date.now() - job.startedAt)}`
 					: "";
+			// Visual progress bar: 10 segments, filled proportionally to
+			// completed lenses. Constant width so the line never jumps.
+			const barWidth = 10;
+			const filled =
+				totalLenses === 0
+					? 0
+					: Math.min(
+							barWidth,
+							Math.round((completedOrErrorCount / totalLenses) * barWidth),
+						);
+			const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
 			const progress = theme.fg(
 				"dim",
-				`${doneCount}/${totalLenses} complete` +
+				`[${bar}] ${completedOrErrorCount}/${totalLenses} complete` +
 					(activeCount > 0 ? ` · ${activeCount} active` : ""),
 			);
 			lines.push(
@@ -424,9 +436,7 @@ export class ReviewProgressWidget {
 			if (s?.lowCount && s.lowCount > 0) parts.push(`${s.lowCount} low`);
 			if (s?.nitCount && s.nitCount > 0) parts.push(`${s.nitCount} nit`);
 			out.push(
-				truncate(
-					`  ${theme.fg("dim", parts.join(` ${theme.fg("dim", "·")} `))}`,
-				),
+				truncate(`  ${theme.fg("dim", parts.join(" · "))}`),
 			);
 		}
 

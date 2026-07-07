@@ -133,22 +133,19 @@ describe("renderWidget — completed summary", () => {
 			overallStatus: overrides.overallStatus ?? "done",
 			startedAt: Date.now() - 5000,
 			completedAt: Date.now(),
-			...(overrides.synthesisResult
-				? { synthesisResult: overrides.synthesisResult }
-				: {
-						synthesisResult: {
-							findings: [],
-							summary: "ok",
-							verdict: "Approve",
-							criticalCount: 0,
-							highCount: 0,
-							mediumCount: 0,
-							lowCount: 0,
-							nitCount: 0,
-							healthScore: 92,
-							scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-						},
-					}),
+			synthesisResult:
+				overrides.synthesisResult ?? {
+					findings: [],
+					summary: "ok",
+					verdict: "Approve",
+					criticalCount: 0,
+					highCount: 0,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: 92,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				},
 			...overrides,
 		};
 	}
