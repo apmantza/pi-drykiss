@@ -9,6 +9,8 @@
  * - Unescaped double quotes inside string values (common in docs/code lenses)
  */
 
+import { extractBalancedJson } from "./json-extract.js";
+
 export function isPlainObject(
 	value: unknown,
 ): value is Record<string, unknown> {
@@ -93,6 +95,70 @@ function repairUnescapedQuotes(raw: string): string {
 	return result.join("");
 }
 
+/**
+ * Shared first-pass repair used by both lenient parsing and sanitization:
+ * strip markdown fences, repair unescaped inline quotes.
+ */
+function stripAndRepairQuotes(raw: string): string {
+	let s = raw;
+	s = stripJsonMarkdownFences(s);
+	s = repairUnescapedQuotes(s);
+	return s;
+}
+
+type ControlCharReplacer = (ch: "\n" | "\r" | "\t") => string;
+
+/**
+ * Walk the input and replace/control-escape literal newlines, carriage
+ * returns, and tabs that appear inside JSON string values. The scan is
+ * state-machine driven so it respects escaped quotes and backslashes.
+ */
+function processStringControlChars(
+	raw: string,
+	replacer: ControlCharReplacer,
+): string {
+	const result: string[] = [];
+	let i = 0;
+
+	while (i < raw.length) {
+		if (raw[i] !== '"') {
+			result.push(raw[i]);
+			i++;
+			continue;
+		}
+
+		// Start of a string
+		result.push('"');
+		i++;
+		while (i < raw.length) {
+			const ch = raw[i];
+			if (ch === "\\") {
+				result.push(ch);
+				i++;
+				if (i < raw.length) {
+					result.push(raw[i]);
+					i++;
+				}
+				continue;
+			}
+			if (ch === '"') {
+				result.push('"');
+				i++;
+				break;
+			}
+			if (ch === "\n" || ch === "\r" || ch === "\t") {
+				result.push(replacer(ch));
+				i++;
+				continue;
+			}
+			result.push(ch);
+			i++;
+		}
+	}
+
+	return result.join("");
+}
+
 export function lenientJsonParse<T = unknown>(raw: string): T {
 	// Try strict parse first (fast path)
 	try {
@@ -101,84 +167,28 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		// Fall through to lenient parsing
 	}
 
-	let fixed = raw;
+	let fixed = stripAndRepairQuotes(raw);
 
-	// 1. Remove markdown code fences if present
-	fixed = stripJsonMarkdownFences(fixed);
-
-	// 2. Fix unescaped double quotes inside string values (docs/code lenses)
-	fixed = repairUnescapedQuotes(fixed);
-
-	// 3. Extract JSON object or array if wrapped in text
-	// Use brace/bracket depth tracking to correctly handle nested structures
-	function extractBalanced(
-		input: string,
-		open: string,
-		close: string,
-	): string | null {
-		let start = -1;
-		for (let i = 0; i < input.length; i++) {
-			if (input[i] === open) {
-				start = i;
-				break;
-			}
-		}
-		if (start === -1) return null;
-		let depth = 0;
-		let inString = false;
-		let escaped = false;
-		for (let i = start; i < input.length; i++) {
-			const ch = input[i];
-			if (escaped) {
-				escaped = false;
-				continue;
-			}
-			if (ch === "\\" && inString) {
-				escaped = true;
-				continue;
-			}
-			if (ch === '"' && !escaped) {
-				inString = !inString;
-				continue;
-			}
-			if (inString) continue;
-			if (ch === open) depth++;
-			if (ch === close) {
-				depth--;
-				if (depth === 0) return input.substring(start, i + 1);
-			}
-		}
-		return null;
-	}
-	const objMatch = extractBalanced(fixed, "{", "}");
-	const arrMatch = objMatch ? null : extractBalanced(fixed, "[", "]");
+	// Extract JSON object or array if wrapped in text
+	const objMatch = extractBalancedJson(fixed, "{", "}");
 	if (objMatch) {
 		fixed = objMatch;
-	} else if (arrMatch) {
-		fixed = arrMatch;
+	} else {
+		const arrMatch = extractBalancedJson(fixed, "[", "]");
+		if (arrMatch) fixed = arrMatch;
 	}
 
-	// 4. Fix trailing commas (common LLM mistake)
+	// Fix trailing commas (common LLM mistake)
 	fixed = fixTrailingCommas(fixed);
 
-	// 5. Fix unescaped newlines inside string values
-	// This regex matches content between quotes and escapes literal newlines
-	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
-		// Only process if there are unescaped newlines
-		if (!content.includes("\n")) return match;
-		// Escape the newlines
-		const escaped = content.replaceAll(/\n/g, "\\n").replaceAll(/\r/g, "\\r");
-		return `"${escaped}"`;
+	// Escape literal newlines/tabs inside string values
+	fixed = processStringControlChars(fixed, (ch) => {
+		if (ch === "\n") return "\\n";
+		if (ch === "\r") return "\\r";
+		return "\\t";
 	});
 
-	// 6. Fix unescaped tabs inside string values
-	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
-		if (!content.includes("\t")) return match;
-		const escaped = content.replaceAll(/\t/g, "\\t");
-		return `"${escaped}"`;
-	});
-
-	// 7. Fix single quotes used as string delimiters (rare but happens)
+	// Fix single quotes used as string delimiters (rare but happens)
 	// Only do this if there are no double quotes (pure single-quote JSON)
 	// SECURITY: Only convert when no double quotes exist to avoid corrupting
 	// strings that legitimately contain apostrophes in double-quoted JSON.
@@ -186,7 +196,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		fixed = fixed.replaceAll(/'/g, '"');
 	}
 
-	// 8. Try to fix unterminated strings by finding last complete object/array
+	// Try to fix unterminated strings by finding last complete object/array
 	// Find the last } or ] and truncate there
 	const lastObjBrace = fixed.lastIndexOf("}");
 	const lastArrBracket = fixed.lastIndexOf("]");
@@ -214,67 +224,10 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
  * Returns the sanitized string ready for JSON.parse().
  */
 export function sanitizeJsonString(raw: string): string {
-	let s = raw;
+	let s = stripAndRepairQuotes(raw);
 
-	// Remove markdown code fences if present
-	s = stripJsonMarkdownFences(s);
-
-	// Repair unescaped double quotes inside string values (docs/code lenses
-	// often emit inline quotes without escaping them).
-	s = repairUnescapedQuotes(s);
-
-	// Replace literal newlines/tabs inside strings with escaped versions
-	// Use depth-aware scanner to correctly handle escaped quotes and nested braces
-	function sanitizeStrings(s: string): string {
-		const result: string[] = [];
-		let i = 0;
-		while (i < s.length) {
-			if (s[i] !== '"') {
-				result.push(s[i]);
-				i++;
-				continue;
-			}
-			// Start of a string
-			result.push('"');
-			i++;
-			while (i < s.length) {
-				const ch = s[i];
-				if (ch === "\\") {
-					result.push(ch);
-					i++;
-					if (i < s.length) {
-						result.push(s[i]);
-						i++;
-					}
-					continue;
-				}
-				if (ch === '"') {
-					result.push('"');
-					i++;
-					break;
-				}
-				if (ch === "\n") {
-					result.push(" ");
-					i++;
-					continue;
-				}
-				if (ch === "\r") {
-					result.push(" ");
-					i++;
-					continue;
-				}
-				if (ch === "\t") {
-					result.push(" ");
-					i++;
-					continue;
-				}
-				result.push(ch);
-				i++;
-			}
-		}
-		return result.join("");
-	}
-	s = sanitizeStrings(s);
+	// Replace literal newlines/tabs inside strings with spaces
+	s = processStringControlChars(s, () => " ");
 
 	// Remove trailing commas before } or ]
 	s = fixTrailingCommas(s);

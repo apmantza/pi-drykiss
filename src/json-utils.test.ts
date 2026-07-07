@@ -64,12 +64,20 @@ describe("lenientJsonParse", () => {
 		expect(Array.isArray(parsed)).toBe(true);
 		expect((parsed as any[])[0].file).toBe('src\\test"quote".ts');
 	});
+
 	it("fixes unescaped double quotes inside string values", () => {
 		const input =
 			'[{"file": "x.ts", "detail": "use loadPromptBody("iron-law" shared)"}]';
 		expect(lenientJsonParse(input)).toEqual({
 			file: "x.ts",
 			detail: 'use loadPromptBody("iron-law" shared)',
+		});
+	});
+
+	it("fixes newlines in strings that contain escaped quotes", () => {
+		const input = '{"text": "say \\"hello\\"\nworld"}';
+		expect(lenientJsonParse(input)).toEqual({
+			text: 'say "hello"\nworld',
 		});
 	});
 });
@@ -130,5 +138,19 @@ describe("sanitizeJsonString", () => {
 		const result = sanitizeJsonString(input);
 		expect(result).toContain("x y");
 		expect(result).toContain('"z"');
+	});
+
+	it("does not corrupt strings with escaped quotes when replacing newlines", () => {
+		const input = '{"text": "say \\"hello\\"\nworld"}';
+		const result = sanitizeJsonString(input);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(result);
+		} catch (err) {
+			throw new Error(
+				`JSON.parse failed for sanitized result: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+		expect(parsed).toEqual({ text: 'say "hello" world' });
 	});
 });
