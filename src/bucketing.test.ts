@@ -385,20 +385,40 @@ describe("formatBucketsForPrompt", () => {
 		expect(formatted).toContain("lenses=clarity+deduplication+simplicity");
 	});
 
-	it("omits the line when none is set", () => {
+	it("strips control characters from summaries to limit prompt-injection surface", () => {
 		const findings = [
 			{
 				...finding({
 					file: "src/a.ts",
-					line: undefined,
+					line: 42,
 					severity: "high",
-					summary: "No line given",
+					summary: "Bug\x00here\x01with\x07bells",
 				}),
 				_bucketVotes: 1,
 			},
 		];
 		const formatted = formatBucketsForPrompt(findings);
-		expect(formatted).toContain("[0] (high) src/a.ts");
-		expect(formatted).not.toContain("src/a.ts:");
+		expect(formatted).toContain("Bugherewithbells");
+		expect(formatted).not.toContain("\x00");
+		expect(formatted).not.toContain("\x01");
+		expect(formatted).not.toContain("\x07");
+	});
+
+	it("truncates very long summaries", () => {
+		const summary = "x".repeat(600);
+		const findings = [
+			{
+				...finding({
+					file: "src/a.ts",
+					line: 42,
+					severity: "high",
+					summary,
+				}),
+				_bucketVotes: 1,
+			},
+		];
+		const formatted = formatBucketsForPrompt(findings);
+		const summaryPortion = formatted.split("\n    ").pop() ?? "";
+		expect(summaryPortion.length).toBeLessThanOrEqual(500);
 	});
 });

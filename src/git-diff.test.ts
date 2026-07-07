@@ -479,12 +479,12 @@ describe("getProjectIndex", () => {
 		vi.resetAllMocks();
 	});
 
-	function mockDirent(name: string, isDir: boolean) {
+	function mockDirent(name: string, isDir: boolean, isSymlink = false) {
 		return {
 			name,
-			isDirectory: () => isDir,
-			isFile: () => !isDir,
-			isSymbolicLink: () => false,
+			isDirectory: () => (isSymlink ? false : isDir),
+			isFile: () => (isSymlink ? false : !isDir),
+			isSymbolicLink: () => isSymlink,
 		} as any;
 	}
 
@@ -534,6 +534,32 @@ describe("getProjectIndex", () => {
 		expect(index).toHaveLength(1);
 		expect(index[0].path).toMatch(/index\.ts$/);
 		expect(index[0].exports).toContain("main");
+	});
+
+	it("skips symbolic links to avoid reading outside the project", async () => {
+		vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+		vi.mocked(readdir).mockResolvedValue([
+			mockDirent("real.ts", false),
+			mockDirent("link.ts", false, true),
+		]);
+		vi.mocked(readFile).mockResolvedValue("export const x = 1;");
+
+		const index = await getProjectIndex("/cwd");
+		expect(index).toHaveLength(1);
+		expect(index[0].path).toMatch(/real\.ts$/);
+	});
+
+	it("skips symbolic links to directories", async () => {
+		vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as any);
+		vi.mocked(readdir).mockResolvedValue([
+			mockDirent("real.ts", false),
+			mockDirent("linkdir", true, true),
+		]);
+		vi.mocked(readFile).mockResolvedValue("export const x = 1;");
+
+		const index = await getProjectIndex("/cwd");
+		expect(index).toHaveLength(1);
+		expect(index[0].path).toMatch(/real\.ts$/);
 	});
 
 	it("extracts Python exports", async () => {

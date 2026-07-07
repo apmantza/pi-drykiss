@@ -272,7 +272,12 @@ export function parseDeepFindings(text: string): DeepFinding[] {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(json);
-	} catch {
+	} catch (err) {
+		console.warn(
+			"%s Failed to parse deep-review pass output: %s",
+			LOG_PREFIX,
+			toErrorMessage(err),
+		);
 		return [];
 	}
 	if (!Array.isArray(parsed)) return [];

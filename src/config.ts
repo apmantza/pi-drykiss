@@ -310,7 +310,7 @@ export async function loadEffectiveConfig(
 			warnings.push(`Unknown risk code in focus: ${code}`);
 		}
 	}
-	if (cleaned.disable && cleaned.focus) {
+	if (cleaned.disable?.length && cleaned.focus?.length) {
 		warnings.push(
 			"Both disable and focus are set; ignoring both. Use one or the other.",
 		);

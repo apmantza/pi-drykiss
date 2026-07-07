@@ -203,6 +203,18 @@ export function clusterAndFlatten(findings: readonly Finding[]): Finding[] {
 }
 
 /**
+ * Sanitize a string before interpolating it into an LLM prompt.
+ * Strips control characters (except ordinary whitespace) and caps length
+ * to reduce the attack surface for prompt injection via finding fields.
+ */
+function sanitizePromptString(value: string): string {
+	return value
+		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+		.trim()
+		.slice(0, 500);
+}
+
+/**
  * Format a list of bucketed findings as a "Bucket N: ..." block for the
  * synthesis prompt. Pure; produces a compact representation the LLM can
  * reason over (file:line, severity, votes, contributing lenses, the
@@ -219,7 +231,7 @@ export function formatBucketsForPrompt(findings: readonly Finding[]): string {
 					? `, lenses=${f._bucketLenses.join("+")}`
 					: "";
 			const voteLabel = votes > 1 ? ` (${votes} votes${lenses})` : "";
-			return `[${index}] (${f.severity}) ${where}${voteLabel}\n    ${f.summary}`;
+			return `[${index}] (${f.severity}) ${where}${voteLabel}\n    ${sanitizePromptString(f.summary)}`;
 		})
 		.join("\n\n");
 }
