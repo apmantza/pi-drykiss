@@ -435,9 +435,7 @@ export class ReviewProgressWidget {
 				parts.push(`${s.mediumCount} medium`);
 			if (s?.lowCount && s.lowCount > 0) parts.push(`${s.lowCount} low`);
 			if (s?.nitCount && s.nitCount > 0) parts.push(`${s.nitCount} nit`);
-			out.push(
-				truncate(`  ${theme.fg("dim", parts.join(" · "))}`),
-			);
+			out.push(truncate(`  ${theme.fg("dim", parts.join(" · "))}`));
 		}
 
 		return out;

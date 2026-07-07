@@ -206,34 +206,42 @@ export default function (pi: ExtensionAPI): void {
 		},
 
 		renderResult(result: any, _options: any, theme: any) {
-			if (result.details?.phase === "scoping") {
-				const text = result.content?.[0]?.text ?? "Preparing review scope…";
-				return new Text(theme.fg("dim", text), 0, 0);
-			}
-			const review = result.details?.result;
-			const progress = result.details?.progress;
-			const clean = review?.clean === true;
-			const counts = review?.counts ?? {};
-			const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
-			const hs = review?.healthScore;
-			const hasScore = typeof hs === "number";
-			let scoreText = "";
-			if (hasScore) {
-				const scoreColor =
-					hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
-				scoreText = theme.fg(scoreColor, `, score ${hs}/100`);
-			}
-			const summary =
-				`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
-				theme.fg(
-					"dim",
-					` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
+			// Final result: show the verdict + score summary.
+			if (result.details?.result) {
+				const review = result.details.result;
+				const progress = result.details?.progress;
+				const clean = review?.clean === true;
+				const counts = review?.counts ?? {};
+				const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
+				const hs = review?.healthScore;
+				const hasScore = typeof hs === "number";
+				let scoreText = "";
+				if (hasScore) {
+					const scoreColor =
+						hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
+					scoreText = theme.fg(scoreColor, `, score ${hs}/100`);
+				}
+				const summary =
+					`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
+					theme.fg(
+						"dim",
+						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
+					);
+				return new Text(
+					progress ? `${theme.fg("dim", progress)}\n${summary}` : summary,
+					0,
+					0,
 				);
-			return new Text(
-				progress ? `${theme.fg("dim", progress)}\n${summary}` : summary,
-				0,
-				0,
-			);
+			}
+			// Streaming update (scoping or lens execution): the Pi TUI
+			// calls renderResult on every onUpdate, but those payloads
+			// carry no final ReviewResult yet. Show the progress text
+			// instead of a misleading "reviewed 0 finding(s)" placeholder.
+			const text =
+				result.details?.progress ??
+				result.content?.[0]?.text ??
+				"Running DRYKISS autoreview…";
+			return new Text(theme.fg("dim", text), 0, 0);
 		},
 	});
 }
