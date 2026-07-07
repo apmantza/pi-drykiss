@@ -40,7 +40,9 @@ export class ConversationViewer implements Component {
 			const state = this.job.states.get(lens);
 			if (!state) {
 				lines.push("");
-				lines.push(bold(fg("accent", `┌─ ${lens.toUpperCase()} ─ (state unavailable)`)));
+				lines.push(
+					bold(fg("accent", `┌─ ${lens.toUpperCase()} ─ (state unavailable)`)),
+				);
 				lines.push(fg("accent", "└─"));
 				continue;
 			}

@@ -3,9 +3,10 @@ import {
 	ReviewProgressWidget,
 	collectModelPairs,
 	pickVerdict,
+	formatFinding,
 } from "./review-widget.js";
 import type { LensState, ReviewJob } from "./review-manager.js";
-import type { ReviewLens } from "./types.js";
+import type { ReviewLens, Finding } from "./types.js";
 
 function buildLensState(overrides: Partial<LensState>): LensState {
 	return {
@@ -18,7 +19,7 @@ function buildLensState(overrides: Partial<LensState>): LensState {
 	};
 }
 
-function renderJobLine(job: ReviewJob, lineIndex = 2): string {
+function renderLines(job: ReviewJob): string[] {
 	let captured: (() => string[]) | undefined;
 	const widget = new ReviewProgressWidget();
 	const theme = {
@@ -37,7 +38,11 @@ function renderJobLine(job: ReviewJob, lineIndex = 2): string {
 	widget.setJobs([job]);
 	const lines = captured?.() ?? [];
 	widget.dispose();
-	return lines[lineIndex] ?? "";
+	return lines;
+}
+
+function renderJobLine(job: ReviewJob, lineIndex = 1): string {
+	return renderLines(job)[lineIndex] ?? "";
 }
 
 function buildRunningJob(elapsedMs: number): ReviewJob {
@@ -57,32 +62,15 @@ function buildRunningJob(elapsedMs: number): ReviewJob {
 		states: new Map([[lens, state]]),
 		synthesisStatus: "idle",
 		overallStatus: "running",
-		startedAt: Date.now(),
+		startedAt: Date.now() - elapsedMs,
 	};
 }
 
 function renderElapsedLine(elapsedMs: number): string {
-	let captured: (() => string[]) | undefined;
-	const widget = new ReviewProgressWidget();
-	const theme = {
-		fg: (_c: string, t: string) => t,
-		bold: (t: string) => t,
-	};
-	const uiCtx = {
-		setWidget: (
-			_key: string,
-			fn: (tui: any, theme: any) => { render: () => string[] },
-		) => {
-			captured = () => fn({ terminal: { columns: 200 } }, theme).render();
-		},
-	};
-	widget.attach(uiCtx);
-	widget.setJobs([buildRunningJob(elapsedMs)]);
-	const lines = captured?.() ?? [];
-	widget.dispose();
-	// Heading, progress, then the lens line.
-	const lensLine = lines[2] ?? "";
-	const match = lensLine.match(/running\s*·\s*(.+)$/);
+	const lines = renderLines(buildRunningJob(elapsedMs));
+	// Running widget is now a single heading line with the elapsed.
+	const heading = lines[0] ?? "";
+	const match = heading.match(/running\s*(.+)$/);
 	return match ? match[1].trim() : "";
 }
 
@@ -108,219 +96,20 @@ describe("formatElapsed (via widget render)", () => {
 		expect(renderElapsedLine(0)).toBe("0.0s");
 	});
 
-	it("omits the elapsed suffix for lenses without startedAt", () => {
-		// Build a job whose lens state has no startedAt (legacy / pre-status-change).
-		const lens: ReviewLens = "simplicity";
-		const state: LensState = {
-			status: "running",
-			modelName: "m",
-			durationMs: 0,
-			findingsCount: 0,
-			rawOutput: "",
-		};
-		const job: ReviewJob = {
-			...buildRunningJob(0),
-			states: new Map([[lens, state]]),
-		};
-		let captured: (() => string[]) | undefined;
-		const widget = new ReviewProgressWidget();
-		const theme = {
-			fg: (_c: string, t: string) => t,
-			bold: (t: string) => t,
-		};
-		const uiCtx = {
-			setWidget: (
-				_key: string,
-				fn: (tui: any, theme: any) => { render: () => string[] },
-			) => {
-				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
-			},
-		};
-		widget.attach(uiCtx);
-		widget.setJobs([job]);
-		const lensLine = (captured?.() ?? [])[2] ?? "";
-		widget.dispose();
-		// Should show "running" with NO elapsed suffix.
-		expect(lensLine).toMatch(/·\s*running\s*$/);
-		expect(lensLine).not.toMatch(/running\s*·/);
-	});
-});
-
-describe("renderLensLine — session log link", () => {
-	const lens: ReviewLens = "simplicity";
-
-	function buildJobWithState(state: LensState): ReviewJob {
-		return {
-			id: "j1",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "idle",
-			overallStatus: "running",
-			startedAt: Date.now(),
-		};
-	}
-
-	it("appends an OSC 8 hyperlink to the basename for a done lens with logPath", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 8400,
-				findingsCount: 5,
-				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
-			}),
-		);
-		const line = renderJobLine(job);
-		// Hyperlink escape sequence: ESC ] 8 ; ; <url> ESC \
-		expect(line).toContain("\x1b]8;;file://");
-		expect(line).toContain("j1-simplicity.jsonl");
-		// pathToFileURL adds a drive letter on Windows but not on Linux/macOS.
-		// Verify the file:// scheme + path components, drive letter optional.
-		expect(line).toMatch(
-			/file:\/\/\/(?:[A-Z]:)?[^ ]*\.pi[\\/]drykiss[\\/]sessions/,
-		);
+	it("shows the heading line for running jobs", () => {
+		const lines = renderLines(buildRunningJob(1000));
+		expect(lines[0]).toContain("DRYKISS Review");
+		expect(lines[0]).toContain("running");
 	});
 
-	it("appends the link for an errored lens with logPath", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "error",
-				errorMessage: "boom",
-				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
-			}),
-		);
-		const line = renderJobLine(job);
-		expect(line).toContain("\x1b]8;;");
-		expect(line).toContain("j1-simplicity.jsonl");
-	});
-
-	it("does NOT append a link for a done lens without logPath", () => {
-		const job = buildJobWithState(
-			buildLensState({ status: "done", durationMs: 1000, findingsCount: 0 }),
-		);
-		const line = renderJobLine(job);
-		expect(line).not.toContain("\x1b]8;;");
-		expect(line).not.toContain(".jsonl");
-	});
-
-	it("does NOT append a link for a running lens even if logPath is set", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "running",
-				startedAt: Date.now() - 1000,
-				logPath: "/some/path.jsonl", // shouldn't happen, but defensive
-			}),
-		);
-		const line = renderJobLine(job);
-		expect(line).not.toContain("\x1b]8;;");
-	});
-
-	it("does NOT append a link for a queued lens", () => {
-		const job = buildJobWithState(buildLensState({ status: "queued" }));
-		const line = renderJobLine(job);
-		expect(line).not.toContain("\x1b]8;;");
-	});
-});
-
-describe("renderLensLine — provider display", () => {
-	const lens: ReviewLens = "simplicity";
-
-	function buildJobWithState(state: LensState): ReviewJob {
-		return {
-			id: "j2",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "idle",
-			overallStatus: "running",
-			startedAt: Date.now(),
-		};
-	}
-
-	it("renders provider/modelName together when provider is set", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "running",
-				startedAt: Date.now() - 1000,
-				modelName: "Claude Sonnet 4",
-				provider: "anthropic",
-			}),
-		);
-		const line = renderJobLine(job);
-		// Provider and model joined as `provider/modelName` so users can
-		// tell which provider served this lens at a glance.
-		expect(line).toContain("@ anthropic/Claude Sonnet 4");
-	});
-
-	it("falls back to modelName alone when provider is missing", () => {
-		// Legacy lens states from persisted reviews don't have a
-		// provider field — the widget must still render the model name
-		// without crashing or showing an empty slash.
-		const job = buildJobWithState(
-			buildLensState({
-				status: "running",
-				startedAt: Date.now() - 1000,
-				modelName: "Claude Sonnet 4",
-			}),
-		);
-		const line = renderJobLine(job);
-		expect(line).toContain("@ Claude Sonnet 4");
-		expect(line).not.toContain("/Claude Sonnet 4");
-	});
-
-	it("treats whitespace-only provider as missing", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "running",
-				startedAt: Date.now() - 1000,
-				modelName: "GPT-4o",
-				provider: "   ",
-			}),
-		);
-		const line = renderJobLine(job);
-		expect(line).toContain("@ GPT-4o");
-		expect(line).not.toContain("/GPT-4o");
-	});
-
-	it("renders provider/modelName for a done lens", () => {
-		const job = buildJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 4200,
-				findingsCount: 3,
-				modelName: "Haiku",
-				provider: "anthropic",
-			}),
-		);
-		const line = renderJobLine(job);
-		expect(line).toContain("@ anthropic/Haiku");
-		expect(line).toContain("3 findings");
+	it("shows a single progress line for running jobs (no per-lens lines)", () => {
+		const lines = renderLines(buildRunningJob(1000));
+		// Should be exactly 1 line: the progress heading.
+		expect(lines).toHaveLength(1);
 	});
 });
 
 describe("renderWidget — completed summary", () => {
-	function renderAll(job: ReviewJob): string[] {
-		let captured: (() => string[]) | undefined;
-		const widget = new ReviewProgressWidget();
-		const theme = {
-			fg: (_c: string, t: string) => t,
-			bold: (t: string) => t,
-		};
-		const uiCtx = {
-			setWidget: (
-				_key: string,
-				fn: (tui: any, theme: any) => { render: () => string[] },
-			) => {
-				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
-			},
-		};
-		widget.attach(uiCtx);
-		widget.setJobs([job]);
-		const lines = captured?.() ?? [];
-		widget.dispose();
-		return lines;
-	}
-
 	function buildCompletedJob(
 		overrides: Partial<ReviewJob> & {
 			synthesisResult?: any;
@@ -364,21 +153,21 @@ describe("renderWidget — completed summary", () => {
 		};
 	}
 
-	it("renders a compact summary line for a completed job (not running/queued)", () => {
-		const lines = renderAll(buildCompletedJob());
-		// First line is the heading with the verdict.
+	it("renders heading + per-lens line for a completed job", () => {
+		const lines = renderLines(buildCompletedJob());
+		// Line 0: heading with verdict
 		expect(lines[0]).toContain("DRYKISS Review");
 		expect(lines[0]).toContain("Verdict: Approve");
-		// Stats line includes the health score.
-		const statsLine = lines[1] ?? "";
-		expect(statsLine).toContain("0 findings");
-		expect(statsLine).toContain("score 92/100");
-		// Model/provider line comes after.
-		expect(lines[2]).toContain("@ anthropic/Claude Sonnet 4");
+		// Line 1: per-lens line
+		expect(lines[1]).toContain("KISS");
+		expect(lines[1]).toContain("✓");
+		expect(lines[1]).toContain("4.2s");
+		expect(lines[1]).toContain("3 findings");
+		expect(lines[1]).toContain("@ anthropic/Claude Sonnet 4");
 	});
 
-	it("includes critical/high counts in the stats line when present", () => {
-		const lines = renderAll(
+	it("includes critical/high counts in the severity breakdown line", () => {
+		const lines = renderLines(
 			buildCompletedJob({
 				synthesisResult: {
 					findings: [],
@@ -386,21 +175,28 @@ describe("renderWidget — completed summary", () => {
 					verdict: "Request changes",
 					criticalCount: 2,
 					highCount: 5,
-					mediumCount: 0,
-					lowCount: 0,
+					mediumCount: 3,
+					lowCount: 1,
 					nitCount: 0,
 					healthScore: 35,
 					scoreBreakdown: { critical: 2, warning: 5, suggestion: 0 },
 				},
 			}),
 		);
-		const statsLine = lines[1] ?? "";
-		expect(statsLine).toContain("2 critical");
-		expect(statsLine).toContain("5 high");
-		expect(statsLine).toContain("score 35/100");
+		// Severity breakdown is the last line.
+		const breakdown = lines[lines.length - 1];
+		expect(breakdown).toContain("2 critical");
+		expect(breakdown).toContain("5 high");
+		expect(breakdown).toContain("3 medium");
 	});
 
-	it("lists multiple distinct provider/model pairs separated by comma", () => {
+	it("omits severity breakdown when no findings", () => {
+		const lines = renderLines(buildCompletedJob());
+		// Should be heading + 1 per-lens line, no breakdown.
+		expect(lines).toHaveLength(2);
+	});
+
+	it("lists multiple per-lens lines for multi-lens jobs", () => {
 		const lens1: ReviewLens = "simplicity";
 		const lens2: ReviewLens = "deduplication";
 		const job = buildCompletedJob({
@@ -428,31 +224,12 @@ describe("renderWidget — completed summary", () => {
 				],
 			]),
 		});
-		const lines = renderAll(job);
-		const modelLine = lines.find((l) => l.includes("@")) ?? "";
-		// Both provider/model pairs must appear, regardless of order
-		// (Set iteration is insertion order, which here is lens order).
-		expect(modelLine).toContain("anthropic/Claude Sonnet 4");
-		expect(modelLine).toContain("openai/GPT-4o");
-	});
-
-	it("omits the model line when no lenses have a provider or modelName", () => {
-		const lens: ReviewLens = "simplicity";
-		const job = buildCompletedJob({
-			states: new Map([
-				[
-					lens,
-					buildLensState({
-						status: "done",
-						modelName: "", // explicit empty — buildLensState defaults to "m"
-					}),
-				],
-			]),
-		});
-		const lines = renderAll(job);
-		// Should have heading + stats, but no model line.
-		expect(lines.length).toBe(2);
-		expect(lines.some((l) => l.startsWith("@"))).toBe(false);
+		const lines = renderLines(job);
+		// Line 0: heading, Line 1: KISS, Line 2: DRY
+		expect(lines[1]).toContain("KISS");
+		expect(lines[1]).toContain("anthropic/Claude Sonnet 4");
+		expect(lines[2]).toContain("DRY");
+		expect(lines[2]).toContain("openai/GPT-4o");
 	});
 
 	it("handles errored jobs with a red icon and missing synthesis", () => {
@@ -473,26 +250,21 @@ describe("renderWidget — completed summary", () => {
 			startedAt: Date.now() - 5000,
 			completedAt: Date.now(),
 		};
-		const lines = renderAll(job);
-		// Heading should still render; the widget doesn't crash when
-		// synthesis is missing on an errored job.
+		const lines = renderLines(job);
 		expect(lines[0]).toContain("DRYKISS Review");
-		// Errored jobs surface "Review failed" so we don't conflate
-		// infrastructure failures with a content verdict.
 		expect(lines[0]).toContain("Review failed");
+		// Per-lens line should show error status
+		expect(lines[1]).toContain("✗");
+		expect(lines[1]).toContain("boom");
 	});
 
-	it("renders the elapsed duration for completed jobs", () => {
-		const lines = renderAll(buildCompletedJob());
-		const statsLine = lines[1] ?? "";
-		// startedAt is 5s ago, completedAt is now → ~5s elapsed
-		expect(statsLine).toMatch(/\d+\.\ds/);
+	it("renders the elapsed duration in the heading", () => {
+		const lines = renderLines(buildCompletedJob());
+		// heading line should contain an elapsed time like "5.0s"
+		expect(lines[0]).toMatch(/\d+\.\ds/);
 	});
 
 	it("hides the score line when synthesis is missing (undefined healthScore)", () => {
-		// Regression guard: safeNumber(undefined) → 0 would render a
-		// misleading "score 0/100" in the red band. The widget must
-		// hide the line entirely instead.
 		const job = buildCompletedJob({
 			synthesisResult: {
 				findings: [],
@@ -504,18 +276,13 @@ describe("renderWidget — completed summary", () => {
 				lowCount: 0,
 				nitCount: 0,
 				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-				// healthScore intentionally omitted via cast — simulates
-				// a legacy persisted review that pre-dates the field.
 			} as any,
 		});
-		const lines = renderAll(job);
-		const statsLine = lines[1] ?? "";
-		expect(statsLine).not.toContain("score");
+		const lines = renderLines(job);
+		expect(lines[0]).not.toContain("score");
 	});
 
 	it("hides the score line when synthesis has no scoreBreakdown property", () => {
-		// Defensive: synthesisResult without the scoreBreakdown field
-		// at all (legacy persisted review) must not crash.
 		const job = buildCompletedJob({
 			synthesisResult: {
 				findings: [],
@@ -527,58 +294,13 @@ describe("renderWidget — completed summary", () => {
 				lowCount: 0,
 				nitCount: 0,
 				healthScore: 0,
-				// no scoreBreakdown
 			} as any,
 		});
-		const lines = renderAll(job);
-		const statsLine = lines[1] ?? "";
-		// healthScore === 0 is a valid number, so it should still render.
-		expect(statsLine).toContain("score 0/100");
+		const lines = renderLines(job);
+		expect(lines[0]).toContain("score 0/100");
 	});
 
-	it("does not double-dim each stats part", () => {
-		// Regression guard: statsParts.map(p => fg("dim", p))
-		// followed by theme.fg("dim", joined) over-dims every part.
-		// The widget should dim the line as a whole, not each part.
-		// Use a theme that counts "dim" invocations so the test
-		// detects double-dimming directly rather than relying on
-		// ANSI escape counting (which depends on the real theme
-		// emitting a recognizable escape sequence).
-		let dimCallCount = 0;
-		const theme = {
-			fg: (color: string, text: string) => {
-				if (color === "dim") dimCallCount++;
-				return text;
-			},
-			bold: (text: string) => text,
-		};
-		let captured: (() => string[]) | undefined;
-		const widget = new ReviewProgressWidget();
-		const uiCtx = {
-			setWidget: (
-				_key: string,
-				fn: (tui: any, theme: any) => { render: () => string[] },
-			) => {
-				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
-			},
-		};
-		widget.attach(uiCtx);
-		widget.setJobs([buildCompletedJob()]);
-		captured?.();
-		widget.dispose();
-		// Expected: 3 separators + 1 outer wrap = 4 "dim" calls.
-		// If per-part dimming regressed, we'd see N additional
-		// calls (one per stats part: findings, critical, high,
-		// score, elapsed) = 4 + 4..5 = 8..9 calls.
-		expect(dimCallCount).toBeLessThanOrEqual(5);
-	});
-
-	it("color-bands the score in the completed summary (green ≥80, yellow ≥50, red <50)", () => {
-		// Consistency guard: widget summary must use the same color
-		// bands as the message renderer so users learn one rule,
-		// not two. Use a theme that wraps each color in a distinct
-		// sentinel token so the test is meaningful (the default
-		// no-op theme would let any color pass).
+	it("color-bands the score in the completed summary", () => {
 		const seenColors: Set<string> = new Set();
 		const theme = {
 			fg: (color: string, text: string) => {
@@ -625,25 +347,154 @@ describe("renderWidget — completed summary", () => {
 			return lines;
 		}
 
-		// 92 → success
 		let lines = renderOne(buildWithScore(92));
-		expect(lines[1]).toContain("[success:score 92/100]");
-		// 65 → warning
+		expect(lines[0]).toContain("[success:score 92/100]");
 		lines = renderOne(buildWithScore(65));
-		expect(lines[1]).toContain("[warning:score 65/100]");
-		// 30 → error
+		expect(lines[0]).toContain("[warning:score 65/100]");
 		lines = renderOne(buildWithScore(30));
-		expect(lines[1]).toContain("[error:score 30/100]");
-		// Band thresholds
+		expect(lines[0]).toContain("[error:score 30/100]");
 		lines = renderOne(buildWithScore(80));
-		expect(lines[1]).toContain("[success:score 80/100]");
+		expect(lines[0]).toContain("[success:score 80/100]");
 		lines = renderOne(buildWithScore(50));
-		expect(lines[1]).toContain("[warning:score 50/100]");
+		expect(lines[0]).toContain("[warning:score 50/100]");
 	});
 });
 
-import { formatFinding } from "./review-widget.js";
-import type { Finding } from "./types.js";
+describe("per-lens line — session log link", () => {
+	const lens: ReviewLens = "simplicity";
+
+	function buildCompletedJobWithState(state: LensState): ReviewJob {
+		return {
+			id: "j1",
+			files: [],
+			lenses: [lens],
+			states: new Map([[lens, state]]),
+			synthesisStatus: "done",
+			overallStatus: "done",
+			startedAt: Date.now(),
+			completedAt: Date.now(),
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			},
+		};
+	}
+
+	it("appends an OSC 8 hyperlink for a done lens with logPath", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({
+				status: "done",
+				durationMs: 8400,
+				findingsCount: 5,
+				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
+			}),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).toContain("\x1b]8;;file://");
+		expect(line).toContain("j1-simplicity.jsonl");
+	});
+
+	it("appends the link for an errored lens with logPath", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({
+				status: "error",
+				errorMessage: "boom",
+				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
+			}),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).toContain("\x1b]8;;");
+		expect(line).toContain("j1-simplicity.jsonl");
+	});
+
+	it("does NOT append a link for a done lens without logPath", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({ status: "done", durationMs: 1000, findingsCount: 0 }),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).not.toContain("\x1b]8;;");
+	});
+});
+
+describe("per-lens line — provider display", () => {
+	const lens: ReviewLens = "simplicity";
+
+	function buildCompletedJobWithState(state: LensState): ReviewJob {
+		return {
+			id: "j2",
+			files: [],
+			lenses: [lens],
+			states: new Map([[lens, state]]),
+			synthesisStatus: "done",
+			overallStatus: "done",
+			startedAt: Date.now(),
+			completedAt: Date.now(),
+			synthesisResult: {
+				findings: [],
+				summary: "ok",
+				verdict: "Approve",
+				criticalCount: 0,
+				highCount: 0,
+				mediumCount: 0,
+				lowCount: 0,
+				nitCount: 0,
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			},
+		};
+	}
+
+	it("renders provider/modelName together when provider is set", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({
+				status: "done",
+				durationMs: 1000,
+				findingsCount: 0,
+				modelName: "Claude Sonnet 4",
+				provider: "anthropic",
+			}),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).toContain("@ anthropic/Claude Sonnet 4");
+	});
+
+	it("falls back to modelName alone when provider is missing", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({
+				status: "done",
+				durationMs: 1000,
+				findingsCount: 0,
+				modelName: "Claude Sonnet 4",
+			}),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).toContain("@ Claude Sonnet 4");
+		expect(line).not.toContain("/Claude Sonnet 4");
+	});
+
+	it("treats whitespace-only provider as missing", () => {
+		const job = buildCompletedJobWithState(
+			buildLensState({
+				status: "done",
+				durationMs: 1000,
+				findingsCount: 0,
+				modelName: "GPT-4o",
+				provider: "   ",
+			}),
+		);
+		const line = renderJobLine(job, 1);
+		expect(line).toContain("@ GPT-4o");
+		expect(line).not.toContain("/GPT-4o");
+	});
+});
 
 describe("formatFinding", () => {
 	function buildFinding(overrides: Partial<Finding> = {}): Finding {
@@ -745,7 +596,6 @@ describe("formatFinding", () => {
 
 	it("falls back to the raw lens name when unknown", () => {
 		const out = formatFinding(buildFinding({ lens: "simplicity" }));
-		// simplicity → "KISS" via LENS_DISPLAY_NAMES
 		expect(out).toContain("[KISS]");
 	});
 });
@@ -839,15 +689,10 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		};
 	}
 
-	it("keeps the widget alive when only completed jobs remain (so the summary renders)", () => {
-		// Regression guard: update() previously disposed the widget
-		// as soon as no job was running/queued, losing the
-		// health-score summary the instant synthesis finished.
+	it("keeps the widget alive when only completed jobs remain", () => {
 		const widget = new ReviewProgressWidget();
 		const ctx = attachAndCapture(widget);
 		ctx.setJobs([makeCompletedJob()]);
-		// Widget should still be registered (not disposed) — the
-		// captured renderer should produce the summary lines.
 		expect(ctx.captured).toBeDefined();
 		const lines = ctx.captured!();
 		expect(lines.length).toBeGreaterThan(0);
@@ -856,32 +701,20 @@ describe("ReviewProgressWidget — lifecycle", () => {
 	});
 
 	it("stops the 80ms render timer when only completed jobs remain", () => {
-		// Perf guard: completed jobs render a static summary with no
-		// spinner or live elapsed counter. The 12Hz tick is pure waste.
 		const widget = new ReviewProgressWidget();
 		const ctx = attachAndCapture(widget);
-		// First prime with a running job so ensureTimer() actually
-		// installs the interval.
 		ctx.setJobs([makeRunningJob()]);
-		const before = widget["timer"];
-		expect(before).toBeDefined();
-		// Now swap to a completed job. update() should stop the timer.
+		expect(widget["timer"]).toBeDefined();
 		ctx.setJobs([makeCompletedJob()]);
-		const after = widget["timer"];
-		expect(after).toBeUndefined();
+		expect(widget["timer"]).toBeUndefined();
 		widget.dispose();
 	});
 
 	it("restarts the render timer when a new live job lands", () => {
-		// Symmetry guard: stopTimer must be reversible so the widget
-		// can pick back up if another review starts after the first
-		// one finished.
 		const widget = new ReviewProgressWidget();
 		const ctx = attachAndCapture(widget);
-		// Completed job first — timer should stay stopped.
 		ctx.setJobs([makeCompletedJob()]);
 		expect(widget["timer"]).toBeUndefined();
-		// Now a running job lands — timer should restart.
 		ctx.setJobs([makeRunningJob()]);
 		expect(widget["timer"]).toBeDefined();
 		widget.dispose();
@@ -892,10 +725,7 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		const ctx = attachAndCapture(widget);
 		ctx.setJobs([makeCompletedJob()]);
 		expect(ctx.captured).toBeDefined();
-		// Clearing jobs should fully dispose (ReviewManager's 10-min
-		// cleanup is what reaches this state).
 		ctx.setJobs([]);
-		// After dispose, the registered widget is cleared.
 		expect(widget["widgetRegistered"]).toBe(false);
 	});
 });
@@ -978,10 +808,7 @@ describe("collectModelPairs", () => {
 		]);
 	});
 
-	it("coerces non-string provider/modelName safely (unknown from serialized payload)", () => {
-		// After serialization through structured clone, fields can be
-		// missing or non-string. The helper must not throw — fall
-		// through to "missing" and skip the entry.
+	it("coerces non-string provider/modelName safely", () => {
 		const entries: Array<
 			[string, { provider?: unknown; modelName?: unknown }]
 		> = [
@@ -994,8 +821,6 @@ describe("collectModelPairs", () => {
 });
 
 describe("pickVerdict", () => {
-	// pickVerdict lives in review-widget.ts alongside collectModelPairs.
-	// Imported via the top-of-file ESM import so vitest's hoisting works.
 	it("returns the synthesis verdict when it is a non-empty string", () => {
 		expect(pickVerdict("Approve", false)).toBe("Approve");
 		expect(pickVerdict("Request changes", false)).toBe("Request changes");
@@ -1016,22 +841,15 @@ describe("pickVerdict", () => {
 		expect(pickVerdict("", false)).toBe("Request changes");
 	});
 
-	it("falls through on empty string verdict (does not display a blank 'Verdict:' line)", () => {
-		// Regression guard: an LLM emitting {"verdict": ""} should not
-		// produce a blank "Verdict:" line in the TUI. The widget
-		// previously used `??` which would have displayed the empty
-		// string verbatim.
+	it("falls through on empty string verdict", () => {
 		expect(pickVerdict("", false).length).toBeGreaterThan(0);
 	});
 
-	it("returns the verdict even when the job errored (explicit content verdict wins)", () => {
-		// If a job somehow produced a verdict before erroring on the
-		// last lens, we should still show the verdict. The "Review
-		// failed" fallback only kicks in when verdict is missing.
+	it("returns the verdict even when the job errored", () => {
 		expect(pickVerdict("Approve", true)).toBe("Approve");
 	});
 
-	it("handles non-string verdict types safely (post-serialization may coerce)", () => {
+	it("handles non-string verdict types safely", () => {
 		expect(pickVerdict(42, false)).toBe("Request changes");
 		expect(pickVerdict({ verdict: "Approve" }, false)).toBe("Request changes");
 		expect(pickVerdict(true, false)).toBe("Request changes");

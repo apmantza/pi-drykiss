@@ -1,6 +1,6 @@
 import { truncateToWidth, hyperlink } from "@earendil-works/pi-tui";
 import { basename } from "node:path";
-import type { ReviewJob, LensStatus } from "./review-manager.js";
+import type { ReviewJob } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { pathToFileLink } from "./persist.js";
 import { stripAnsi } from "./content-utils.js";
@@ -290,79 +290,40 @@ export class ReviewProgressWidget {
 			const isLive =
 				job.overallStatus === "running" || job.overallStatus === "queued";
 			if (!isLive) {
-				// Show a compact completed summary so the user sees the
-				// health score, verdict, and per-lens breakdown right
-				// after the job finishes — without waiting for the
-				// follow-up message renderer notification.
 				if (job.overallStatus === "done" || job.overallStatus === "error") {
 					lines.push(...this.renderCompletedSummary(job, theme, truncate));
 				}
 				continue;
 			}
 
-			const heading =
+			// Running / queued: single progress line with spinner.
+			const icon =
 				job.overallStatus === "running"
-					? theme.fg("accent", theme.bold("● DRYKISS Review"))
-					: theme.fg("dim", theme.bold("○ DRYKISS Review (queued)"));
-			const fileCount = theme.fg("dim", `· ${job.files.length} file(s)`);
-			lines.push(truncate(`${heading} ${fileCount}`));
+					? theme.fg("accent", frame)
+					: theme.fg("dim", "○");
+			const heading = theme.fg("accent", theme.bold("DRYKISS Review"));
+			const fileCount = theme.fg("dim", `${job.files.length} file(s)`);
 
-			// Count active/completed/done lenses
 			let activeCount = 0;
 			let doneCount = 0;
-			let errorCount = 0;
 			for (const lens of job.lenses) {
 				const s = job.states.get(lens)!;
 				if (s.status === "running") activeCount++;
-				else if (s.status === "done") doneCount++;
-				else if (s.status === "error") errorCount++;
+				else if (s.status === "done" || s.status === "error") doneCount++;
 			}
 			const totalLenses = job.lenses.length;
-			const progressText = theme.fg(
+			const elapsed =
+				job.overallStatus === "running" && job.startedAt
+					? ` · running ${formatElapsed(Date.now() - job.startedAt)}`
+					: "";
+			const progress = theme.fg(
 				"dim",
-				`${doneCount + errorCount}/${totalLenses} complete` +
+				`${doneCount}/${totalLenses} complete` +
 					(activeCount > 0 ? ` · ${activeCount} active` : ""),
 			);
-			lines.push(truncate(`  ${progressText}`));
-
-			for (let i = 0; i < job.lenses.length; i++) {
-				const lens = job.lenses[i];
-				const s = job.states.get(lens)!;
-				const isLast =
-					i === job.lenses.length - 1 && job.synthesisStatus === "idle";
-				const branch = isLast ? "└─" : "├─";
-				lines.push(
-					truncate(this.renderLensLine(branch, lens, s, theme, frame)),
-				);
-			}
-
-			if (job.synthesisStatus !== "idle") {
-				let icon;
-				if (job.synthesisStatus === "running") {
-					icon = theme.fg("accent", frame);
-				} else if (job.synthesisStatus === "error") {
-					icon = theme.fg("error", "✗");
-				} else {
-					icon = theme.fg("success", "✓");
-				}
-				const synthElapsed =
-					job.synthesisStatus === "running" && job.synthesisStartedAt
-						? ` · ${formatElapsed(Date.now() - job.synthesisStartedAt)}`
-						: "";
-				let statusText;
-				if (job.synthesisStatus === "running") {
-					statusText = theme.fg("accent", `running${synthElapsed}`);
-				} else if (job.synthesisStatus === "error") {
-					statusText = theme.fg("error", "failed");
-				} else {
-					statusText = theme.fg("dim", "done");
-				}
-				lines.push(
-					truncate(
-						`${theme.fg("dim", "└─")} ${icon} ${theme.bold("Synthesis")} · ${statusText}`,
-					),
-				);
-			}
+			lines.push(
+				truncate(`${icon} ${heading} · ${fileCount} · ${progress}${elapsed}`),
+			);
 		}
 
 		return lines;
@@ -388,121 +349,88 @@ export class ReviewProgressWidget {
 		const s = job.synthesisResult;
 		const hasError = job.overallStatus === "error";
 
-		// Shared aggregation — same logic as the message renderer and
-		// the notification body, so the three surfaces never disagree.
-		const modelPairs = collectModelPairs(job.states);
-		const modelLine =
-			modelPairs.length > 0
-				? theme.fg("dim", `@ ${modelPairs.join(", ")}`)
-				: "";
-
+		// Line 1: heading with verdict + score + elapsed.
 		const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-		// Shared verdict picker — same rule as the message renderer and
-		// notification body so the three surfaces never disagree on
-		// "what verdict do we show for a job with no synthesis verdict?".
 		const verdict = pickVerdict(s?.verdict, hasError);
-		const findingsCount = s?.findings?.length ?? 0;
 		const healthScore = s?.healthScore;
 		const elapsed =
 			job.completedAt && job.startedAt
 				? formatElapsed(job.completedAt - job.startedAt)
 				: "";
 
-		const statsParts: string[] = [];
-		statsParts.push(`${findingsCount} findings`);
-		if (s?.criticalCount && s.criticalCount > 0)
-			statsParts.push(`${s.criticalCount} critical`);
-		if (s?.highCount && s.highCount > 0) statsParts.push(`${s.highCount} high`);
-		// typeof check (not safeNumber) so a missing healthScore stays
-		// hidden instead of being displayed as a misleading "score 0/100"
-		// in the red band. Same 80/50 thresholds as the message renderer
-		// and notification body so the three surfaces never disagree on
-		// what "good" / "warning" / "critical" looks like.
+		const headingParts: string[] = [];
+		headingParts.push(
+			`${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg("accent", `Verdict: ${verdict}`)}`,
+		);
 		if (typeof healthScore === "number") {
 			const scoreColor =
 				healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
-			statsParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
+			headingParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
 		}
-		if (elapsed) statsParts.push(elapsed);
+		if (elapsed) headingParts.push(elapsed);
+		out.push(truncate(headingParts.join(` ${theme.fg("dim", "·")} `)));
 
-		const heading = `${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg(
-			"accent",
-			`Verdict: ${verdict}`,
-		)}`;
-		// One dim wrap around the whole line, not per-part — double-dimming
-		// made the separator and parts harder to scan.
-		const statsLine = theme.fg(
-			"dim",
-			statsParts.join(` ${theme.fg("dim", "·")} `),
-		);
-		out.push(truncate(heading));
-		out.push(truncate(`  ${statsLine}`));
-		if (modelLine) out.push(truncate(`  ${modelLine}`));
-		return out;
-	}
-
-	private renderLensLine(
-		branch: string,
-		lens: string,
-		state: {
-			status: LensStatus;
-			modelName: string;
-			provider?: string;
-			durationMs: number;
-			errorMessage?: string;
-			findingsCount: number;
-			logPath?: string;
-			startedAt?: number;
-			streamingText?: string;
-		},
-		theme: Theme,
-		frame: string,
-	): string {
-		let icon: string;
-		let statusText: string;
-		let linkSegment = "";
-		if (state.status === "queued") {
-			icon = theme.fg("dim", "○");
-			statusText = theme.fg("dim", "queued");
-		} else if (state.status === "running") {
-			icon = theme.fg("accent", frame);
-			const elapsed = state.startedAt
-				? ` · ${formatElapsed(Date.now() - state.startedAt)}`
-				: "";
-			statusText = state.streamingText
-				? theme.fg("dim", state.streamingText.slice(0, 30))
-				: theme.fg("accent", `running${elapsed}`);
-		} else if (state.status === "done") {
-			icon = theme.fg("success", "✓");
+		// Lines 2+: one line per lens with status + duration + findings + model.
+		for (const lens of job.lenses) {
+			const st = job.states.get(lens);
+			if (!st) continue;
+			const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
+			const lensIcon =
+				st.status === "done"
+					? theme.fg("success", "✓")
+					: st.status === "error"
+						? theme.fg("error", "✗")
+						: theme.fg("dim", "○");
+			const dur =
+				st.durationMs > 0 ? `${(st.durationMs / 1000).toFixed(1)}s` : "-";
 			const findings =
-				state.findingsCount > 0 ? ` · ${state.findingsCount} findings` : "";
-			statusText = theme.fg(
-				"dim",
-				`${(state.durationMs / 1000).toFixed(1)}s${findings}`,
+				st.findingsCount > 0 ? `${st.findingsCount} findings` : "0 findings";
+			const errorTag =
+				st.status === "error" && st.errorMessage
+					? theme.fg("error", ` · ${st.errorMessage.slice(0, 30)}`)
+					: "";
+			const prov = st.provider?.trim() ?? "";
+			const modelName = st.modelName?.trim() ?? "";
+			const modelLabel = prov ? `${prov}/${modelName}` : modelName;
+			const model = modelLabel ? theme.fg("dim", `@ ${modelLabel}`) : "";
+			const linkSegment =
+				st.status === "done" || st.status === "error"
+					? renderLogLink(st.logPath, theme)
+					: "";
+			out.push(
+				truncate(
+					`  ${lensIcon} ${theme.bold(displayName)} · ${dur} · ${findings}${model ? ` · ${model}` : ""}${errorTag}${linkSegment}`,
+				),
 			);
-			linkSegment = renderLogLink(state.logPath, theme);
-		} else {
-			icon = theme.fg("error", "✗");
-			statusText = theme.fg(
-				"error",
-				state.errorMessage ? state.errorMessage.slice(0, 40) : "error",
-			);
-			linkSegment = renderLogLink(state.logPath, theme);
 		}
 
-		const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
-		const name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-		// Show provider/model together so users can tell which
-		// provider served which lens at a glance — important when
-		// lenses autoroute to different providers, or when a
-		// server-gated free tier triggers a fallback to a paid
-		// model on a different provider. Whitespace-only or empty
-		// fields are skipped so the line never renders as `@ /`.
-		const prov = state.provider?.trim() ?? "";
-		const modelName = state.modelName?.trim() ?? "";
-		const modelLabel = prov ? `${prov}/${modelName}` : modelName;
-		const model = theme.fg("dim", `@ ${modelLabel}`);
-		return `${theme.fg("dim", branch)} ${icon} ${theme.bold(name)} ${model} · ${statusText}${linkSegment}`;
+		// Last line: findings split by severity. Use the synthesis
+		// severity counts (not the deduplicated findings array length)
+		// so the breakdown is visible even when the persisted findings
+		// list is empty but the lens reported counts.
+		const totalFindings =
+			(s?.criticalCount ?? 0) +
+			(s?.highCount ?? 0) +
+			(s?.mediumCount ?? 0) +
+			(s?.lowCount ?? 0) +
+			(s?.nitCount ?? 0);
+		if (totalFindings > 0) {
+			const parts: string[] = [`${totalFindings} findings`];
+			if (s?.criticalCount && s.criticalCount > 0)
+				parts.push(`${s.criticalCount} critical`);
+			if (s?.highCount && s.highCount > 0) parts.push(`${s.highCount} high`);
+			if (s?.mediumCount && s.mediumCount > 0)
+				parts.push(`${s.mediumCount} medium`);
+			if (s?.lowCount && s.lowCount > 0) parts.push(`${s.lowCount} low`);
+			if (s?.nitCount && s.nitCount > 0) parts.push(`${s.nitCount} nit`);
+			out.push(
+				truncate(
+					`  ${theme.fg("dim", parts.join(` ${theme.fg("dim", "·")} `))}`,
+				),
+			);
+		}
+
+		return out;
 	}
 
 	private update() {

@@ -52,9 +52,7 @@ describe("constants", () => {
 			expect(() => assertSafeGitRef("main\x1fbranch")).toThrow(
 				"control characters",
 			);
-			expect(() => assertSafeGitRef("main\x7f")).toThrow(
-				"control characters",
-			);
+			expect(() => assertSafeGitRef("main\x7f")).toThrow("control characters");
 			expect(() => assertSafeGitRef("\x01injection")).toThrow(
 				"control characters",
 			);
