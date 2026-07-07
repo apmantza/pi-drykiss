@@ -37,7 +37,13 @@ export class ConversationViewer implements Component {
 		lines.push("─".repeat(60));
 
 		for (const lens of this.job.lenses) {
-			const state = this.job.states.get(lens)!;
+			const state = this.job.states.get(lens);
+			if (!state) {
+				lines.push("");
+				lines.push(bold(fg("accent", `┌─ ${lens.toUpperCase()} ─ (state unavailable)`)));
+				lines.push(fg("accent", "└─"));
+				continue;
+			}
 			lines.push("");
 			lines.push(
 				bold(
@@ -47,7 +53,7 @@ export class ConversationViewer implements Component {
 					),
 				),
 			);
-			if (state.session) {
+			if (state.session && Array.isArray(state.session.messages)) {
 				for (const msg of state.session.messages) {
 					if (msg.role === "user") {
 						const text =

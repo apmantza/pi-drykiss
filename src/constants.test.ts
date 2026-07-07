@@ -7,6 +7,7 @@ import {
 	CONFIG_FILE,
 	LENS_DISPLAY_NAMES,
 	LOG_PREFIX,
+	assertSafeGitRef,
 } from "./constants.js";
 import { homedir } from "node:os";
 
@@ -29,6 +30,35 @@ describe("constants", () => {
 		expect(LENS_DISPLAY_NAMES.deduplication).toBe("DRY");
 		expect(LENS_DISPLAY_NAMES.synthesis).toBe("Synthesis");
 		expect(LENS_DISPLAY_NAMES.docs).toBe("Docs");
+	});
+
+	describe("assertSafeGitRef", () => {
+		it("accepts valid refs", () => {
+			expect(() => assertSafeGitRef("main")).not.toThrow();
+			expect(() => assertSafeGitRef("HEAD")).not.toThrow();
+			expect(() => assertSafeGitRef("abc123")).not.toThrow();
+			expect(() => assertSafeGitRef("v1.2.3")).not.toThrow();
+		});
+
+		it("rejects refs starting with -", () => {
+			expect(() => assertSafeGitRef("-main")).toThrow("cannot start with");
+			expect(() => assertSafeGitRef("--flag")).toThrow("cannot start with");
+		});
+
+		it("rejects refs with control characters", () => {
+			expect(() => assertSafeGitRef("main\x00branch")).toThrow(
+				"control characters",
+			);
+			expect(() => assertSafeGitRef("main\x1fbranch")).toThrow(
+				"control characters",
+			);
+			expect(() => assertSafeGitRef("main\x7f")).toThrow(
+				"control characters",
+			);
+			expect(() => assertSafeGitRef("\x01injection")).toThrow(
+				"control characters",
+			);
+		});
 	});
 });
 
