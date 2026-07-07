@@ -15,6 +15,8 @@ vi.mock("./prompt-loader.js", () => ({
 			return '```json\n{ summary: "" }\n```';
 		if (name === "grounding-rules")
 			return "## Grounding\nBe specific.\n### Quick Self-Check\n- [ ] KISS";
+		if (name === "grounding-rules-synthesis")
+			return "## Synthesis Calibration\nFinal filter rules.";
 		if (name === "active-constraints")
 			return "## Active Constraints\n{{active_constraints}}";
 		throw new Error(`Unknown prompt: ${name}`);
@@ -74,6 +76,7 @@ describe("composeSynthesisPrompt", () => {
 		expect(result).toContain("# Synthesizer");
 		expect(result).toContain("```json");
 		expect(result).toContain("## Grounding");
+		expect(result).toContain("## Synthesis Calibration");
 	});
 
 	it("includes active constraints when provided", async () => {
@@ -84,10 +87,11 @@ describe("composeSynthesisPrompt", () => {
 		expect(result).toContain("## Active Constraints");
 	});
 
-	it("includes the grounding rules (with Quick Self-Check) in synthesis", async () => {
+	it("includes both grounding rules and synthesis-calibration rules in synthesis", async () => {
 		const result = await composeSynthesisPrompt();
 		expect(result).toContain("## Grounding");
 		expect(result).toContain("### Quick Self-Check");
+		expect(result).toContain("## Synthesis Calibration");
 	});
 
 	it("omits active constraints section when not provided", async () => {
@@ -177,13 +181,12 @@ describe("simplicity lens body (bundled prompt structure)", () => {
 });
 
 /**
- * Structure tests for the merged `grounding-rules.md` shared fragment.
- * Reads the real bundled file and asserts the expected sections are
- * present and that the synthesis-only rules are clearly scoped so they
- * don't leak into lens behavior (no cross-contamination).
+ * Structure tests for the shared grounding fragments. Verifies that
+ * synthesis-only calibration rules live in their own file and never leak
+ * into the lens grounding file (true separation, not just a scope note).
  */
 describe("grounding-rules.md (bundled prompt structure)", () => {
-	it("contains the lens grounding, Quick Self-Check, and Synthesis Calibration sections", async () => {
+	it("contains the lens grounding and Quick Self-Check sections", async () => {
 		const { readFile } = await import("node:fs/promises");
 		const content = await readFile(
 			"src/prompts/_shared/grounding-rules.md",
@@ -193,26 +196,32 @@ describe("grounding-rules.md (bundled prompt structure)", () => {
 		expect(content).toContain("### Severity Calibration");
 		expect(content).toContain("### Anti-Noise Rules");
 		expect(content).toContain("### Quick Self-Check");
-		expect(content).toContain("### Synthesis Calibration");
 	});
 
-	it("scopes the Synthesis Calibration rules to the synthesis stage only", async () => {
+	it("does NOT contain synthesis-only rules (no cross-contamination into lenses)", async () => {
 		const { readFile } = await import("node:fs/promises");
 		const content = await readFile(
 			"src/prompts/_shared/grounding-rules.md",
 			"utf8",
 		);
-		const idx = content.indexOf("### Synthesis Calibration");
-		expect(idx).toBeGreaterThan(-1);
-		const section = content.slice(idx);
-		// The synthesis-only rules must be explicitly framed as not
-		// applying to individual lens reviews, so a lens won't
-		// downgrade or merge its own output unsupervised.
-		expect(section).toMatch(
-			/apply.*only at the synthesis|synthesis \(final-filter\) stage/i,
+		expect(content).not.toContain("### Synthesis Calibration");
+		expect(content).not.toContain("You are the final filter");
+		expect(content).not.toContain("Merge duplicates across lenses");
+	});
+});
+
+describe("grounding-rules-synthesis.md (bundled prompt structure)", () => {
+	it("contains the synthesis-calibration rules", async () => {
+		const { readFile } = await import("node:fs/promises");
+		const content = await readFile(
+			"src/prompts/_shared/grounding-rules-synthesis.md",
+			"utf8",
 		);
-		expect(section).toMatch(
-			/MUST NOT apply them to their own output|not to individual lens reviews/i,
+		expect(content).toContain("## Synthesis Calibration");
+		expect(content).toContain("You are the final filter");
+		expect(content).toContain("Merge duplicates across lenses");
+		expect(content).toContain(
+			"Downgrade any maintainability/test/architecture finding labeled critical",
 		);
 	});
 });

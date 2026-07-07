@@ -6,15 +6,15 @@
  *   2. <lens>.md
  *   3. active-constraints.md  (only when `activeConstraints` is non-empty)
  *   4. json-output.md
- *   5. grounding-rules.md  (includes the Quick Self-Check + Synthesis Calibration sections)
+ *   5. grounding-rules.md  (includes the Quick Self-Check checklist)
  *
  * Composition order (synthesis):
  *   1. iron-law.md
  *   2. synthesis.md
  *   3. active-constraints.md  (only when `activeConstraints` is non-empty)
  *   4. json-output-synthesis.md
- *   5. grounding-rules.md  (same shared fragment as lenses; the file's
- *      "Synthesis Calibration" section scopes the synthesis-only rules)
+ *   5. grounding-rules.md  (shared lens grounding)
+ *   6. grounding-rules-synthesis.md  (synthesis-only final-filter rules)
  *
  * Substitutions:
  *   - `{{active_constraints}}` in `active-constraints.md` is replaced with the runtime constraint text.
@@ -80,16 +80,23 @@ export async function composeLensPrompt(
 export async function composeSynthesisPrompt(
 	options: ComposeOptions = {},
 ): Promise<string> {
-	const [ironLaw, synthesisBody, jsonOutput, grounding, activeTemplate] =
-		await Promise.all([
-			loadPromptBody("iron-law", "shared"),
-			loadPromptBody("synthesis", "lens"),
-			loadPromptBody("json-output-synthesis", "shared"),
-			loadPromptBody("grounding-rules", "shared"),
-			options.activeConstraints
-				? loadPromptBody("active-constraints", "shared")
-				: Promise.resolve(""),
-		]);
+	const [
+		ironLaw,
+		synthesisBody,
+		jsonOutput,
+		grounding,
+		synthesisGrounding,
+		activeTemplate,
+	] = await Promise.all([
+		loadPromptBody("iron-law", "shared"),
+		loadPromptBody("synthesis", "lens"),
+		loadPromptBody("json-output-synthesis", "shared"),
+		loadPromptBody("grounding-rules", "shared"),
+		loadPromptBody("grounding-rules-synthesis", "shared"),
+		options.activeConstraints
+			? loadPromptBody("active-constraints", "shared")
+			: Promise.resolve(""),
+	]);
 
 	const sections: string[] = [ironLaw, synthesisBody];
 	if (activeTemplate && options.activeConstraints) {
@@ -99,7 +106,7 @@ export async function composeSynthesisPrompt(
 			}),
 		);
 	}
-	sections.push(jsonOutput, grounding);
+	sections.push(jsonOutput, grounding, synthesisGrounding);
 
 	return sections.filter(Boolean).join("\n\n");
 }

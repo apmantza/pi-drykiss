@@ -95,37 +95,55 @@ export async function loadSharedFragment(
 
 /**
  * Load a prompt body, trying the user dir first and falling back to the bundled dir on ENOENT.
+ * Results are cached in memory for the lifetime of the process to avoid repeated disk reads.
  * This is the function every other module should call.
  */
+const promptCache = new Map<string, string>();
+
+function cacheKey(name: string, kind: "lens" | "shared"): string {
+	const env = process.env.DRYKISS_PROMPTS_DIR;
+	return env ? `env:${env}:${kind}:${name}` : `${kind}:${name}`;
+}
+
+export function clearPromptCache(): void {
+	promptCache.clear();
+}
+
 export async function loadPromptBody(
 	name: string,
 	kind: "lens" | "shared" = "lens",
 ): Promise<string> {
-	const userDir = userPromptsDir();
-	const bundledDir = bundledPromptsDir();
+	const key = cacheKey(name, kind);
+	const cached = promptCache.get(key);
+	if (cached !== undefined) {
+		return cached;
+	}
+
 	const env = process.env.DRYKISS_PROMPTS_DIR;
+	const dirs =
+		env && env.trim().length > 0
+			? [env]
+			: [userPromptsDir(), bundledPromptsDir()];
 
-	// Env var short-circuits the resolution order
-	if (env && env.trim().length > 0) {
-		return kind === "lens"
-			? loadPromptFile({ dir: env }, name)
-			: loadSharedFragment({ dir: env }, name);
-	}
-
-	try {
-		return await (kind === "lens"
-			? loadPromptFile({ dir: userDir }, name)
-			: loadSharedFragment({ dir: userDir }, name));
-	} catch (err) {
-		if (
-			err instanceof Error &&
-			(err as NodeJS.ErrnoException).code === "ENOENT"
-		) {
-			// Fall back to bundled defaults
-			return kind === "lens"
-				? loadPromptFile({ dir: bundledDir }, name)
-				: loadSharedFragment({ dir: bundledDir }, name);
+	let lastErr: unknown;
+	for (const dir of dirs) {
+		try {
+			const result = await (kind === "lens"
+				? loadPromptFile({ dir }, name)
+				: loadSharedFragment({ dir }, name));
+			promptCache.set(key, result);
+			return result;
+		} catch (err) {
+			if (
+				err instanceof Error &&
+				(err as NodeJS.ErrnoException).code === "ENOENT"
+			) {
+				lastErr = err;
+				continue;
+			}
+			throw err;
 		}
-		throw err;
 	}
+
+	throw lastErr;
 }

@@ -89,12 +89,19 @@ export function parseFindingsJson(
 	lens?: ReviewLens,
 ): ParseFindingsResult {
 	try {
+		// Repair unescaped quotes / newlines inside string values FIRST, so the
+		// balanced-extraction and parse steps see valid JSON. Calling
+		// extractBalancedJson on the unsanitized raw mis-tracks strings at the
+		// first unescaped quote and truncates the structure (e.g. docs lenses
+		// emit `loadPromptBody("iron-law", "shared")` inside a JSON string).
+		const sanitized = sanitizeJsonString(raw);
+
 		// Some lenses wrap the whole array in an object; some emit a single
 		// finding object. Extract the largest balanced JSON structure so we
 		// can parse either shape instead of assuming an array.
-		const arrExtract = extractBalancedJson(raw, "[", "]");
-		const objExtract = extractBalancedJson(raw, "{", "}");
-		let jsonText = raw;
+		const arrExtract = extractBalancedJson(sanitized, "[", "]");
+		const objExtract = extractBalancedJson(sanitized, "{", "}");
+		let jsonText = sanitized;
 		if (arrExtract) {
 			// A balanced array is the canonical lens output shape. Prefer it
 			// over an object so we recover findings nested inside wrapper
@@ -110,11 +117,9 @@ export function parseFindingsJson(
 		try {
 			parsed = JSON.parse(jsonText);
 		} catch {
-			try {
-				parsed = JSON.parse(sanitizeJsonString(jsonText));
-			} catch {
-				parsed = lenientJsonParse(jsonText);
-			}
+			// jsonText is already sanitized; fall back to the tolerant parser
+			// for trailing-comma / single-quote / unterminated cases.
+			parsed = lenientJsonParse(jsonText);
 		}
 
 		// Normalize the parsed value to a findings array:

@@ -9,7 +9,8 @@ This directory contains the *shared* parts of every lens's system prompt. They a
 | `iron-law.md` | The Iron Law: "never suggest fixes before completing risk diagnosis". Loaded first. Sets the lens's epistemic stance. |
 | `json-output.md` | JSON output schema for lens reviews. Loaded after the lens body. |
 | `json-output-synthesis.md` | JSON output schema for the synthesis step. Loaded only when composing the synthesis prompt. |
-| `grounding-rules.md` | Severity calibration, anti-noise, and a "Quick Self-Check" (KISS/DRY/names/size/edge-cases/security/resilience/architecture) for lens reviews, plus a "Synthesis Calibration" section with the stricter final-filter rules for the synthesis step. Shared by both lens and synthesis prompts. |
+| `grounding-rules.md` | Severity calibration, anti-noise, and a "Quick Self-Check" (KISS/DRY/names/size/edge-cases/security/resilience/architecture) for lens reviews. Shared by both lens and synthesis prompts. |
+| `grounding-rules-synthesis.md` | Synthesis-only final-filter rules (deduplicate, down-rank noise, downgrade false criticals, handle incomplete lens failures). Loaded only when composing the synthesis prompt. |
 | `active-constraints.md` | A *template* with a `{{active_constraints}}` placeholder. Only loaded when the project has `disable`/`focus`/`ignore`/`severity` config set. The composer substitutes the runtime constraint list into the placeholder. |
 | `mode-context-proposed.md` | Injected into the lens **user** prompt when the review mode is a proposed change (local/staged/branch/commit/pr/files). Frames the reviewer as gating a change set. Loaded by `mode-context.ts`. |
 | `mode-context-audit.md` | Injected into the lens **user** prompt when the review mode is a full-codebase audit. Frames the reviewer to skip diff-introduced vs pre-existing checks. Loaded by `mode-context.ts`. |
@@ -37,6 +38,7 @@ synthesis.md
 active-constraints.md  (only if config has active constraints)
 json-output-synthesis.md
 grounding-rules.md
+grounding-rules-synthesis.md
 ```
 
 ## Editing

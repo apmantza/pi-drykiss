@@ -6,6 +6,7 @@
  * - Unescaped control characters
  * - Unterminated strings (best-effort)
  * - Markdown code fences around JSON
+ * - Unescaped double quotes inside string values (common in docs/code lenses)
  */
 
 export function isPlainObject(
@@ -22,6 +23,76 @@ function fixTrailingCommas(raw: string): string {
 	return raw.replace(/,\s*([}\]])/g, "$1");
 }
 
+/**
+ * Repair unescaped double quotes that appear inside JSON string values.
+ * LLMs reviewing docs or code often emit inline quotes without escaping
+ * them, which terminates the string early. We use a look-ahead heuristic:
+ * a quote inside a string is escaped unless it is immediately followed by a
+ * JSON structural token (optionally after whitespace) — in which case we
+ * treat it as the string's closing delimiter.
+ *
+ * This is a best-effort repair; inherently ambiguous cases (multiple inline
+ * quotes where one is followed by a structural char) are additionally
+ * prevented at the prompt level by instructing lenses to escape double
+ * quotes or use single quotes inside JSON strings.
+ */
+function repairUnescapedQuotes(raw: string): string {
+	const result: string[] = [];
+	let i = 0;
+	let inString = false;
+	let escaped = false;
+
+	while (i < raw.length) {
+		const ch = raw[i];
+
+		if (escaped) {
+			result.push(ch);
+			escaped = false;
+			i++;
+			continue;
+		}
+
+		if (ch === "\\") {
+			result.push(ch);
+			escaped = true;
+			i++;
+			continue;
+		}
+
+		if (ch === '"') {
+			if (!inString) {
+				inString = true;
+				result.push(ch);
+			} else {
+				// Look ahead to decide if this is a closing quote or an
+				// unescaped quote inside the string value.
+				let j = i + 1;
+				while (j < raw.length && /\s/.test(raw[j])) j++;
+				const next = raw[j];
+				if (
+					next === "," ||
+					next === ":" ||
+					next === "}" ||
+					next === "]" ||
+					next === undefined
+				) {
+					inString = false;
+					result.push(ch);
+				} else {
+					result.push('\\"');
+				}
+			}
+			i++;
+			continue;
+		}
+
+		result.push(ch);
+		i++;
+	}
+
+	return result.join("");
+}
+
 export function lenientJsonParse<T = unknown>(raw: string): T {
 	// Try strict parse first (fast path)
 	try {
@@ -35,7 +106,10 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	// 1. Remove markdown code fences if present
 	fixed = stripJsonMarkdownFences(fixed);
 
-	// 2. Extract JSON object or array if wrapped in text
+	// 2. Fix unescaped double quotes inside string values (docs/code lenses)
+	fixed = repairUnescapedQuotes(fixed);
+
+	// 3. Extract JSON object or array if wrapped in text
 	// Use brace/bracket depth tracking to correctly handle nested structures
 	function extractBalanced(
 		input: string,
@@ -84,10 +158,10 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		fixed = arrMatch;
 	}
 
-	// 3. Fix trailing commas (common LLM mistake)
+	// 4. Fix trailing commas (common LLM mistake)
 	fixed = fixTrailingCommas(fixed);
 
-	// 4. Fix unescaped newlines inside string values
+	// 5. Fix unescaped newlines inside string values
 	// This regex matches content between quotes and escapes literal newlines
 	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
 		// Only process if there are unescaped newlines
@@ -97,14 +171,14 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		return `"${escaped}"`;
 	});
 
-	// 5. Fix unescaped tabs inside string values
+	// 6. Fix unescaped tabs inside string values
 	fixed = fixed.replace(/"([^"]*)"/g, (match, content) => {
 		if (!content.includes("\t")) return match;
 		const escaped = content.replaceAll(/\t/g, "\\t");
 		return `"${escaped}"`;
 	});
 
-	// 6. Fix single quotes used as string delimiters (rare but happens)
+	// 7. Fix single quotes used as string delimiters (rare but happens)
 	// Only do this if there are no double quotes (pure single-quote JSON)
 	// SECURITY: Only convert when no double quotes exist to avoid corrupting
 	// strings that legitimately contain apostrophes in double-quoted JSON.
@@ -112,7 +186,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		fixed = fixed.replaceAll(/'/g, '"');
 	}
 
-	// 3. Try to fix unterminated strings by finding last complete object/array
+	// 8. Try to fix unterminated strings by finding last complete object/array
 	// Find the last } or ] and truncate there
 	const lastObjBrace = fixed.lastIndexOf("}");
 	const lastArrBracket = fixed.lastIndexOf("]");
@@ -144,6 +218,10 @@ export function sanitizeJsonString(raw: string): string {
 
 	// Remove markdown code fences if present
 	s = stripJsonMarkdownFences(s);
+
+	// Repair unescaped double quotes inside string values (docs/code lenses
+	// often emit inline quotes without escaping them).
+	s = repairUnescapedQuotes(s);
 
 	// Replace literal newlines/tabs inside strings with escaped versions
 	// Use depth-aware scanner to correctly handle escaped quotes and nested braces

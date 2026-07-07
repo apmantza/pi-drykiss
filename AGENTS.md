@@ -16,9 +16,10 @@ src/
   prompt-loader.ts    # Pure file-reading: reads .md files from user dir (with bundled fallback)
   prompt-composer.ts  # Composes a lens system prompt from shared fragments + per-lens body
   prompt-builder.ts   # Thin orchestrator: ties loader + composer together; user-prompt context; seed lifecycle
+  mode-context.ts     # Resolves review posture (proposed vs audit) and loads mode-context-{proposed,audit}.md
   prompts/            # The bundled default prompt text — the source of truth (see prompt-architecture.md)
-    _shared/          # iron-law, json-output, json-output-synthesis, grounding-rules (incl. Quick Self-Check + Synthesis Calibration), active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
-    simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, synthesis.md
+    _shared/          # iron-law, json-output, json-output-synthesis, grounding-rules, grounding-rules-synthesis, active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
+    simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, docs.md, synthesis.md
   model-selector.ts   # Resolves model hints, interactive selection, isModelError detection
   git-diff.ts         # Git diff parsing, file status detection, project index generation
   edit-tracker.ts     # Tracks file edits across turns via tool_execution_end events

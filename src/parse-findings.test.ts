@@ -245,5 +245,14 @@ describe("parseFindingsJson", () => {
 			expect(parseError).toBeUndefined();
 			expect(findings).toHaveLength(1);
 		});
+
+		it("survives unescaped double quotes inside string values (docs/code lenses)", () => {
+			const raw =
+				'[{"file": "src/a.ts", "severity": "medium", "category": "c", "summary": "s", "detail": "use loadPromptBody("iron-law" shared)", "suggestion": "f"}]';
+			const { findings, parseError } = parseFindingsJson(raw, "docs");
+			expect(parseError).toBeUndefined();
+			expect(findings).toHaveLength(1);
+			expect(findings[0].detail).toBe('use loadPromptBody("iron-law" shared)');
+		});
 	});
 });

@@ -45,7 +45,8 @@ pi-drykiss/
 │   │   │   ├── iron-law.md          # "NEVER suggest fixes before completing risk diagnosis..."
 │   │   │   ├── json-output.md       # JSON output instructions for lens prompts
 │   │   │   ├── json-output-synthesis.md  # JSON output instructions for synthesis
-│   │   │   ├── grounding-rules.md   # Severity calibration + Quick Self-Check (merged from kiss-dry-checklist) + Synthesis Calibration (merged from grounding-rules-synthesis)
+│   │   │   ├── grounding-rules.md   # Severity calibration + Quick Self-Check (merged from kiss-dry-checklist)
+│   │   │   ├── grounding-rules-synthesis.md  # Synthesis-only final-filter rules (deduplication, down-ranking, verdict consistency)
 │   │   │   ├── active-constraints.md  # Placeholder for the disable/severity/ignore/focus block
 │   │   │   ├── mode-context-proposed.md  # Proposed-change framing (injected into lens user prompt)
 │   │   │   ├── mode-context-audit.md      # Full-codebase audit framing (injected into lens user prompt)
@@ -131,8 +132,7 @@ The check is best-effort: heuristics can be evaded. But it raises the cost of re
 
 ```ts
 // src/prompt-loader.ts
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { loadPromptBody, bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
 
 export interface PromptSource {
   /** Where to read prompts from. Defaults to bundled defaults. */
@@ -143,8 +143,7 @@ export async function loadPromptFile(
   source: PromptSource,
   name: string,
 ): Promise<string> {
-  const path = join(source.dir, `${name}.md`);
-  return readFile(path, "utf8");
+  return readFile(join(source.dir, `${name}.md`), "utf8");
 }
 
 export async function loadSharedFragment(
@@ -153,6 +152,37 @@ export async function loadSharedFragment(
 ): Promise<string> {
   return loadPromptFile({ ...source, dir: join(source.dir, "_shared") }, name);
 }
+
+export async function loadPromptBody(
+  name: string,
+  kind: "lens" | "shared" = "lens",
+): Promise<string> {
+  // Resolution order:
+  // 1. process.env.DRYKISS_PROMPTS_DIR (debug/override)
+  // 2. ~/.pi/drykiss/prompts/ (user-customized)
+  // 3. bundledPromptsDir() -> <repo>/src/prompts/ (jiti fallback)
+  // Results are memoized in memory; call clearPromptCache() to reset.
+}
+
+export function bundledPromptsDir(): string {
+  // Returns <repo>/src/prompts via import.meta.url (works under jiti/tsx).
+}
+
+export function userPromptsDir(): string {
+  // Returns ~/.pi/drykiss/prompts
+}
+```
+
+`loadPromptBody` is the primary entry point used by `prompt-composer.ts` and tests. The other functions are exposed for lower-level access and configuration.
+
+## The prompt-composer.ts API
+
+  source: PromptSource,
+  name: string,
+): Promise<string> {
+  return loadPromptFile({ ...source, dir: join(source.dir, "_shared") }, name);
+}
+
 ```
 
 `source.dir` resolves in this order:
@@ -202,41 +232,65 @@ export async function composeLensPrompt(
 export async function composeSynthesisPrompt(
   options: ComposeOptions,
 ): Promise<string> {
-  // analogous, using synthesis-specific shared fragments
+  const [
+    ironLaw,
+    synthesisBody,
+    jsonOutput,
+    grounding,
+    synthesisGrounding,
+    activeTemplate,
+  ] = await Promise.all([
+    loadPromptBody("iron-law", "shared"),
+    loadPromptBody("synthesis", "lens"),
+    loadPromptBody("json-output-synthesis", "shared"),
+    loadPromptBody("grounding-rules", "shared"),
+    loadPromptBody("grounding-rules-synthesis", "shared"),
+    options.activeConstraints
+      ? loadPromptBody("active-constraints", "shared")
+      : Promise.resolve(""),
+  ]);
+
+  const sections = [ironLaw, synthesisBody];
+  if (activeTemplate && options.activeConstraints) {
+    sections.push(
+      substitute(activeTemplate, {
+        active_constraints: options.activeConstraints,
+      }),
+    );
+  }
+  sections.push(jsonOutput, grounding, synthesisGrounding);
+
+  return sections.filter(Boolean).join("\n\n");
 }
 ```
 
 ## The prompt-builder.ts API (the thin orchestrator)
 
 ```ts
-// src/prompt-builder.ts (after refactor — should be ~150 lines, not 790)
-import { composeLensPrompt, composeSynthesisPrompt, defaultPromptSource } from "./prompt-composer.js";
-import { getGlobalPromptsDir } from "./constants.js";
+// src/prompt-builder.ts
+import { composeLensPrompt, composeSynthesisPrompt } from "./prompt-composer.js";
 
 export async function loadLensSystemPrompt(
   lens: Exclude<ReviewLens, "all">,
   activeConstraints?: string,
 ): Promise<string> {
-  const source = { dir: getGlobalPromptsDir() };
-  return composeLensPrompt(lens, { source, activeConstraints });
+  return composeLensPrompt(lens, { activeConstraints });
 }
 
-export async function loadSynthesisSystemPrompt(): Promise<string> {
-  const source = { dir: getGlobalPromptsDir() };
-  return composeSynthesisPrompt({ source });
-}
-
-export function bundledPromptsDir(): string {
-  // Resolves to src/prompts/ via new URL at runtime
-  return new URL("../prompts/", import.meta.url).pathname;
+export async function loadSynthesisSystemPrompt(
+  activeConstraints?: string,
+): Promise<string> {
+  return composeSynthesisPrompt({ activeConstraints });
 }
 
 export async function ensureDefaultPrompts(): Promise<void> {
-  const userDir = getGlobalPromptsDir();
+  const userDir = userPromptsDir();
   // Copy bundled src/prompts/* to userDir on first run
-  // (sentinel-versioned per P0.2)
+  // (sentinel-versioned; see CURRENT_SEED_VERSION)
 }
 ```
+
+`prompt-builder.ts` is now a thin orchestrator. The loader-resolution logic lives in `prompt-loader.ts` (`loadPromptBody`), and composition lives in `prompt-composer.ts`.
 
 ## The migration (one-time)
 

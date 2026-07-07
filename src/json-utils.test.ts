@@ -64,6 +64,14 @@ describe("lenientJsonParse", () => {
 		expect(Array.isArray(parsed)).toBe(true);
 		expect((parsed as any[])[0].file).toBe('src\\test"quote".ts');
 	});
+	it("fixes unescaped double quotes inside string values", () => {
+		const input =
+			'[{"file": "x.ts", "detail": "use loadPromptBody("iron-law" shared)"}]';
+		expect(lenientJsonParse(input)).toEqual({
+			file: "x.ts",
+			detail: 'use loadPromptBody("iron-law" shared)',
+		});
+	});
 });
 
 describe("sanitizeJsonString", () => {
@@ -94,6 +102,22 @@ describe("sanitizeJsonString", () => {
 		const result = sanitizeJsonString(input);
 		expect(result).toContain("col1 col2");
 		expect(result).not.toContain("\t");
+	});
+
+	it("escapes unescaped double quotes inside string values", () => {
+		const input = '{"detail": "use loadPromptBody("iron-law" shared)"}';
+		const result = sanitizeJsonString(input);
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(result);
+		} catch (err) {
+			throw new Error(
+				`JSON.parse failed for sanitized result: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+		expect(parsed).toEqual({
+			detail: 'use loadPromptBody("iron-law" shared)',
+		});
 	});
 
 	it("does not modify content outside strings", () => {

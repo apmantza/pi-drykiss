@@ -5,8 +5,10 @@ vi.mock("node:fs/promises", () => ({
 	readFile: vi.fn(),
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
 	vi.resetAllMocks();
+	const { clearPromptCache } = await import("./prompt-loader.js");
+	clearPromptCache();
 });
 
 describe("loadPromptFile", () => {
@@ -86,6 +88,28 @@ describe("resolvePromptsDir", () => {
 });
 
 describe("loadPromptBody", () => {
+	beforeEach(() => {
+		delete process.env.DRYKISS_PROMPTS_DIR;
+	});
+
+	it("caches successful loads and reuses them on subsequent calls", async () => {
+		vi.mocked(readFile)
+			.mockRejectedValueOnce(
+				Object.assign(new Error("not found"), { code: "ENOENT" as const }),
+			)
+			.mockResolvedValueOnce("bundled prompt content");
+		const { loadPromptBody } = await import("./prompt-loader.js");
+
+		const first = await loadPromptBody("cached-lens", "lens");
+		const second = await loadPromptBody("cached-lens", "lens");
+
+		expect(first).toBe("bundled prompt content");
+		expect(second).toBe("bundled prompt content");
+		// First call tries user dir (ENOENT) then bundled dir (success) = 2 reads.
+		// Second call should hit the cache and not touch the filesystem.
+		expect(readFile).toHaveBeenCalledTimes(2);
+	});
+
 	it("falls back to bundled prompts on ENOENT from user dir", async () => {
 		vi.mocked(readFile)
 			.mockRejectedValueOnce(

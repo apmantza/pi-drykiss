@@ -99,13 +99,14 @@ const BUNDLED_SHARED_FILES = [
 	"json-output.md",
 	"json-output-synthesis.md",
 	"grounding-rules.md",
+	"grounding-rules-synthesis.md",
 	"active-constraints.md",
 	...Object.values(MODE_CONTEXT_FRAGMENT_NAMES).map((name) => `${name}.md`),
 ] as const;
 
 /** Sentinel filename. Present = seeded at version X.Y.Z. */
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "5"; // bump to force re-seed (v5: language-agnostic review taxonomy)
+const CURRENT_SEED_VERSION = "6"; // bump to force re-seed (v6: split synthesis calibration into its own shared file)
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);

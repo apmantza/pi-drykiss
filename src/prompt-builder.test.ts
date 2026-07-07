@@ -88,7 +88,7 @@ const LENS_PROMPTS: Record<string, string> = {
 };
 
 const SYNTHESIS_PROMPT =
-	"Senior Engineer Synthesizer · critical > high > medium > low > nit · Output the final report as a single JSON object · Synthesis Grounding rules";
+	"Senior Engineer Synthesizer · critical > high > medium > low > nit · Output the final report as a single JSON object · Grounding rules · Synthesis Calibration";
 
 /** Wire the composer mock to return the right fixture for each lens. */
 function setComposerFixtures(): void {
@@ -706,11 +706,11 @@ describe("prompt template management", () => {
 
 				await ensureDefaultPrompts("/cwd");
 
-				// 8 lens + 7 shared + 1 sentinel = 16 files
+				// 8 lens + 8 shared + 1 sentinel = 17 files
 				const entries = await readdir(userDir);
 				const sharedEntries = await readdir(join(userDir, "_shared"));
 				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
-				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(7);
+				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
 				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
 					true,
 				);
