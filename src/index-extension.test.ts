@@ -377,3 +377,91 @@ describe("extension registration", () => {
 		expect(applyReviewState).not.toHaveBeenCalled();
 	});
 });
+
+describe("drykiss_autoreview tool renderResult", () => {
+	function getTool() {
+		const { pi } = makePi();
+		registerDrykiss(pi as any);
+		return pi.registerTool.mock.calls[0][0];
+	}
+
+	function render(result: any, isPartial = false): string {
+		const tool = getTool();
+		const theme = {
+			fg: (_c: string, t: string) => t,
+			bold: (t: string) => t,
+			dim: (t: string) => t,
+		};
+		const text = tool.renderResult(result, { isPartial }, theme);
+		return text.render(200).join("\n");
+	}
+
+	it("renders the verdict + score for a final clean result", () => {
+		const out = render({
+			details: {
+				result: {
+					clean: true,
+					counts: { total: 0 },
+					verdict: "Approve",
+					healthScore: 95,
+				},
+			},
+		});
+		expect(out).toContain("clean");
+		expect(out).toContain("0 finding(s)");
+		expect(out).toContain("verdict: Approve");
+		expect(out).toContain("score 95/100");
+	});
+
+	it("renders the verdict + score for a final result with findings", () => {
+		const out = render({
+			details: {
+				result: {
+					clean: false,
+					counts: { total: 3 },
+					verdict: "Request changes",
+					healthScore: 42,
+				},
+			},
+		});
+		expect(out).toContain("reviewed");
+		expect(out).toContain("3 finding(s)");
+		expect(out).toContain("verdict: Request changes");
+		expect(out).toContain("score 42/100");
+	});
+
+	it("renders nothing for a partial/streaming result (widget handles live progress)", () => {
+		const out = render(
+			{
+				details: {
+					progress:
+						"DRYKISS autoreview progress: [░░░░░░░░░░] 0/1 lens(es) complete",
+				},
+			},
+			true,
+		);
+		expect(out).toBe("");
+		expect(out).not.toContain("reviewed 0 finding(s)");
+	});
+
+	it("renders nothing for a partial result even with content text", () => {
+		const out = render(
+			{
+				content: [{ type: "text", text: "Preparing review scope…" }],
+			},
+			true,
+		);
+		expect(out).toBe("");
+		expect(out).not.toContain("Preparing review scope");
+	});
+
+	it("renders nothing for an empty partial result", () => {
+		const out = render({}, true);
+		expect(out).toBe("");
+	});
+
+	it("renders nothing for an unexpected non-partial shape without a result", () => {
+		const out = render({ details: {} });
+		expect(out).toBe("");
+	});
+});

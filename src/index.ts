@@ -205,14 +205,24 @@ export default function (pi: ExtensionAPI): void {
 			);
 		},
 
-		renderResult(result: any, _options: any, theme: any) {
+		renderResult(result: any, options: any, theme: any) {
+			// During streaming (partial results) the Pi TUI shows its own
+			// "Working…" loader and our ReviewProgressWidget renders the live
+			// progress (one progress-bar line + one line per lens) below the
+			// tool call. Returning an empty component here avoids a redundant
+			// "reviewed 0 finding(s)" placeholder row under the loader.
+			if (options?.isPartial) {
+				return new Text("", 0, 0);
+			}
 			// Final result: show the verdict + score summary.
 			if (result.details?.result) {
 				const review = result.details.result;
 				const progress = result.details?.progress;
 				const clean = review?.clean === true;
 				const counts = review?.counts ?? {};
-				const icon = clean ? theme.fg("success", "✓") : theme.fg("warning", "◐");
+				const icon = clean
+					? theme.fg("success", "✓")
+					: theme.fg("warning", "◐");
 				const hs = review?.healthScore;
 				const hasScore = typeof hs === "number";
 				let scoreText = "";
@@ -233,15 +243,9 @@ export default function (pi: ExtensionAPI): void {
 					0,
 				);
 			}
-			// Streaming update (scoping or lens execution): the Pi TUI
-			// calls renderResult on every onUpdate, but those payloads
-			// carry no final ReviewResult yet. Show the progress text
-			// instead of a misleading "reviewed 0 finding(s)" placeholder.
-			const text =
-				result.details?.progress ??
-				result.content?.[0]?.text ??
-				"Running DRYKISS autoreview…";
-			return new Text(theme.fg("dim", text), 0, 0);
+			// Fallback for unexpected shapes: render nothing rather than a
+			// misleading placeholder.
+			return new Text("", 0, 0);
 		},
 	});
 }

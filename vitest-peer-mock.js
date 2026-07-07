@@ -14,11 +14,26 @@ function visibleWidth(s) {
 	return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").length;
 }
 
+// Minimal Text component stub: stores the string and renders it as a
+// single line. Enough for tests that inspect renderResult output.
+class Text {
+	constructor(text = "", _paddingX = 0, _paddingY = 0) {
+		this._text = text;
+	}
+	setText(text) {
+		this._text = text;
+	}
+	render(_width) {
+		return [this._text];
+	}
+}
+
 module.exports = {
 	truncateToWidth: (s, w) =>
 		typeof s === "string" && s.length > w ? s.slice(0, w - 1) + "\u2026" : s,
 	hyperlink,
 	visibleWidth,
 	pathToFileURL,
+	Text,
 };
 module.exports.default = module.exports;
