@@ -5,6 +5,7 @@ import {
 	getFileContent,
 	getProjectIndex,
 	getAllSourceFiles,
+	redactSecrets,
 } from "./git-diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
@@ -348,6 +349,26 @@ describe("getFileDiff", () => {
 			"src/foo.ts",
 		]);
 	});
+
+	it("redacts secrets from diff output before returning", async () => {
+		const pi = mockPi(
+			"+const key = AKIAIOSFODNN7EXAMPLE;\n-normal line;\n",
+		);
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const diff = await getFileDiff(pi, "/cwd", "src/config.ts", {
+			files: [],
+			ref: "HEAD",
+			staged: false,
+			all: false,
+		});
+		expect(diff).toContain("[REDACTED]");
+		expect(diff).not.toContain("AKIAIOSFODNN7EXAMPLE");
+		expect(diff).toContain("normal line");
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Redacted 1 secret-like value(s)"),
+		);
+		warnSpy.mockRestore();
+	});
 });
 
 describe("getFileContent", () => {
@@ -471,6 +492,38 @@ describe("getFileContent", () => {
 		const result = await getFileContent("/cwd", "src/file%name.ts");
 		expect(result).not.toBeNull();
 		expect(readFile).toHaveBeenCalled();
+	});
+
+	it("redacts secrets from file content before returning", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			"const key = AKIAIOSFODNN7EXAMPLE;\nnormal code;\n",
+		);
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const result = await getFileContent("/cwd", "src/config.ts");
+		expect(result).not.toBeNull();
+		expect(result!.content).toContain("[REDACTED]");
+		expect(result!.content).not.toContain("AKIAIOSFODNN7EXAMPLE");
+		expect(result!.content).toContain("normal code");
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Redacted 1 secret-like value(s)"),
+		);
+		warnSpy.mockRestore();
+	});
+
+	it("redacts multi-line private key blocks before truncation", async () => {
+		const block =
+			"-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+		const lines = Array.from({ length: 600 }, (_, i) =>
+			i === 300 ? block : `line${i + 1}`,
+		);
+		vi.mocked(readFile).mockResolvedValue(lines.join("\n"));
+		const result = await getFileContent("/cwd", "src/secret.ts");
+		expect(result).not.toBeNull();
+		// The private key block should be fully redacted even though it
+		// spans lines and is well within the truncation boundary.
+		expect(result!.content).not.toContain("BEGIN RSA PRIVATE KEY");
+		expect(result!.content).not.toContain("MIIEogIBAAKCAQEA");
+		expect(result!.content).toContain("[REDACTED]");
 	});
 });
 
@@ -619,5 +672,76 @@ describe("getProjectIndex", () => {
 
 		const index = await getProjectIndex("/cwd");
 		expect(index).toHaveLength(0);
+	});
+});
+
+describe("redactSecrets", () => {
+	it("redacts AWS access key ids", () => {
+		const out = redactSecrets("key=AKIAIOSFODNN7EXAMPLE");
+		expect(out.text).toBe("key=[REDACTED]");
+		expect(out.redacted).toBe(1);
+		expect(out.types).toContain("AWS access key id");
+	});
+
+	it("redacts GitHub tokens", () => {
+		const out = redactSecrets(
+			"token: ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+		);
+		expect(out.text).toBe("token: [REDACTED]");
+		expect(out.types).toContain("GitHub token");
+	});
+
+	it("redacts private key blocks spanning multiple lines", () => {
+		const block =
+			"-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+		const out = redactSecrets(block);
+		expect(out.text).toBe("[REDACTED]");
+		expect(out.types).toContain("private key");
+	});
+
+	it("redacts JWTs", () => {
+		const jwt =
+			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f";
+		const out = redactSecrets(`Authorization: Bearer ${jwt}`);
+		expect(out.text).toBe("Authorization: Bearer [REDACTED]");
+		expect(out.types).toContain("JWT");
+	});
+
+	it("redacts assignment-style credentials", () => {
+		const out = redactSecrets(
+			'const API_KEY = "supersecretpassword1234567890";',
+		);
+		expect(out.text).toBe("const [REDACTED];");
+		expect(out.types).toContain("credential assignment");
+	});
+
+	it("redacts multiple distinct credential types and reports each once", () => {
+		const input =
+			"aws=AKIAIOSFODNN7EXAMPLE\nghp_abcdefghijklmnopqrstuvwxyz0123456789";
+		const out = redactSecrets(input);
+		expect(out.redacted).toBe(2);
+		expect(out.types).toHaveLength(2);
+		expect(out.types).toContain("AWS access key id");
+		expect(out.types).toContain("GitHub token");
+	});
+
+	it("leaves ordinary code untouched (no false positives)", () => {
+		const code = "const count = 42;\nfunction add(a, b) { return a + b; }";
+		const out = redactSecrets(code);
+		expect(out.text).toBe(code);
+		expect(out.redacted).toBe(0);
+		expect(out.types).toHaveLength(0);
+	});
+
+	it("does not redact short assignment values below the length threshold", () => {
+		const out = redactSecrets('const token = "abc";');
+		expect(out.text).toBe('const token = "abc";');
+		expect(out.redacted).toBe(0);
+	});
+
+	it("returns the original text when input is empty", () => {
+		const out = redactSecrets("");
+		expect(out.text).toBe("");
+		expect(out.redacted).toBe(0);
 	});
 });

@@ -76,6 +76,74 @@ export function parseDiffOutput(stdout: string): ChangedFile[] {
 	return files;
 }
 
+// ── Secret redaction ──────────────────────────────────────────────────────
+// Defense-in-depth on top of the prompt rule "never reproduce secret values".
+// The shared grounding rules already tell lenses not to echo credentials,
+// but we also redact high-signal credential shapes from the diff/file text
+// before it ever reaches the reviewer LLM. This matches the openclaw
+// autoreview skill's "fail closed / redact before engine invocation when
+// patch text looks secret-like" rule: secrets never leave the local process
+// in cleartext, even if a lens forgets the instruction.
+
+interface SecretPattern {
+	re: RegExp;
+	type: string;
+}
+
+const SECRET_PATTERNS: SecretPattern[] = [
+	{
+		// Private key blocks (base64-encoded content between BEGIN/END markers).
+		// Uses a specific character class instead of [\s\S]*? to avoid
+		// O(n²) backtracking on non-matching input — base64 characters
+		// plus newlines are the only valid content between the markers.
+		re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----\n[A-Za-z0-9+/=\n]*\n-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
+		type: "private key",
+	},
+	{ re: /\bAKIA[0-9A-Z]{16}\b/g, type: "AWS access key id" },
+	{ re: /\bghp_[A-Za-z0-9]{36}\b/g, type: "GitHub token" },
+	{ re: /\bgithub_pat_[A-Za-z0-9_]{82}\b/g, type: "GitHub fine-grained token" },
+	{ re: /\bgh[ousr]_[A-Za-z0-9]{36}\b/g, type: "GitHub token" },
+	{ re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, type: "Slack token" },
+	{ re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/g, type: "Stripe secret key" },
+	{ re: /\bAIza[0-9A-Za-z_-]{35}\b/g, type: "Google API key" },
+	{
+		re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+		type: "JWT",
+	},
+	{
+		// Assignment-style: key = "value" where the value looks secret.
+		re: /(api[_-]?key|apikey|secret|token|password|passwd|pwd|client[_-]?secret|access[_-]?token|auth[_-]?token|private[_-]?key)\s*[:=]\s*["'][A-Za-z0-9/+_=-]{16,}["']/gi,
+		type: "credential assignment",
+	},
+];
+
+export interface RedactResult {
+	readonly text: string;
+	readonly redacted: number;
+	readonly types: readonly string[];
+}
+
+/**
+ * Scan text for high-signal credential shapes and replace each match with
+ * the literal `[REDACTED]`. Returns the redacted text plus a count and the
+ * distinct credential types that were redacted (never the values). The
+ * patterns are deliberately conservative to avoid false positives on
+ * ordinary code.
+ */
+export function redactSecrets(input: string): RedactResult {
+	let text = input;
+	let redacted = 0;
+	const types = new Set<string>();
+	for (const { re, type } of SECRET_PATTERNS) {
+		text = text.replace(re, () => {
+			redacted++;
+			types.add(type);
+			return "[REDACTED]";
+		});
+	}
+	return { text, redacted, types: [...types] };
+}
+
 export async function getAllSourceFiles(
 	cwd: string,
 	ignorePatterns?: readonly string[],
@@ -163,7 +231,17 @@ export async function getFileDiff(
 	}
 
 	const result = await pi.exec("git", args);
-	return result.stdout;
+	// Redact high-signal credential shapes from the patch before it
+	// reaches the reviewer LLM. Defense-in-depth on top of the prompt
+	// rule "never reproduce secret values" — secrets never leave the
+	// local process in cleartext even if a lens forgets the instruction.
+	const { text, redacted, types } = redactSecrets(result.stdout);
+	if (redacted > 0) {
+		console.warn(
+			`${LOG_PREFIX} Redacted ${redacted} secret-like value(s) (${types.join(", ")}) from diff of ${filePath} before review.`,
+		);
+	}
+	return text;
 }
 
 const MAX_FILE_LINES = 500;
@@ -269,15 +347,26 @@ export async function getFileContent(
 			return null;
 		}
 		const raw = await readFile(resolved, "utf8");
-		const lines = raw.split("\n");
+		// Redact BEFORE truncation so multi-line secrets (e.g. private key
+		// blocks) aren't clipped at the truncation boundary and partially
+		// visible. The redacted text may be shorter than the raw content,
+		// but that's fine — the secret is gone.
+		const redacted = redactSecrets(raw);
+		if (redacted.redacted > 0) {
+			console.warn(
+				`${LOG_PREFIX} Redacted ${redacted.redacted} secret-like value(s) (${redacted.types.join(", ")}) from ${filePath} before review.`,
+			);
+		}
+		const lines = redacted.text.split("\n");
+		const lineCount = raw.split("\n").length;
 		const truncated = lines.length > MAX_FILE_LINES;
 		const content = truncated
 			? lines.slice(0, MAX_FILE_LINES).join("\n") +
 				"\n\n... (truncated: " +
-				(lines.length - MAX_FILE_LINES) +
+				(lineCount - MAX_FILE_LINES) +
 				" more lines) ...\n"
-			: raw;
-		return { content, lineCount: lines.length, truncated };
+			: redacted.text;
+		return { content, lineCount, truncated };
 	} catch (err) {
 		const code = getNodeErrorCode(err);
 		// ENOENT is expected for missing files (e.g., deleted files in git status)
