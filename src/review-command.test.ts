@@ -71,6 +71,7 @@ describe("drykiss_autoreview tool", () => {
 		} as any;
 		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockResolvedValue({
 				jobId: "job-1",
 				clean: true,
@@ -112,6 +113,9 @@ describe("drykiss_autoreview tool", () => {
 			undefined,
 		);
 		expect(result.details.result.clean).toBe(true);
+		expect(manager.recordFinalResult).toHaveBeenCalledWith(
+			result.details.result,
+		);
 		// Default format is "compact": one-line header, kiss-style.
 		expect(result.content[0].text).toMatch(/^DRYKISS clean /m);
 		expect(result.content[0].text).toContain("local changes");
@@ -124,6 +128,7 @@ describe("drykiss_autoreview tool", () => {
 		]);
 		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockResolvedValue({
 				jobId: "job-1",
 				clean: true,
@@ -162,6 +167,7 @@ describe("drykiss_autoreview tool", () => {
 		]);
 		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockResolvedValue({
 				jobId: "job-1",
 				clean: true,
@@ -207,6 +213,7 @@ describe("drykiss_autoreview tool", () => {
 		]);
 		const pi = { exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any;
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockResolvedValue({
 				jobId: "job-1",
 				clean: true,
@@ -246,6 +253,7 @@ describe("drykiss_autoreview tool", () => {
 			{ path: "src/b.ts", status: "modified", language: "TypeScript" },
 		]);
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockResolvedValue({
 				jobId: "job-1",
 				clean: true,
@@ -285,6 +293,59 @@ describe("drykiss_autoreview tool", () => {
 		);
 	});
 
+	it("does not fail the tool when final result recording fails", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			const { getChangedFiles } = await import("./git-diff.js");
+			vi.mocked(getChangedFiles).mockResolvedValue([
+				{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+			]);
+			const manager = {
+				recordFinalResult: vi.fn(() => {
+					throw new Error("record failed");
+				}),
+				runReview: vi.fn().mockResolvedValue({
+					jobId: "job-1",
+					clean: true,
+					status: "done",
+					verdict: "Approve",
+					files: ["src/a.ts"],
+					counts: {
+						total: 0,
+						critical: 0,
+						high: 0,
+						medium: 0,
+						low: 0,
+						nit: 0,
+						suppressed: 0,
+						previouslyRejected: 0,
+					},
+					findings: [],
+					summary: "Clean.",
+					errors: [],
+					validationIssues: [],
+					healthScore: 100,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				}),
+			} as any;
+
+			const result = await executeDrykissAutoreviewTool(
+				{ mode: "local" },
+				{ cwd: "/home/test", modelRegistry: { getAvailable: vi.fn() } } as any,
+				{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
+				manager,
+			);
+
+			expect(result.details.result.clean).toBe(true);
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to record final review result"),
+				expect.any(Error),
+			);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("renders a progress bar and running model names via onUpdate", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		vi.mocked(getChangedFiles).mockResolvedValue([
@@ -292,6 +353,7 @@ describe("drykiss_autoreview tool", () => {
 		]);
 		const onUpdate = vi.fn();
 		const manager = {
+			recordFinalResult: vi.fn(),
 			runReview: vi.fn().mockImplementation((...args: any[]) => {
 				const options = args[7];
 				if (options?.onProgress) {

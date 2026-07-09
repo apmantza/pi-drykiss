@@ -429,7 +429,7 @@ export class ReviewProgressWidget {
 		// list is empty but the lens reported counts.
 		const counts = finalResult?.counts;
 		const totalFindings = counts
-			? counts.total
+			? (counts.total ?? 0)
 			: (s?.criticalCount ?? 0) +
 				(s?.highCount ?? 0) +
 				(s?.mediumCount ?? 0) +

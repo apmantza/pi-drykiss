@@ -329,7 +329,11 @@ export async function executeDrykissAutoreviewTool(
 				}
 			: result;
 
-	manager.recordFinalResult?.(finalResult);
+	try {
+		manager.recordFinalResult(finalResult);
+	} catch (err) {
+		console.warn(`${LOG_PREFIX} Failed to record final review result:`, err);
+	}
 
 	const formatMode = params.format ?? "compact";
 	const jobs =

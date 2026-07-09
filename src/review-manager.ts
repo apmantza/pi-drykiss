@@ -832,7 +832,6 @@ export class ReviewManager {
 			};
 		}
 		// Fire-and-forget persist history
-		this.recordFinalResult(result);
 		appendHistory({
 			date: new Date().toISOString(),
 			mode: options.target?.label ?? "unknown",
