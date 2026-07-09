@@ -107,6 +107,14 @@ Use these smells when they explain a concrete clarity or maintenance problem. Th
 
 If a finding is squarely another lens's domain, omit it here unless the readability angle is distinct and adds signal.
 
+## What NOT to Flag
+
+- Do not flag names, formatting, import order, or style that a formatter/linter already enforces unless the issue changes meaning or hides a defect.
+- Do not report “large function” or “SRP” by itself; name the specific mixed responsibilities and the reader/correctness cost.
+- Do not flag code comments merely because they explain what instead of why; that is the Simplicity lens unless the comment is false or stale.
+- Do not invent project conventions. Only report convention drift when the rule is documented or consistently visible in the supplied code.
+- Do not report accessibility issues for CLI, server, config, library, or test-only code that produces no DOM/UI.
+
 ## Severity Labels
 
 - **Critical:** Blocks merge — broken functionality, data loss, correctness bugs (per the shared calibration)

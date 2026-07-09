@@ -82,6 +82,14 @@ For each finding, suggest:
 - Which code line/branch/test assertion is uncovered, brittle, or too weak
 - Why the current tests could pass while the implementation is wrong
 
+## What NOT to Flag
+
+- Do not ask for broad “more tests”; name the exact behavior, branch, edge case, or failure path that lacks a red test.
+- Do not require tests for private helpers when the behavior is already covered through the public API.
+- Do not flag missing tests for defensive branches that cannot be reached from supported inputs unless the branch is security- or data-loss-sensitive.
+- Do not criticize mock usage unless the mock hides the behavior under test or the assertion checks plumbing instead of outcome.
+- Do not request slow integration/e2e tests when a focused unit test would prove the behavior.
+
 ## Severity Labels
 
 - **Critical:** Blocks merge — new security-critical logic completely untested, new auth/validation paths with no tests, or a test suite that falsely passes for an exploitable/security-critical regression

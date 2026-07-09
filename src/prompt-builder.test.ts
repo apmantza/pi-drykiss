@@ -85,6 +85,7 @@ const LENS_PROMPTS: Record<string, string> = {
 		"Test Coverage & Test Quality Auditor · Given-When-Then · Weak tests are false confidence · Over-mocking · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
 	security:
 		"Security Auditor · Injection Vulnerabilities · Secrets & Credentials · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
+	docs: "Documentation Accuracy Auditor · documentation surfaces · Output findings as a single JSON array · Output ONLY the JSON array · Grounding rules · Quick Self-Check",
 };
 
 const SYNTHESIS_PROMPT =
@@ -206,6 +207,18 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].systemPrompt).toContain("Secrets & Credentials");
 	});
 
+	it("returns single prompt for docs lens", async () => {
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"docs",
+		);
+		expect(prompts[0].lens).toBe("docs");
+		expect(prompts[0].systemPrompt).toContain("Documentation Accuracy Auditor");
+		expect(prompts[0].systemPrompt).toContain("documentation surfaces");
+	});
+
 	it("returns all eight prompts for 'all' lens", async () => {
 		const prompts = await buildReviewPrompts(
 			"/cwd",
@@ -222,6 +235,7 @@ describe("buildReviewPrompts", () => {
 		expect(lenses).toContain("architecture");
 		expect(lenses).toContain("tests");
 		expect(lenses).toContain("security");
+		expect(lenses).toContain("docs");
 	});
 
 	it("includes diff content in user prompt", async () => {
@@ -706,10 +720,11 @@ describe("prompt template management", () => {
 
 				await ensureDefaultPrompts("/cwd");
 
-				// 8 lens + 8 shared + 1 sentinel = 17 files
+				// 8 lens + synthesis + 8 shared + 1 sentinel = 18 files
 				const entries = await readdir(userDir);
 				const sharedEntries = await readdir(join(userDir, "_shared"));
-				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
+				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(9);
+				expect(entries).toContain("docs.md");
 				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
 				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
 					true,
@@ -723,12 +738,15 @@ describe("prompt template management", () => {
 				vi.mocked(bundledPromptsDir).mockReturnValue(bundledDir);
 				vi.mocked(userPromptsDir).mockReturnValue(userDir);
 
+				const sortByName = (a: string, b: string) => a.localeCompare(b);
 				await ensureDefaultPrompts("/cwd");
-				const before = (await readdir(userDir)).sort();
+				const beforeEntries = await readdir(userDir);
+				const before = beforeEntries.sort(sortByName);
 
 				// Second call: sentinel present → no writes
 				await ensureDefaultPrompts("/cwd");
-				const after = (await readdir(userDir)).sort();
+				const afterEntries = await readdir(userDir);
+				const after = afterEntries.sort(sortByName);
 
 				expect(after).toEqual(before);
 			});

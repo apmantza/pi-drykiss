@@ -89,6 +89,14 @@ Do NOT output Mermaid, markdown fences, or any non-JSON content. The architectur
 
 When file-level dependency structure is relevant, describe it inside a normal finding's `detail` and `suggestion` fields with concrete import/reference evidence. The synthesis step may optionally convert strongly evidenced architecture findings into a final `mermaidGraph` field.
 
+## What NOT to Flag
+
+- Do not flag file length, class size, or “god module” without naming the unrelated responsibilities and the change that would become risky.
+- Do not demand an interface, adapter, or plugin seam for a single implementation unless there is a concrete testability or boundary-isolation need.
+- Do not report a layer violation unless you can cite the dependency direction that is wrong and the project boundary it crosses.
+- Do not recommend broad rewrites, new frameworks, or architecture migrations as review findings.
+- Do not flag a shallow helper if deleting it would force callers to duplicate policy, ordering, validation, or error semantics.
+
 ## Severity Labels
 
 - **Critical:** Blocks merge — circular dependencies in core modules, broken invariant enforcement, missing constructor validation for security-sensitive types

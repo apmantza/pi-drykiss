@@ -90,6 +90,7 @@ const BUNDLED_LENS_FILES = [
 	"architecture.md",
 	"tests.md",
 	"security.md",
+	"docs.md",
 	"synthesis.md",
 ] as const;
 
