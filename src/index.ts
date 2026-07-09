@@ -208,40 +208,58 @@ export default function (pi: ExtensionAPI): void {
 		renderResult(result: any, options: any, theme: any) {
 			// During streaming (partial results) the Pi TUI shows its own
 			// "Working…" loader and our ReviewProgressWidget renders the live
-			// progress (one progress-bar line + one line per lens) below the
-			// tool call. Returning an empty component here avoids a redundant
-			// "reviewed 0 finding(s)" placeholder row under the loader.
+			// progress below the tool call. Returning an empty component here
+			// avoids a redundant placeholder row under the loader.
 			if (options?.isPartial) {
 				return new Text("", 0, 0);
 			}
-			// Final result: show the verdict + score summary.
+			// Final result: persist a result summary, not the last progress line.
+			// Keep this aligned with ReviewProgressWidget's completed summary:
+			// target, verdict, score, final post-processed counts, and report path.
 			if (result.details?.result) {
 				const review = result.details.result;
-				const progress = result.details?.progress;
 				const clean = review?.clean === true;
 				const counts = review?.counts ?? {};
 				const icon = clean
 					? theme.fg("success", "✓")
-					: theme.fg("warning", "◐");
+					: review?.status === "error"
+						? theme.fg("error", "✗")
+						: theme.fg("warning", "◐");
 				const hs = review?.healthScore;
 				const hasScore = typeof hs === "number";
 				let scoreText = "";
 				if (hasScore) {
 					const scoreColor =
 						hs >= 80 ? "success" : hs >= 50 ? "warning" : "error";
-					scoreText = theme.fg(scoreColor, `, score ${hs}/100`);
+					scoreText = `, ${theme.fg(scoreColor, `score ${hs}/100`)}`;
 				}
-				const summary =
-					`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}` +
+				const target = review?.target?.label ? ` — ${review.target.label}` : "";
+				const suppressed = counts.suppressed
+					? `, ${counts.suppressed} suppressed`
+					: "";
+				const rejected = counts.previouslyRejected
+					? `, ${counts.previouslyRejected} previously-rejected`
+					: "";
+				const validatorRefuted = counts.validatorFalsePositive
+					? `, ${counts.validatorFalsePositive} validator-refuted`
+					: "";
+				const lines = [
+					`${icon} ${theme.fg("accent", clean ? "clean" : "reviewed")}${theme.fg(
+						"dim",
+						`${target}: ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
+					)}`,
 					theme.fg(
 						"dim",
-						` ${counts.total ?? 0} finding(s), verdict: ${review?.verdict ?? "unknown"}${scoreText}`,
-					);
-				return new Text(
-					progress ? `${theme.fg("dim", progress)}\n${summary}` : summary,
-					0,
-					0,
-				);
+						`findings: ${counts.total ?? 0} (${counts.critical ?? 0} critical, ${counts.high ?? 0} high, ${counts.medium ?? 0} medium, ${counts.low ?? 0} low, ${counts.nit ?? 0} nit${suppressed}${rejected}${validatorRefuted})`,
+					),
+				];
+				if (review?.reportPath) {
+					lines.push(theme.fg("dim", `report: ${review.reportPath}`));
+				}
+				if (Array.isArray(review?.errors) && review.errors.length > 0) {
+					lines.push(theme.fg("error", `errors: ${review.errors.join("; ")}`));
+				}
+				return new Text(lines.join("\n"), 0, 0);
 			}
 			// Fallback for unexpected shapes: render nothing rather than a
 			// misleading placeholder.

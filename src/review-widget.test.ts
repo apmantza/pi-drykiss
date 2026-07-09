@@ -354,6 +354,62 @@ describe("renderWidget — completed summary", () => {
 		lines = renderOne(buildWithScore(50));
 		expect(lines[0]).toContain("[warning:score 50/100]");
 	});
+
+	it("prefers the final post-processed result over raw synthesis", () => {
+		const lines = renderLines(
+			buildCompletedJob({
+				synthesisResult: {
+					findings: [],
+					summary: "raw",
+					verdict: "Needs security review",
+					criticalCount: 0,
+					highCount: 7,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: 10,
+					scoreBreakdown: { critical: 0, warning: 7, suggestion: 0 },
+				},
+				finalResult: {
+					jobId: "j3",
+					clean: true,
+					status: "done",
+					verdict: "Approve",
+					target: { mode: "local", label: "local changes" },
+					reportPath: "/tmp/drykiss-report.json",
+					files: [],
+					counts: {
+						total: 0,
+						critical: 0,
+						high: 0,
+						medium: 0,
+						low: 0,
+						nit: 0,
+						suppressed: 1,
+						previouslyRejected: 2,
+						validatorFalsePositive: 3,
+					},
+					findings: [],
+					summary: "final",
+					errors: [],
+					validationIssues: [],
+					healthScore: 100,
+					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+				},
+			}),
+		);
+
+		expect(lines[0]).toContain("Verdict: Approve");
+		expect(lines[0]).toContain("local changes");
+		expect(lines[0]).toContain("score 100/100");
+		expect(lines[0]).not.toContain("Needs security review");
+		expect(lines[2]).toContain("0 findings");
+		expect(lines[2]).toContain("1 suppressed");
+		expect(lines[2]).toContain("2 previously-rejected");
+		expect(lines[2]).toContain("3 validator-refuted");
+		expect(lines[3]).toContain("report:");
+		expect(lines[3]).toContain("drykiss-report.json");
+	});
 });
 
 describe("per-lens line — session log link", () => {

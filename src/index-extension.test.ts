@@ -430,6 +430,43 @@ describe("drykiss_autoreview tool renderResult", () => {
 		expect(out).toContain("score 42/100");
 	});
 
+	it("persists result details instead of the last progress line", () => {
+		const out = render({
+			details: {
+				progress:
+					"DRYKISS autoreview progress: [██████████] 1/1 lens(es) complete",
+				result: {
+					clean: false,
+					status: "done",
+					target: { label: "full codebase" },
+					counts: {
+						total: 2,
+						critical: 0,
+						high: 1,
+						medium: 1,
+						low: 0,
+						nit: 0,
+						suppressed: 1,
+						previouslyRejected: 1,
+						validatorFalsePositive: 1,
+					},
+					verdict: "Request changes",
+					healthScore: 55,
+					reportPath: "/tmp/report.json",
+				},
+			},
+		});
+
+		expect(out).not.toContain("DRYKISS autoreview progress");
+		expect(out).toContain("full codebase");
+		expect(out).toContain("2 finding(s)");
+		expect(out).toContain("1 high");
+		expect(out).toContain("1 suppressed");
+		expect(out).toContain("1 previously-rejected");
+		expect(out).toContain("1 validator-refuted");
+		expect(out).toContain("report: /tmp/report.json");
+	});
+
 	it("renders nothing for a partial/streaming result (widget handles live progress)", () => {
 		const out = render(
 			{

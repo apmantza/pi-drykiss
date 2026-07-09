@@ -359,12 +359,16 @@ export class ReviewProgressWidget {
 	): string[] {
 		const out: string[] = [];
 		const s = job.synthesisResult;
+		const finalResult = job.finalResult;
 		const hasError = job.overallStatus === "error";
 
-		// Line 1: heading with verdict + score + elapsed.
+		// Line 1: heading with verdict + score + elapsed. Prefer the
+		// final post-processed ReviewResult when available so the
+		// persisted widget cannot disagree with the tool result after
+		// validation, suppressions, ignore rules, or scoring changes.
 		const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-		const verdict = pickVerdict(s?.verdict, hasError);
-		const healthScore = s?.healthScore;
+		const verdict = finalResult?.verdict ?? pickVerdict(s?.verdict, hasError);
+		const healthScore = finalResult?.healthScore ?? s?.healthScore;
 		const elapsed =
 			job.completedAt && job.startedAt
 				? formatElapsed(job.completedAt - job.startedAt)
@@ -374,6 +378,9 @@ export class ReviewProgressWidget {
 		headingParts.push(
 			`${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg("accent", `Verdict: ${verdict}`)}`,
 		);
+		if (finalResult?.target?.label) {
+			headingParts.push(theme.fg("dim", finalResult.target.label));
+		}
 		if (typeof healthScore === "number") {
 			const scoreColor =
 				healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
@@ -420,22 +427,56 @@ export class ReviewProgressWidget {
 		// severity counts (not the deduplicated findings array length)
 		// so the breakdown is visible even when the persisted findings
 		// list is empty but the lens reported counts.
-		const totalFindings =
-			(s?.criticalCount ?? 0) +
-			(s?.highCount ?? 0) +
-			(s?.mediumCount ?? 0) +
-			(s?.lowCount ?? 0) +
-			(s?.nitCount ?? 0);
-		if (totalFindings > 0) {
+		const counts = finalResult?.counts;
+		const totalFindings = counts
+			? counts.total
+			: (s?.criticalCount ?? 0) +
+				(s?.highCount ?? 0) +
+				(s?.mediumCount ?? 0) +
+				(s?.lowCount ?? 0) +
+				(s?.nitCount ?? 0);
+		const suppressed = counts?.suppressed ?? 0;
+		const previouslyRejected = counts?.previouslyRejected ?? 0;
+		const validatorFalsePositive = counts?.validatorFalsePositive ?? 0;
+		const validatorUnverified = counts?.validatorUnverified ?? 0;
+		const validatorReal = counts?.validatorReal ?? 0;
+		const hasSuppressed = suppressed > 0;
+		const hasRejected = previouslyRejected > 0;
+		const hasValidator =
+			validatorFalsePositive > 0 ||
+			validatorUnverified > 0 ||
+			validatorReal > 0;
+		if (totalFindings > 0 || hasSuppressed || hasRejected || hasValidator) {
 			const parts: string[] = [`${totalFindings} findings`];
-			if (s?.criticalCount && s.criticalCount > 0)
-				parts.push(`${s.criticalCount} critical`);
-			if (s?.highCount && s.highCount > 0) parts.push(`${s.highCount} high`);
-			if (s?.mediumCount && s.mediumCount > 0)
-				parts.push(`${s.mediumCount} medium`);
-			if (s?.lowCount && s.lowCount > 0) parts.push(`${s.lowCount} low`);
-			if (s?.nitCount && s.nitCount > 0) parts.push(`${s.nitCount} nit`);
+			const critical = counts?.critical ?? s?.criticalCount ?? 0;
+			const high = counts?.high ?? s?.highCount ?? 0;
+			const medium = counts?.medium ?? s?.mediumCount ?? 0;
+			const low = counts?.low ?? s?.lowCount ?? 0;
+			const nit = counts?.nit ?? s?.nitCount ?? 0;
+			if (critical > 0) parts.push(`${critical} critical`);
+			if (high > 0) parts.push(`${high} high`);
+			if (medium > 0) parts.push(`${medium} medium`);
+			if (low > 0) parts.push(`${low} low`);
+			if (nit > 0) parts.push(`${nit} nit`);
+			if (hasSuppressed) parts.push(`${suppressed} suppressed`);
+			if (hasRejected) parts.push(`${previouslyRejected} previously-rejected`);
+			if (validatorFalsePositive > 0)
+				parts.push(`${validatorFalsePositive} validator-refuted`);
+			if (validatorUnverified > 0)
+				parts.push(`${validatorUnverified} validator-unverified`);
+			if (validatorReal > 0) parts.push(`${validatorReal} validator-confirmed`);
 			out.push(truncate(`  ${theme.fg("dim", parts.join(" · "))}`));
+		}
+
+		const reportPath = finalResult?.reportPath ?? job.reviewPath;
+		if (reportPath) {
+			const reportName = basename(reportPath);
+			const reportUrl = pathToFileLink(reportPath);
+			out.push(
+				truncate(
+					`  ${theme.fg("dim", "report:")} ${hyperlink(theme.fg("dim", reportName), reportUrl)}`,
+				),
+			);
 		}
 
 		return out;

@@ -91,6 +91,8 @@ export interface ReviewJob {
 	synthesisSession?: AgentSession;
 	/** Absolute path to the persisted synthesized review JSON, when saved. */
 	reviewPath?: string;
+	/** Post-processed result after validation, suppressions, ignores, and scoring. */
+	finalResult?: ReviewResult;
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
 	completedAt?: number;
@@ -830,6 +832,7 @@ export class ReviewManager {
 			};
 		}
 		// Fire-and-forget persist history
+		this.recordFinalResult(result);
 		appendHistory({
 			date: new Date().toISOString(),
 			mode: options.target?.label ?? "unknown",
@@ -899,6 +902,13 @@ export class ReviewManager {
 
 	listJobs(): ReviewJob[] {
 		return [...this.jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+	}
+
+	recordFinalResult(result: ReviewResult): void {
+		const job = this.jobs.get(result.jobId);
+		if (!job) return;
+		job.finalResult = result;
+		this.onUpdate?.(job);
 	}
 
 	/** Clean up completed jobs older than 10 minutes. */

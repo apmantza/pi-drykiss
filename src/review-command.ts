@@ -329,6 +329,8 @@ export async function executeDrykissAutoreviewTool(
 				}
 			: result;
 
+	manager.recordFinalResult?.(finalResult);
+
 	const formatMode = params.format ?? "compact";
 	const jobs =
 		typeof (manager as { listJobs?: unknown }).listJobs === "function"
