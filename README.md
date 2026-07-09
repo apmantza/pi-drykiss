@@ -1,148 +1,103 @@
 # pi-drykiss
 
-Code reviews shouldn't be a checkbox. They should catch the things that actually matter — unnecessary complexity, duplicated logic, silent failures, and security holes.
+pi-drykiss is a Pi extension for multi-lens AI code review.
 
-`pi-drykiss` runs seven independent AI reviewers in parallel, each focused on a specific aspect of code quality. They don't see each other's work until synthesis, preventing groupthink and keeping findings honest. Results are ranked by severity and cross-validated before you see them.
+It runs focused reviewers in parallel, then synthesizes their findings into one
+ranked report. The goal is high-signal review feedback: simpler code, less
+duplication, stronger error handling, better tests, safer boundaries, and docs
+that match reality.
 
-> _"Use AI to write better code, more slowly."_ — Inspired by [Nolan Lawson](https://nolanlawson.com/2026/05/25/using-ai-to-write-better-code-more-slowly/)
+## What It Does
 
-## Quick Start
+- Reviews git diffs, commits, branches, PRs, explicit files, or the full codebase
+- Runs independent lenses for simplicity, duplication, clarity, resilience,
+  architecture, tests, security, and docs
+- Gives reviewers full-file context, not just diff hunks
+- Uses a project index where useful for cross-file duplication/architecture checks
+- Deduplicates and ranks findings during synthesis
+- Persists reports and lens session logs under `~/.pi/drykiss/`
+- Supports project config, prompt customization, model fallback, and free-model
+  autorouting
+
+## Install
 
 ```bash
 pi install npm:pi-drykiss
 ```
 
-Then run:
+Or from git:
 
-```
-/drykiss
-```
-
-That's it. Seven reviewers will analyze your changes and give you a ranked report.
-
-## What Gets Reviewed
-
-Each lens focuses on one thing:
-
-| Lens | What It Catches |
-|------|-----------------|
-| **Simplicity** | Over-engineering, unnecessary abstraction, "clever" one-liners, deep nesting |
-| **Deduplication** | Copy-pasted logic, magic values, scattered conditionals, cross-file duplication |
-| **Clarity** | Unclear names, missing edge cases, performance issues (N+1 queries, XSS) |
-| **Resilience** | Swallowed exceptions, unhandled promise rejections, generic error messages |
-| **Architecture** | SRP violations, wide interfaces, circular dependencies, removal candidates |
-| **Tests** | Missing coverage, untested branches, fragile assertions, shared mutable state |
-| **Security** | Injection vulnerabilities, hardcoded credentials, missing auth checks |
-| **Docs** | README/CHANGELOG/AGENTS.md drift — wrong flags, renamed paths, stale references |
-
-## Commands
-
-```
-/drykiss                    # review all uncommitted changes
-/drykiss --staged           # review staged changes only
-/drykiss --ref=main         # diff against main
-/drykiss src/foo.ts         # review specific files
-/drykiss --model=haiku      # use a specific model
+```bash
+pi install git:github.com/apmantza/pi-drykiss
 ```
 
-**Focused reviews:**
+## Usage
 
-```
-/drykiss-kiss              # simplicity only
-/drykiss-dry               # duplication only
-/drykiss-resilience        # error handling only
-/drykiss-arch              # architecture only
-/drykiss-tests             # test coverage only
-/drykiss-docs              # documentation accuracy (README/CHANGELOG/AGENTS.md vs code)
-```
+Ask Pi to run an autoreview, or call the `drykiss_autoreview` tool directly.
 
-**Configuration:**
+Common scopes:
 
-```
-/drykiss-config                           # show current config
-/drykiss-config set-default sonnet        # set default model
-/drykiss-config set-lens clarity sonnet   # per-lens model override
-/drykiss-config confirm off               # skip confirmation dialog
-/drykiss-config context-mode diff         # review diffs only (faster)
-/drykiss-config autoroute on              # auto-pick free models
-/drykiss-config model-scope haiku         # prefer free models matching "haiku"
-/drykiss-config autoreview on             # opt in to automatic agent_end reviews after edits
-/drykiss-config autoreview-mode local     # local|staged|branch|full|files
-/drykiss-config autoreview-confirm off    # skip confirmation for automatic reviews
-/drykiss-config reset-prompts             # regenerate default prompts
+```text
+drykiss_autoreview mode=local              # uncommitted changes
+drykiss_autoreview mode=staged             # staged changes
+drykiss_autoreview mode=branch base=main   # branch diff
+drykiss_autoreview mode=commit commit=HEAD # one commit
+drykiss_autoreview mode=files files=[...]  # selected files
+drykiss_autoreview mode=full               # whole codebase
 ```
 
-**History:**
+Useful options:
 
-```
-/drykiss-history             # browse past reviews
-/drykiss-jobs                # inspect running/completed reviews
-```
-
-## Why Full-File Context?
-
-Most code review tools only see the diff. `pi-drykiss` reviewers see the **entire file** plus the diff. This means they can:
-
-- Spot existing helpers you already have 50 lines up
-- Judge whether new code follows existing patterns
-- Catch imports that duplicate what's already there
-
-The DRY and Architecture reviewers also get a **project index** — a map of exported functions across your codebase — so they can catch cross-file duplication.
-
-## Customizable Prompts
-
-Every reviewer's system prompt is an editable Markdown file at `~/.pi/drykiss/prompts/`. Edit them to:
-
-- Add company-specific conventions
-- Adjust severity thresholds
-- Add custom checklists
-
-The JSON output format is always appended by code, so you can't accidentally break parsing.
-
-## Model Selection
-
-Models are resolved in this order:
-
-1. `--model` CLI flag
-2. Per-lens config (`/drykiss-config set-lens ...`)
-3. Global default (`/drykiss-config set-default ...`)
-4. Auto-route to a free model (if `/drykiss-config autoroute on`), otherwise the interactive picker (on first use, saved automatically)
-5. First available model
-
-If a model hits a quota limit, you'll be prompted to pick a different one and the review retries automatically. With autoroute on, the retry will prefer another free model first; the picker only appears if no free model is available.
-
-### Auto-routing to free models
-
-`/drykiss-config autoroute on` makes DRYKISS prefer free models over the interactive picker — useful when you have multiple providers configured and want DRYKISS to just pick a free one without bothering you.
-
-Optionally combine it with a `modelScope` hint to bias the choice:
-
-```
-/drykiss-config model-scope haiku    # prefer a free model whose id/name contains "haiku"
-/drykiss-config model-scope claude   # prefer a free Claude variant
-/drykiss-config model-scope clear    # back to "any free model"
+```text
+lens=security              # one focused lens
+lenses=[simplicity,tests]  # selected lenses
+format=structured          # full structured report
 ```
 
-If no free model matches the scope, DRYKISS falls back to any other free model. If no free model is available at all, the standard interactive picker appears.
+Model selection, context mode, max files, validation, prompt overrides, and
+risk-targeting are config-driven via `.pi/drykiss/config.json` and
+`~/.pi/drykiss/config.json`.
 
-Free-model detection is the same logic used by the `pi-free` extension (per-provider pricing check + name-based fallback) but is inlined here so DRYKISS does not require `pi-free` to be installed.
+## Lenses
 
-## Severity Levels
+- **Simplicity** — unnecessary complexity and speculative abstractions
+- **Deduplication** — repeated logic, rules, constants, and validation
+- **Clarity** — readability, correctness, stale comments, conventions, a11y
+- **Resilience** — swallowed errors, weak fallbacks, missing failure signals
+- **Architecture** — boundaries, seams, dependency direction, type design
+- **Tests** — missing behaviors, weak assertions, brittle coverage
+- **Security** — injection, auth, secrets, data exposure, crypto, supply chain
+- **Docs** — README/CHANGELOG/AGENTS drift against actual code/config
 
-| Level | Meaning |
-|-------|---------|
-| **Critical** | Security vulnerability, data loss, broken functionality |
-| **High** | Significant maintainability or performance impact |
-| **Medium** | Clear improvement worth making |
-| **Low** | Nice-to-have or stylistic |
-| **Nit** | Very minor |
+## Prompts
 
-## Inspiration
+All prompt text lives in Markdown files.
 
-- [Nolan Lawson — Using AI to write better code more slowly](https://nolanlawson.com/2026/05/25/using-ai-to-write-better-code-more-slowly/)
-- [Karpathy Guidelines — Reducing LLM coding mistakes](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/skills/karpathy-guidelines/SKILL.md)
-- [KISS principle](https://en.wikipedia.org/wiki/KISS_principle)
-- [DRY principle](https://en.wikipedia.org/wiki/Don%27t_repeat_yourself)
+Resolution order:
+
+1. `DRYKISS_PROMPTS_DIR`
+2. `~/.pi/drykiss/prompts/`
+3. bundled `src/prompts/`
+
+Edit the seeded files in `~/.pi/drykiss/prompts/` to tune lens behavior for your
+project without changing TypeScript code.
+
+## Documentation
+
+- [Autoreview inspiration](docs/autoreview-inspiration.md) — researched ideas and
+  possible future improvements
+
+## Development
+
+```bash
+npm test
+npm run typecheck
+npm run check:no-prompt-literals
+npm run check
+```
+
+Important project rule: prompt bodies belong in `.md` files, not TypeScript
+string literals.
 
 ## License
 
