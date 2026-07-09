@@ -38,7 +38,10 @@ describe("review session state", () => {
 
 		applyReviewState(ctx);
 
-		expect(ctx.ui.setWidget).toHaveBeenCalledWith("drykiss-review-session", undefined);
+		expect(ctx.ui.setWidget).toHaveBeenCalledWith(
+			"drykiss-review-session",
+			undefined,
+		);
 	});
 
 	it("does not touch the widget when the UI is unavailable", () => {
