@@ -192,7 +192,8 @@ describe("drykiss_autoreview tool", () => {
 
 		expect(manager.runReview).toHaveBeenCalledTimes(1);
 		const args = manager.runReview.mock.calls[0][7] as any;
-		expect(args.lenses.sort()).toEqual(
+		const sortByName = (a: string, b: string) => a.localeCompare(b);
+		expect(args.lenses.sort(sortByName)).toEqual(
 			[
 				"simplicity",
 				"deduplication",
@@ -202,7 +203,7 @@ describe("drykiss_autoreview tool", () => {
 				"tests",
 				"security",
 				"docs",
-			].sort(),
+			].sort(sortByName),
 		);
 	});
 
@@ -338,7 +339,8 @@ describe("drykiss_autoreview tool", () => {
 
 			expect(result.details.result.clean).toBe(true);
 			expect(warn).toHaveBeenCalledWith(
-				expect.stringContaining("Failed to record final review result"),
+				"%s Failed to record final review result:",
+				"[DRYKISS]",
 				expect.any(Error),
 			);
 		} finally {

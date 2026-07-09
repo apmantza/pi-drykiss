@@ -332,7 +332,7 @@ export async function executeDrykissAutoreviewTool(
 	try {
 		manager.recordFinalResult(finalResult);
 	} catch (err) {
-		console.warn(`${LOG_PREFIX} Failed to record final review result:`, err);
+		console.warn("%s Failed to record final review result:", LOG_PREFIX, err);
 	}
 
 	const formatMode = params.format ?? "compact";
