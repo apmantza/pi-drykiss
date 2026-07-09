@@ -79,7 +79,7 @@ export function parsePrUrl(input: string, gitRemote?: string): PrInfo | null {
 	const numberMatch = trimmed.match(/^\d+$/);
 	if (numberMatch && gitRemote) {
 		const remoteMatch = gitRemote.match(
-			/(?:https?:\/\/github\.com\/|git@github\.com:)([a-zA-Z0-9._-]+)\/([a-zA-Z0-9_-]+)(?:\.git)?$/,
+			/(?:https?:\/\/github\.com\/|git@github\.com:)([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+?)(?:\.git)?$/,
 		);
 		if (remoteMatch) {
 			return {

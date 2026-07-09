@@ -164,6 +164,34 @@ describe("bucketFindings", () => {
 		expect(buckets[0].representative.severity).toBe("critical");
 	});
 
+	it("carries a member's line when the highest-severity representative has none", () => {
+		// Regression guard for bucketToFinding's `bucket.line ?? representative.line`
+		// fallback: the representative is chosen by severity, but when that finding
+		// has no line, the merged result must still surface the bucket's aggregated
+		// line from a co-located member. Distinct lenses push votes > 1 so the
+		// multi-member (bucketToFinding) path is exercised.
+		const findings = [
+			finding({
+				file: "a.ts",
+				line: undefined,
+				severity: "critical",
+				lens: "simplicity",
+				summary: "Duplicate parsing logic across two modules",
+			}),
+			finding({
+				file: "a.ts",
+				line: 11,
+				severity: "low",
+				lens: "clarity",
+				summary: "Duplicate parsing logic across two modules",
+			}),
+		];
+		const result = clusterAndFlatten(findings);
+		expect(result).toHaveLength(1);
+		expect(result[0].severity).toBe("critical");
+		expect(result[0].line).toBe(11);
+	});
+
 	it("breaks severity ties with longer message length", () => {
 		// Both findings need to cluster (same file, co-located line,
 		// ≥25% Jaccard) for the tiebreak to be exercised. Use

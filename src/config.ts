@@ -10,6 +10,7 @@ import {
 	LOG_PREFIX,
 	getNodeErrorCode,
 } from "./constants.js";
+import { toErrorMessage } from "./error-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
@@ -386,16 +387,28 @@ async function loadConfigFile(
 ): Promise<DrykissConfig | undefined> {
 	try {
 		const text = await readFile(path, "utf8");
-		return JSON.parse(text) as DrykissConfig;
+		const parsed = JSON.parse(text) as unknown;
+		// Reject non-object / array JSON so a malformed top-level value
+		// (a bare string, number, or array) can't be silently trusted as a
+		// config object.
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
+			warnings.push(`Config file ${path} is not a JSON object; ignoring.`);
+			return undefined;
+		}
+		return parsed as DrykissConfig;
 	} catch (err) {
-		if (getNodeErrorCode(err) === "ENOENT") {
-			return undefined;
-		}
-		if (err instanceof SyntaxError) {
-			warnings.push(`Config file ${path} is corrupt; ignoring.`);
-			return undefined;
-		}
-		throw err;
+		// ENOENT is expected (no config yet). Any other error (corrupt,
+		// permission, disk) degrades to "no config" rather than breaking the
+		// review — best-effort, like the rest of the tool.
+		if (getNodeErrorCode(err) === "ENOENT") return undefined;
+		warnings.push(
+			`Failed to load config ${path}: ${toErrorMessage(err)}; ignoring.`,
+		);
+		return undefined;
 	}
 }
 function isValidSeverity(s: unknown): s is SeverityOverride {

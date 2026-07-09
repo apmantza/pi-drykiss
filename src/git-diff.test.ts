@@ -8,7 +8,14 @@ import {
 	redactSecrets,
 } from "./git-diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
+import {
+	readFile,
+	readdir,
+	stat,
+	lstat,
+	realpath,
+	open,
+} from "node:fs/promises";
 
 vi.mock("node:fs/promises", () => ({
 	readFile: vi.fn(),
@@ -16,6 +23,7 @@ vi.mock("node:fs/promises", () => ({
 	stat: vi.fn(),
 	lstat: vi.fn(),
 	realpath: vi.fn(),
+	open: vi.fn(),
 }));
 
 function mockPi(stdout: string): ExtensionAPI {
@@ -351,9 +359,7 @@ describe("getFileDiff", () => {
 	});
 
 	it("redacts secrets from diff output before returning", async () => {
-		const pi = mockPi(
-			"+const key = AKIAIOSFODNN7EXAMPLE;\n-normal line;\n",
-		);
+		const pi = mockPi("+const key = AKIAIOSFODNN7EXAMPLE;\n-normal line;\n");
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const diff = await getFileDiff(pi, "/cwd", "src/config.ts", {
 			files: [],
@@ -376,6 +382,19 @@ describe("getFileContent", () => {
 		vi.resetAllMocks();
 		vi.mocked(lstat).mockResolvedValue({ isFile: () => true } as any);
 		vi.mocked(realpath).mockImplementation((p) => Promise.resolve(p as string));
+		// open() returns a fake handle whose readFile delegates to the
+		// module-level readFile mock, so content tests keep working.
+		vi.mocked(open).mockImplementation(
+			async () =>
+				({
+					stat: () => Promise.resolve({ isFile: () => true } as any),
+					readFile: ((...args: unknown[]) =>
+						(readFile as unknown as (...a: unknown[]) => Promise<unknown>)(
+							...args,
+						)) as any,
+					close: () => Promise.resolve(),
+				}) as any,
+		);
 	});
 
 	it("returns full content for small files", async () => {
@@ -474,6 +493,15 @@ describe("getFileContent", () => {
 			isSymbolicLink: () => true,
 		} as any);
 		const result = await getFileContent("/cwd", "src/symlink.ts");
+		expect(result).toBeNull();
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it("returns null when a symlink is swapped in after realpath (ELOOP)", async () => {
+		vi.mocked(open).mockRejectedValue(
+			Object.assign(new Error("ELOOP"), { code: "ELOOP" as const }),
+		);
+		const result = await getFileContent("/cwd", "src/link.ts");
 		expect(result).toBeNull();
 		expect(readFile).not.toHaveBeenCalled();
 	});

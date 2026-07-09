@@ -38,6 +38,20 @@ describe("parsePrUrl", () => {
 		expect(result).toEqual({ owner: "myorg", repo: "myrepo", number: 42 });
 	});
 
+	it("parses a repo name containing dots via SSH remote", () => {
+		const result = parsePrUrl("42", "git@github.com:myorg/my.cool.repo.git");
+		expect(result).toEqual({
+			owner: "myorg",
+			repo: "my.cool.repo",
+			number: 42,
+		});
+	});
+
+	it("parses a repo name containing dots via shorthand", () => {
+		const result = parsePrUrl("owner/my.repo#123");
+		expect(result).toEqual({ owner: "owner", repo: "my.repo", number: 123 });
+	});
+
 	it("returns null for invalid input", () => {
 		expect(parsePrUrl("not a pr")).toBeNull();
 		expect(parsePrUrl("owner/repo")).toBeNull();

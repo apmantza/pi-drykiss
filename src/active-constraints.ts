@@ -72,8 +72,10 @@ export function buildActiveConstraints(rt: RiskTargeting | undefined): string {
  * to prevent injection.
  */
 function safeFormatCode(code: string): string {
-	const def = RISK_CODES[code as keyof typeof RISK_CODES];
-	if (def) {
+	// Validate against the known catalogue before indexing, so an
+	// unrecognised code can't trip an unchecked cast.
+	if (Object.hasOwn(RISK_CODES, code)) {
+		const def = RISK_CODES[code as keyof typeof RISK_CODES];
 		return `\`${code}\` (${sanitizeInline(def.name)})`;
 	}
 	return `\`${sanitizeInline(code)}\``;

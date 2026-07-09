@@ -1,4 +1,12 @@
-import { readFile, readdir, stat, lstat, realpath } from "node:fs/promises";
+import {
+	readFile,
+	readdir,
+	stat,
+	lstat,
+	realpath,
+	open,
+} from "node:fs/promises";
+import { O_NOFOLLOW } from "node:constants";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangedFile, ReviewOptions } from "./types.js";
 import { LOG_PREFIX, getNodeErrorCode, assertSafeGitRef } from "./constants.js";
@@ -104,7 +112,10 @@ const SECRET_PATTERNS: SecretPattern[] = [
 	{ re: /\bgithub_pat_[A-Za-z0-9_]{82}\b/g, type: "GitHub fine-grained token" },
 	{ re: /\bgh[ousr]_[A-Za-z0-9]{36}\b/g, type: "GitHub token" },
 	{ re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, type: "Slack token" },
-	{ re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/g, type: "Stripe secret key" },
+	{
+		re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/g,
+		type: "Stripe secret key",
+	},
 	{ re: /\bAIza[0-9A-Za-z_-]{35}\b/g, type: "Google API key" },
 	{
 		re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
@@ -336,39 +347,61 @@ export async function getFileContent(
 		return null;
 	}
 	try {
-		// Reject non-regular files: symlinks (readFile follows them),
-		// FIFOs (readFile hangs indefinitely), sockets, and device files.
-		// A malicious repo could plant any of these to exfiltrate data,
-		// hang the review, or cause unexpected behavior. lstat reports
-		// the actual type (not the target's type), so this is safe.
+		// Reject non-regular files FIRST (lstat reports the actual type,
+		// not the target's). This avoids hanging on FIFOs/sockets and avoids
+		// opening directories. A malicious repo could plant any of these to
+		// exfiltrate data, hang the review, or cause unexpected behavior.
 		const linkStats = await lstat(resolved);
 		if (!linkStats.isFile()) {
 			console.error(`${LOG_PREFIX} Rejected non-regular file: ${filePath}`);
 			return null;
 		}
-		const raw = await readFile(resolved, "utf8");
-		// Redact BEFORE truncation so multi-line secrets (e.g. private key
-		// blocks) aren't clipped at the truncation boundary and partially
-		// visible. The redacted text may be shorter than the raw content,
-		// but that's fine — the secret is gone.
-		const redacted = redactSecrets(raw);
-		if (redacted.redacted > 0) {
-			console.warn(
-				`${LOG_PREFIX} Redacted ${redacted.redacted} secret-like value(s) (${redacted.types.join(", ")}) from ${filePath} before review.`,
-			);
+		// Harden against a TOCTOU swap: after realpath resolved `resolved`
+		// to a canonical in-root path, an attacker could replace that file
+		// with a symlink to outside cwd before we read it. Opening the
+		// resolved path with O_NOFOLLOW (where supported) makes the read
+		// happen through a single file descriptor, so a symlink swapped in
+		// after the lstat above is caught by open (ELOOP) instead of being
+		// followed out of cwd. On platforms without O_NOFOLLOW (e.g. Windows)
+		// we fall back to flag 0; the realpath + assertPathInRoot guard above
+		// already blocks the common "symlink points outside cwd" case.
+		const noFollow = typeof O_NOFOLLOW === "number" ? O_NOFOLLOW : 0;
+		const handle = await open(resolved, noFollow);
+		try {
+			const raw = await handle.readFile("utf8");
+			// Redact BEFORE truncation so multi-line secrets (e.g. private key
+			// blocks) aren't clipped at the truncation boundary and partially
+			// visible. The redacted text may be shorter than the raw content,
+			// but that's fine — the secret is gone.
+			const redacted = redactSecrets(raw);
+			if (redacted.redacted > 0) {
+				console.warn(
+					`${LOG_PREFIX} Redacted ${redacted.redacted} secret-like value(s) (${redacted.types.join(", ")}) from ${filePath} before review.`,
+				);
+			}
+			const lines = redacted.text.split("\n");
+			const lineCount = raw.split("\n").length;
+			const truncated = lines.length > MAX_FILE_LINES;
+			const content = truncated
+				? lines.slice(0, MAX_FILE_LINES).join("\n") +
+					"\n\n... (truncated: " +
+					(lineCount - MAX_FILE_LINES) +
+					" more lines) ...\n"
+				: redacted.text;
+			return { content, lineCount, truncated };
+		} finally {
+			await handle.close().catch(() => undefined);
 		}
-		const lines = redacted.text.split("\n");
-		const lineCount = raw.split("\n").length;
-		const truncated = lines.length > MAX_FILE_LINES;
-		const content = truncated
-			? lines.slice(0, MAX_FILE_LINES).join("\n") +
-				"\n\n... (truncated: " +
-				(lineCount - MAX_FILE_LINES) +
-				" more lines) ...\n"
-			: redacted.text;
-		return { content, lineCount, truncated };
 	} catch (err) {
 		const code = getNodeErrorCode(err);
+		// ELOOP: a symlink was swapped in at the resolved path after the
+		// lstat above. Treat it like any other non-regular file.
+		if (code === "ELOOP") {
+			console.error(
+				`${LOG_PREFIX} Rejected symlink at resolved path: ${filePath}`,
+			);
+			return null;
+		}
 		// ENOENT is expected for missing files (e.g., deleted files in git status)
 		if (code === "ENOENT") {
 			return null;

@@ -71,18 +71,38 @@ describe("loadConfig", () => {
 		expect(config.interactive).toBe(true);
 	});
 
-	it("rethrows non-ENOENT, non-SyntaxError errors", async () => {
+	it("returns defaults when top-level JSON is not an object", async () => {
+		vi.mocked(readFile).mockResolvedValue('"just a string"');
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const config = await loadConfig();
+		expect(config.defaultModel).toBeUndefined();
+		expect(warnSpy).toHaveBeenCalled();
+		warnSpy.mockRestore();
+	});
+
+	it("falls back with a warning on EACCES errors", async () => {
 		vi.mocked(readFile).mockRejectedValue(
 			Object.assign(new Error("Permission denied"), {
 				code: "EACCES" as const,
 			}),
 		);
-		await expect(loadConfig()).rejects.toThrow("Permission denied");
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const config = await loadConfig();
+		expect(config.defaultModel).toBeUndefined();
+		expect(warnSpy).toHaveBeenCalled();
+		expect(
+			warnSpy.mock.calls.some((c) => String(c[0]).includes("ignoring")),
+		).toBe(true);
+		warnSpy.mockRestore();
 	});
 
-	it("rethrows generic Error that is not ENOENT or SyntaxError", async () => {
+	it("falls back with a warning on generic errors that are not ENOENT or SyntaxError", async () => {
 		vi.mocked(readFile).mockRejectedValue(new Error("Disk full"));
-		await expect(loadConfig()).rejects.toThrow("Disk full");
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const config = await loadConfig();
+		expect(config.defaultModel).toBeUndefined();
+		expect(warnSpy).toHaveBeenCalled();
+		warnSpy.mockRestore();
 	});
 });
 

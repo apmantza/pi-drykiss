@@ -91,7 +91,12 @@ export class ConversationViewer implements Component {
 								? msg.content
 								: extractAssistantText(msg.content);
 						for (const chunk of chunkLine(text, 150)) {
-							lines.push(fg("muted", `│ [Result (${msg.toolName})]: ${chunk}`));
+							lines.push(
+								fg(
+									"muted",
+									`│ [Result (${msg.toolName ?? "unknown"})]: ${chunk}`,
+								),
+							);
 						}
 					}
 				}

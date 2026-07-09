@@ -36,7 +36,13 @@
 import { toErrorMessage } from "./error-utils.js";
 import { extractBalancedJsonArray } from "./json-extract.js";
 import { loadPromptBody } from "./prompt-loader.js";
-import { jaccard, tokenize } from "./rejections.js";
+import {
+	jaccard,
+	tokenize,
+	CO_LOCATED_LINE_WINDOW,
+	CO_LOCATED_JACCARD_THRESHOLD,
+	UNANCHORED_JACCARD_THRESHOLD,
+} from "./rejections.js";
 import { findModelByHint } from "./model-utils.js";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -373,10 +379,10 @@ export function bucketDeepFindings(perPass: DeepFinding[][]): DeepCandidate[] {
 			if (b.file !== t.file) return false;
 			const sim = jaccard(b.tokens, tokens);
 			if (b.line !== undefined && t.line !== undefined) {
-				if (Math.abs(b.line - t.line) > 3) return false;
-				return sim >= 0.25;
+				if (Math.abs(b.line - t.line) > CO_LOCATED_LINE_WINDOW) return false;
+				return sim >= CO_LOCATED_JACCARD_THRESHOLD;
 			}
-			return sim >= 0.5;
+			return sim >= UNANCHORED_JACCARD_THRESHOLD;
 		});
 		if (match) {
 			match.severities.push(t.severity);

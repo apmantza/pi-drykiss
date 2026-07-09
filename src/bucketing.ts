@@ -179,6 +179,11 @@ export function bucketToFinding(bucket: FindingBucket): Finding {
 	const { representative } = bucket;
 	return {
 		...representative,
+		// Override AFTER the spread: the representative (highest severity)
+		// may have no line, but the bucket's aggregated line is tightened to
+		// the first defined member line. Spreading representative first would
+		// clobber this with `line: undefined`.
+		line: bucket.line ?? representative.line,
 		_bucketVotes: bucket.votes,
 		_bucketLenses: bucket.contributingLenses,
 	};

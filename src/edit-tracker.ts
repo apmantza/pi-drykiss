@@ -36,12 +36,10 @@ function sanitizePath(s: string): string | null {
 	return cleaned;
 }
 
-function extractFilePath(...values: unknown[]): string | null {
-	for (const value of values) {
-		const path = extractFilePathFromValue(value);
-		if (path) return path;
-	}
-	return null;
+function extractFilePath(a: unknown, b: unknown): string | null {
+	const fromA = extractFilePathFromValue(a);
+	if (fromA) return fromA;
+	return extractFilePathFromValue(b);
 }
 
 function extractFilePathFromValue(result: unknown): string | null {
