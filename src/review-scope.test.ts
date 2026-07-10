@@ -103,6 +103,42 @@ describe("resolveReviewScope", () => {
 		);
 	});
 
+	it("records unexpected diff collection failures without aborting the scope", async () => {
+		const { getFileDiff } = await import("./git-diff.js");
+		vi.mocked(getFileDiff).mockRejectedValueOnce(new Error("git unavailable"));
+
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{},
+			{ contextMode: "diff" },
+		);
+
+		expect(scope.diffs.get("src/a.ts")).toBe("(diff unavailable)");
+		expect(scope.preparationErrors).toEqual([
+			"Failed to get diff for src/a.ts: git unavailable",
+		]);
+	});
+
+	it("records unexpected file-content collection failures without aborting the scope", async () => {
+		const { getFileContent } = await import("./git-diff.js");
+		vi.mocked(getFileContent).mockRejectedValueOnce(
+			new Error("disk unavailable"),
+		);
+
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{},
+			{ contextMode: "full" },
+		);
+
+		expect(scope.contents).toEqual(new Map());
+		expect(scope.preparationErrors).toEqual([
+			"Failed to load content for src/a.ts: disk unavailable",
+		]);
+	});
+
 	it("resolves PR scopes with PR metadata and fetched contents", async () => {
 		const { fetchPrDiff, fetchPrFileContents } = await import("./github-pr.js");
 
@@ -115,6 +151,7 @@ describe("resolveReviewScope", () => {
 
 		expect(scope.mode).toBe("pr");
 		expect(scope.label).toBe("o/r#12");
+		expect(scope.preparationErrors).toEqual([]);
 		expect(scope.metadata.title).toBe("PR title");
 		expect(scope.contents?.get("src/pr.ts")?.content).toContain("pr");
 		expect(fetchPrDiff).toHaveBeenCalledWith("/repo", "o", "r", 12);
@@ -132,6 +169,7 @@ describe("resolveReviewScope", () => {
 		);
 
 		expect(scope.mode).toBe("commit");
+		expect(scope.preparationErrors).toEqual([]);
 		expect(scope.files).toEqual([
 			{ path: "src/commit.ts", status: "modified", language: "TypeScript" },
 		]);
@@ -142,6 +180,25 @@ describe("resolveReviewScope", () => {
 			"--name-status",
 			"--format=",
 			"HEAD~1",
+		]);
+	});
+
+	it("records commit-scope content failures without aborting the scope", async () => {
+		const { getFileContent } = await import("./git-diff.js");
+		vi.mocked(getFileContent).mockRejectedValueOnce(
+			new Error("disk unavailable"),
+		);
+
+		const scope = await resolveReviewScope(
+			mockPi("M\tsrc/commit.ts\n"),
+			"/repo",
+			{ mode: "commit", commit: "HEAD~1" },
+			{ contextMode: "full" },
+		);
+
+		expect(scope.contents).toEqual(new Map());
+		expect(scope.preparationErrors).toEqual([
+			"Failed to load content for src/commit.ts: disk unavailable",
 		]);
 	});
 

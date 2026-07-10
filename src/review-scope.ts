@@ -10,7 +10,7 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import { LOG_PREFIX, assertSafeGitRef } from "./constants.js";
+import { assertSafeGitRef } from "./constants.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import {
 	fetchPrDiff,
@@ -67,8 +67,15 @@ export interface ReviewScope {
 	readonly diffs: Map<string, string>;
 	readonly contents?: Map<string, FileContent>;
 	readonly projectIndex?: ProjectIndexEntry[];
+	/** Scope-preparation failures that made the review context incomplete. */
+	readonly preparationErrors: readonly string[];
 	readonly options: ReviewOptions;
 	readonly metadata: Record<string, unknown>;
+}
+
+interface CollectionResult<T> {
+	readonly value: T;
+	readonly errors: string[];
 }
 
 export async function resolveReviewScope(
@@ -113,14 +120,14 @@ export async function resolveReviewScope(
 		options.pathFilters,
 		mode === "files",
 	);
-	const diffs = await gatherDiffs(
+	const diffCollection = await gatherDiffs(
 		pi,
 		cwd,
 		files,
 		reviewOptions,
 		options.onFileProgress,
 	);
-	const contents =
+	const contentCollection =
 		contextMode !== "diff"
 			? await gatherContents(cwd, files, options.onFileProgress)
 			: undefined;
@@ -138,9 +145,13 @@ export async function resolveReviewScope(
 		mode,
 		label: scopeLabel(mode, reviewOptions.ref),
 		files,
-		diffs,
-		contents,
+		diffs: diffCollection.value,
+		contents: contentCollection?.value,
 		projectIndex,
+		preparationErrors: [
+			...diffCollection.errors,
+			...(contentCollection?.errors ?? []),
+		],
 		options: reviewOptions,
 		metadata: {},
 	};
@@ -223,35 +234,32 @@ async function gatherDiffs(
 	files: ChangedFile[],
 	options: ReviewOptions,
 	onProgress?: (completed: number, total: number, label: string) => void,
-): Promise<Map<string, string>> {
+): Promise<CollectionResult<Map<string, string>>> {
 	const diffs = new Map<string, string>();
+	const errors: string[] = [];
 	let completed = 0;
 	for (const file of files) {
 		try {
 			diffs.set(file.path, await getFileDiff(pi, cwd, file.path, options));
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.error(
-				"%s Failed to get diff for %s: %s",
-				LOG_PREFIX,
-				file.path,
-				msg,
-			);
+			errors.push(`Failed to get diff for ${file.path}: ${msg}`);
 			diffs.set(file.path, "(diff unavailable)");
 		} finally {
 			completed += 1;
 			onProgress?.(completed, files.length, "Preparing diffs");
 		}
 	}
-	return diffs;
+	return { value: diffs, errors };
 }
 
 async function gatherContents(
 	cwd: string,
 	files: ChangedFile[],
 	onProgress?: (completed: number, total: number, label: string) => void,
-): Promise<Map<string, FileContent>> {
+): Promise<CollectionResult<Map<string, FileContent>>> {
 	const contents = new Map<string, FileContent>();
+	const errors: string[] = [];
 	let completed = 0;
 	for (const file of files) {
 		try {
@@ -259,18 +267,13 @@ async function gatherContents(
 			if (result) contents.set(file.path, result);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
-			console.warn(
-				"%s Skipping content for %s: %s",
-				LOG_PREFIX,
-				file.path,
-				msg,
-			);
+			errors.push(`Failed to load content for ${file.path}: ${msg}`);
 		} finally {
 			completed += 1;
 			onProgress?.(completed, files.length, "Loading file contents");
 		}
 	}
-	return contents;
+	return { value: contents, errors };
 }
 
 async function resolvePrScope(
@@ -334,6 +337,7 @@ async function resolvePrScope(
 		diffs: filteredDiffs,
 		contents,
 		projectIndex,
+		preparationErrors: [],
 		options: { files: [], ref: "HEAD", staged: false, all: false },
 		metadata: {
 			pr: prInfo,
@@ -377,7 +381,7 @@ async function resolveCommitScope(
 		]);
 		diffs.set(file.path, result.stdout || "(diff unavailable)");
 	}
-	const contents =
+	const contentCollection =
 		contextMode !== "diff" ? await gatherContents(cwd, files) : undefined;
 	const projectIndex =
 		needsProjectIndex && contextMode !== "diff"
@@ -389,8 +393,9 @@ async function resolveCommitScope(
 		label: `commit ${commit}`,
 		files,
 		diffs,
-		contents,
+		contents: contentCollection?.value,
 		projectIndex,
+		preparationErrors: contentCollection?.errors ?? [],
 		options: { files: [], ref: commit, staged: false, all: false },
 		metadata: { commit },
 	};

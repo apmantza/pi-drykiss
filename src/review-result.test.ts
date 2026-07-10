@@ -202,6 +202,19 @@ describe("buildReviewResult", () => {
 		expect(result.errors).toEqual([]);
 	});
 
+	it("surfaces scope-preparation failures as review errors", () => {
+		const result = buildReviewResult(job(), {
+			preparationErrors: ["Failed to get diff for src/a.ts: git unavailable"],
+		});
+
+		expect(result.errors).toEqual([
+			"Failed to get diff for src/a.ts: git unavailable",
+		]);
+		expect(result.clean).toBe(false);
+		expect(result.reviewStatus).toBe("error");
+		expect(result.qualityGate.status).toBe("fail");
+	});
+
 	it("overrides a confused synthesizer verdict to Approve when there are no actionable findings", () => {
 		// Regression guard: the synthesizer sometimes emits
 		// "Needs security review" or "Request changes" even with an

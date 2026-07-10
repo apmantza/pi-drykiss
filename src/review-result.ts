@@ -147,6 +147,8 @@ export interface BuildReviewResultOptions {
 	readonly qualityGateThreshold?: number;
 	/** Optional deterministic cap applied after suppression/rejection handling. */
 	readonly findingBudget?: FindingBudget;
+	/** Scope-preparation failures collected before lens execution. */
+	readonly preparationErrors?: readonly string[];
 }
 
 const SEVERITY_SET = SEVERITY_VALUES;
@@ -186,7 +188,7 @@ export function buildReviewResult(
 		suppressed.length,
 		previouslyRejected.length,
 	);
-	const errors = collectErrors(job);
+	const errors = collectErrors(job, options.preparationErrors);
 	// Health reflects only active code findings. Review failures and malformed
 	// synthesis output are represented independently by reviewStatus and the
 	// quality gate instead of masquerading as critical code risk.
@@ -336,8 +338,11 @@ function formatSummary(
 		: base;
 }
 
-function collectErrors(job: ReviewJob): string[] {
-	const errors: string[] = [];
+function collectErrors(
+	job: ReviewJob,
+	preparationErrors: readonly string[] = [],
+): string[] {
+	const errors = [...preparationErrors];
 	for (const lens of job.lenses) {
 		const state = job.states.get(lens);
 		if (state?.status === "error") {

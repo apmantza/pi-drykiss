@@ -292,6 +292,7 @@ export async function executeDrykissAutoreviewTool(
 			validate: params.validate ?? effectiveConfig.validate ?? false,
 			qualityGateThreshold: effectiveConfig.qualityGate,
 			findingBudget: effectiveConfig.review?.findingBudget,
+			preparationErrors: cappedScope.preparationErrors,
 			onProgress: onUpdate
 				? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
 				: undefined,
