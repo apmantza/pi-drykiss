@@ -175,6 +175,65 @@ describe("resolveReviewScope", () => {
 		expect(scope.contents?.get("src/a.ts")?.content).toContain("a");
 	});
 
+	it("applies excludes after discovery while force-includes win", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValueOnce([
+			{ path: "src/keep.ts", status: "modified", language: "TypeScript" },
+			{
+				path: "src/generated/keep.ts",
+				status: "modified",
+				language: "TypeScript",
+			},
+			{
+				path: "src/generated/drop.ts",
+				status: "modified",
+				language: "TypeScript",
+			},
+		]);
+
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{},
+			{
+				contextMode: "diff",
+				pathFilters: {
+					exclude: ["src/generated/**"],
+					forceInclude: ["src/generated/keep.ts"],
+				},
+			},
+		);
+
+		expect(scope.files.map((file) => file.path)).toEqual([
+			"src/keep.ts",
+			"src/generated/keep.ts",
+		]);
+	});
+
+	it("does not filter explicit file scopes", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		vi.mocked(getChangedFiles).mockResolvedValueOnce([
+			{
+				path: "src/generated/drop.ts",
+				status: "modified",
+				language: "TypeScript",
+			},
+		]);
+		const scope = await resolveReviewScope(
+			mockPi(),
+			"/repo",
+			{ files: ["src/generated/drop.ts"] },
+			{
+				contextMode: "diff",
+				pathFilters: { exclude: ["src/generated/**"] },
+			},
+		);
+
+		expect(scope.files.map((file) => file.path)).toEqual([
+			"src/generated/drop.ts",
+		]);
+	});
+
 	it("resolves staged scope when staged=true", async () => {
 		const { getChangedFiles } = await import("./git-diff.js");
 		const scope = await resolveReviewScope(

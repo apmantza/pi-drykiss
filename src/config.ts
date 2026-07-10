@@ -74,7 +74,13 @@ export interface ReviewPathInstruction {
 	readonly lenses?: readonly ReviewLens[];
 }
 
+export interface ReviewPathFilters {
+	readonly exclude?: readonly string[];
+	readonly forceInclude?: readonly string[];
+}
+
 export interface ReviewPolicyConfig {
+	readonly pathFilters?: ReviewPathFilters;
 	readonly pathInstructions?: readonly ReviewPathInstruction[];
 }
 
@@ -409,7 +415,10 @@ function isNonEmptyString(value: unknown): value is string {
 function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
 	if (!isPlainObject(value)) return undefined;
 	const rawInstructions = value.pathInstructions;
-	if (!Array.isArray(rawInstructions)) return {};
+	const pathFilters = cleanPathFilters(value.pathFilters);
+	if (!Array.isArray(rawInstructions)) {
+		return pathFilters ? { pathFilters } : {};
+	}
 
 	const pathInstructions: ReviewPathInstruction[] = [];
 	for (const raw of rawInstructions) {
@@ -426,7 +435,26 @@ function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
 			...(lenses && lenses.length > 0 ? { lenses } : {}),
 		});
 	}
-	return { pathInstructions };
+	return {
+		...(pathFilters ? { pathFilters } : {}),
+		pathInstructions,
+	};
+}
+
+function cleanPathFilters(value: unknown): ReviewPathFilters | undefined {
+	if (!isPlainObject(value)) return undefined;
+	const exclude = Array.isArray(value.exclude)
+		? value.exclude.filter(isNonEmptyString)
+		: undefined;
+	const forceInclude = Array.isArray(value.forceInclude)
+		? value.forceInclude.filter(isNonEmptyString)
+		: undefined;
+	return exclude || forceInclude
+		? {
+				...(exclude ? { exclude } : {}),
+				...(forceInclude ? { forceInclude } : {}),
+			}
+		: undefined;
 }
 
 function isReviewLens(value: unknown): value is ReviewLens {

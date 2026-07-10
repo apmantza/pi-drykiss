@@ -209,6 +209,7 @@ export async function executeDrykissAutoreviewTool(
 			needsProjectIndex:
 				lenses.includes("deduplication") || lenses.includes("architecture"),
 			ignorePatterns: effectiveConfig.ignorePatterns,
+			pathFilters: effectiveConfig.review?.pathFilters,
 			onFileProgress: fileProgress,
 		},
 	);

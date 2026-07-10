@@ -47,6 +47,11 @@ export interface ResolveReviewScopeOptions {
 	readonly needsProjectIndex?: boolean;
 	/** Glob patterns for files to exclude from the review scope. */
 	readonly ignorePatterns?: readonly string[];
+	/** Policy filters applied after scope discovery; force-includes win. */
+	readonly pathFilters?: {
+		readonly exclude?: readonly string[];
+		readonly forceInclude?: readonly string[];
+	};
 	/** Optional progress callback for per-file scope preparation. */
 	readonly onFileProgress?: (
 		completed: number,
@@ -76,17 +81,18 @@ export async function resolveReviewScope(
 	const mode = inferMode(request);
 
 	if (mode === "pr") {
-		return resolvePrScope(
+		const scope = await resolvePrScope(
 			cwd,
 			request,
 			contextMode,
 			options.needsProjectIndex,
 			options.ignorePatterns,
 		);
+		return filterResolvedScope(scope, options.pathFilters);
 	}
 
 	if (mode === "commit") {
-		return resolveCommitScope(
+		const scope = await resolveCommitScope(
 			pi,
 			cwd,
 			request.commit ?? request.ref ?? "HEAD",
@@ -94,13 +100,19 @@ export async function resolveReviewScope(
 			options.needsProjectIndex,
 			options.ignorePatterns,
 		);
+		return filterResolvedScope(scope, options.pathFilters);
 	}
 
 	const reviewOptions = toReviewOptions(mode, request);
-	const files =
+	const discoveredFiles =
 		mode === "full"
 			? await getAllSourceFiles(cwd, options.ignorePatterns)
 			: await getChangedFiles(pi, cwd, reviewOptions, options.ignorePatterns);
+	const files = applyPathFilters(
+		discoveredFiles,
+		options.pathFilters,
+		mode === "files",
+	);
 	const diffs = await gatherDiffs(
 		pi,
 		cwd,
@@ -132,6 +144,49 @@ export async function resolveReviewScope(
 		options: reviewOptions,
 		metadata: {},
 	};
+}
+
+function filterResolvedScope(
+	scope: ReviewScope,
+	filters: ResolveReviewScopeOptions["pathFilters"],
+): ReviewScope {
+	const files = applyPathFilters(scope.files, filters, false);
+	if (files.length === scope.files.length) return scope;
+	const kept = new Set(files.map((file) => file.path));
+	return {
+		...scope,
+		files,
+		diffs: new Map([...scope.diffs].filter(([path]) => kept.has(path))),
+		...(scope.contents
+			? {
+					contents: new Map(
+						[...scope.contents].filter(([path]) => kept.has(path)),
+					),
+				}
+			: {}),
+		...(scope.projectIndex
+			? {
+					projectIndex: scope.projectIndex.filter((entry) =>
+						kept.has(entry.path),
+					),
+				}
+			: {}),
+	};
+}
+
+function applyPathFilters(
+	files: readonly ChangedFile[],
+	filters: ResolveReviewScopeOptions["pathFilters"],
+	explicitFiles: boolean,
+): ChangedFile[] {
+	if (!filters?.exclude || filters.exclude.length === 0 || explicitFiles) {
+		return [...files];
+	}
+	return files.filter(
+		(file) =>
+			matchesAnyGlob(file.path, filters.forceInclude ?? []) ||
+			!matchesAnyGlob(file.path, filters.exclude ?? []),
+	);
 }
 
 function inferMode(request: ReviewScopeRequest): Exclude<ReviewMode, "auto"> {
