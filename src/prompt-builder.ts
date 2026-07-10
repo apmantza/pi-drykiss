@@ -28,6 +28,11 @@ import {
 	loadModeContextBlock,
 	MODE_CONTEXT_FRAGMENT_NAMES,
 } from "./mode-context.js";
+import {
+	loadProjectReviewPolicy,
+	selectPathInstructions,
+} from "./review-policy.js";
+import type { ReviewPathInstruction } from "./config.js";
 
 // Helper functions that go through the module namespace so vi.mock can
 // intercept the calls. (Destructured imports are not always live-bound
@@ -328,23 +333,7 @@ export interface ReviewPrompt {
 export async function loadProjectReviewGuidelines(
 	cwd: string,
 ): Promise<string | null> {
-	const drykissPath = join(cwd, ".pi", "drykiss", "review-guidelines.md");
-	const legacyPath = join(cwd, "REVIEW_GUIDELINES.md");
-
-	for (const p of [drykissPath, legacyPath]) {
-		try {
-			const content = await readFile(p, "utf8");
-			return content.trim() || null;
-		} catch (err) {
-			if (getNodeErrorCode(err) !== "ENOENT") {
-				console.warn(
-					`${LOG_PREFIX} Could not read review guidelines ${p}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		}
-	}
-
-	return null;
+	return (await loadProjectReviewPolicy(cwd)).markdown;
 }
 
 export async function buildReviewPrompts(
@@ -361,6 +350,7 @@ export async function buildReviewPrompts(
 		activeConstraints?: string;
 		commands?: { test?: string; lint?: string };
 		guidelines?: string | null;
+		pathInstructions?: readonly ReviewPathInstruction[];
 		/**
 		 * Review mode (e.g. "pr", "commit", "full"). When provided, a
 		 * posture-specific context block is injected into the user prompt
@@ -394,28 +384,39 @@ export async function buildReviewPrompts(
 			)
 		: "";
 
-	function buildUserPrompt(includeIndex: boolean): string {
+	function buildUserPrompt(
+		currentLens: Exclude<ReviewLens, "all">,
+		includeIndex: boolean,
+	): string {
 		let prompt = EXAMINE_CONTEXT_INSTRUCTION;
 		if (modeContext) prompt += `\n\n${modeContext}`;
 		prompt += `\n\n${context}`;
 		if (commandsBlock) prompt += `\n${commandsBlock}`;
 		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
+		const pathInstructions = selectPathInstructions(
+			files,
+			currentLens,
+			options?.pathInstructions,
+		);
 		if (guidelines) {
 			prompt += `\n\n## Project Review Guidelines\n\n${guidelines}`;
+		}
+		if (pathInstructions.length > 0) {
+			prompt += `\n\n${pathInstructions.join("\n\n")}`;
 		}
 		return prompt;
 	}
 
 	if (lens !== "all") {
 		const systemPrompt = await composeLensPrompt(lens, composeOpts);
-		const userPrompt = buildUserPrompt(lens === "deduplication");
+		const userPrompt = buildUserPrompt(lens, lens === "deduplication");
 		return [{ lens, systemPrompt, userPrompt }];
 	}
 
 	const prompts: ReviewPrompt[] = [];
 	for (const l of LENS_NAMES) {
 		const systemPrompt = await composeLensPrompt(l, composeOpts);
-		const userPrompt = buildUserPrompt(l === "deduplication");
+		const userPrompt = buildUserPrompt(l, l === "deduplication");
 		prompts.push({ lens: l, systemPrompt, userPrompt });
 	}
 	return prompts;

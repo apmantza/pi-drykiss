@@ -14,6 +14,7 @@ import { toErrorMessage } from "./error-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
+import type { ReviewLens } from "./types.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
 
@@ -66,6 +67,16 @@ export interface SeverityOverrideRule {
 
 /** Glob pattern for `ignore` — same syntax as gitignore. */
 export type IgnorePattern = string;
+
+export interface ReviewPathInstruction {
+	readonly glob: string;
+	readonly instruction: string;
+	readonly lenses?: readonly ReviewLens[];
+}
+
+export interface ReviewPolicyConfig {
+	readonly pathInstructions?: readonly ReviewPathInstruction[];
+}
 
 /** Per-project config (Phase 2) for risk-code targeting. */
 export interface RiskTargeting {
@@ -179,6 +190,8 @@ export interface DrykissConfig {
 	suppressions?: Suppression[];
 	/** Automatic closeout review configuration. */
 	autoreview?: DrykissAutoreviewConfig;
+	/** Supplemental review policy, including path-specific guidance. */
+	review?: ReviewPolicyConfig;
 	/**
 	 * Minimum health score threshold for the quality gate (0-100).
 	 * Reviews with score below this value show a FAIL indicator.
@@ -236,11 +249,12 @@ export async function loadConfig(): Promise<DrykissConfig> {
 /** Default config values used when no config file exists. */
 const DEFAULT_CONFIG: Pick<
 	DrykissConfig,
-	"interactive" | "confirmBeforeRun" | "autoreview"
+	"interactive" | "confirmBeforeRun" | "autoreview" | "review"
 > = {
 	interactive: true,
 	confirmBeforeRun: true,
 	autoreview: { maxFiles: 40 },
+	review: {},
 };
 
 /**
@@ -282,6 +296,14 @@ export async function loadEffectiveConfig(
 					...DEFAULT_CONFIG.autoreview,
 					...baseConfig.autoreview,
 					...projectConfig.autoreview,
+				},
+				review: {
+					...baseConfig.review,
+					...projectConfig.review,
+					pathInstructions: [
+						...(baseConfig.review?.pathInstructions ?? []),
+						...(projectConfig.review?.pathInstructions ?? []),
+					],
 				},
 				suppressions: deduplicateSuppressions([
 					...(globalConfig?.suppressions ?? []),
@@ -353,6 +375,7 @@ export async function loadEffectiveConfig(
 					.filter(([k]) => k === "test" || k === "lint"),
 			)
 		: undefined;
+	const cleanedReview = cleanReviewPolicy(config.review);
 
 	return {
 		config: {
@@ -373,6 +396,7 @@ export async function loadEffectiveConfig(
 				: {}),
 			ignorePatterns: cleanedIgnorePatterns,
 			commands: cleanedCommands,
+			review: cleanedReview,
 		},
 		warnings,
 	};
@@ -380,6 +404,41 @@ export async function loadEffectiveConfig(
 
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
+}
+
+function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
+	if (!isPlainObject(value)) return undefined;
+	const rawInstructions = value.pathInstructions;
+	if (!Array.isArray(rawInstructions)) return {};
+
+	const pathInstructions: ReviewPathInstruction[] = [];
+	for (const raw of rawInstructions) {
+		if (!isPlainObject(raw)) continue;
+		if (!isNonEmptyString(raw.glob) || !isNonEmptyString(raw.instruction)) {
+			continue;
+		}
+		const lenses = Array.isArray(raw.lenses)
+			? raw.lenses.filter(isReviewLens)
+			: undefined;
+		pathInstructions.push({
+			glob: raw.glob,
+			instruction: raw.instruction,
+			...(lenses && lenses.length > 0 ? { lenses } : {}),
+		});
+	}
+	return { pathInstructions };
+}
+
+function isReviewLens(value: unknown): value is ReviewLens {
+	return (
+		value === "simplicity" ||
+		value === "deduplication" ||
+		value === "clarity" ||
+		value === "resilience" ||
+		value === "architecture" ||
+		value === "tests" ||
+		value === "security"
+	);
 }
 async function loadConfigFile(
 	path: string,

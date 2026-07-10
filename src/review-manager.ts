@@ -263,6 +263,7 @@ export class ReviewManager {
 			lenses?: ReviewLens[];
 			activeConstraints?: string;
 			commands?: { test?: string; lint?: string };
+			pathInstructions?: readonly import("./config.js").ReviewPathInstruction[];
 			/** Review mode (e.g. "pr", "full") — drives the posture context block. */
 			mode?: string;
 			/** Human-readable scope label injected into the posture block. */
@@ -290,6 +291,7 @@ export class ReviewManager {
 			projectIndex,
 			activeConstraints: options.activeConstraints,
 			commands: options.commands,
+			pathInstructions: options.pathInstructions,
 			mode: options.mode,
 			scopeLabel: options.scopeLabel,
 		});
@@ -751,6 +753,7 @@ export class ReviewManager {
 				id: string;
 			}>;
 			commands?: { test?: string; lint?: string };
+			pathInstructions?: readonly import("./config.js").ReviewPathInstruction[];
 			/**
 			 * Active risk-targeting constraints rendered into the lens
 			 * system prompt. Built by `buildActiveConstraints` from the
@@ -785,6 +788,7 @@ export class ReviewManager {
 				model: options.model,
 				lenses: options.lenses,
 				commands: options.commands,
+				pathInstructions: options.pathInstructions,
 				activeConstraints: options.activeConstraints,
 				mode: options.target?.mode,
 				scopeLabel: options.target?.label,

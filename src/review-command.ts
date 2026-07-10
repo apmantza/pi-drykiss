@@ -285,6 +285,7 @@ export async function executeDrykissAutoreviewTool(
 			severityOverrides: effectiveConfig.riskTargeting?.severity,
 			ignorePatterns: effectiveConfig.riskTargeting?.ignore,
 			suppressions,
+			pathInstructions: effectiveConfig.review?.pathInstructions,
 			activeConstraints,
 			commands: effectiveConfig.commands,
 			validate: params.validate ?? effectiveConfig.validate ?? false,

@@ -345,6 +345,31 @@ describe("buildReviewPrompts", () => {
 		expect(prompts[0].userPrompt).toContain("Prefer small focused changes.");
 	});
 
+	it("applies matching path instructions only to their configured lens", async () => {
+		const prompts = await buildReviewPrompts(
+			"/cwd",
+			mockFiles,
+			mockDiffs,
+			"all",
+			{
+				pathInstructions: [
+					{
+						glob: "src/**",
+						lenses: ["security"],
+						instruction: "Verify authorization boundaries.",
+					},
+				],
+			},
+		);
+
+		expect(
+			prompts.find((prompt) => prompt.lens === "security")?.userPrompt,
+		).toContain("Verify authorization boundaries.");
+		expect(
+			prompts.find((prompt) => prompt.lens === "clarity")?.userPrompt,
+		).not.toContain("Verify authorization boundaries.");
+	});
+
 	it("automatically loads project review guidelines from the filesystem", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
 		try {
@@ -488,7 +513,7 @@ describe("loadProjectReviewGuidelines", () => {
 
 	it("warns and returns null when a guidelines path cannot be read", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "drykiss-guidelines-"));
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const warn = vi.spyOn(console, "error").mockImplementation(() => undefined);
 		try {
 			await mkdir(join(dir, ".pi", "drykiss", "review-guidelines.md"), {
 				recursive: true,
@@ -496,7 +521,7 @@ describe("loadProjectReviewGuidelines", () => {
 
 			await expect(loadProjectReviewGuidelines(dir)).resolves.toBeNull();
 			expect(warn).toHaveBeenCalledWith(
-				expect.stringContaining("Could not read review guidelines"),
+				expect.stringContaining("Could not read review policy"),
 			);
 		} finally {
 			warn.mockRestore();
