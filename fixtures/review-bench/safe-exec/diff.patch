@@ -1,0 +1,25 @@
+diff --git a/app.js b/app.js
+index 4db2c3e..c9f76ad 100644
+--- a/app.js
++++ b/app.js
+@@ -1,7 +1,23 @@
++import { execFile } from "node:child_process";
++import { promisify } from "node:util";
++
++const execFileAsync = promisify(execFile);
++
++function validRepoName(name) {
++  return /^[A-Za-z0-9._-]+$/.test(name);
++}
++
++export function repoProbe(repoName) {
++  if (!validRepoName(repoName)) throw new Error("invalid repo name");
++  return execFileAsync(process.execPath, ["--version"], {
++    cwd: `repos/${repoName}`,
++    encoding: "utf8"
++  });
++}
++
+ export function publicUser(user) {
+   return { id: user.id, name: user.name };
+ }

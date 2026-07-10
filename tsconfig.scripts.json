@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "declaration": false
+  },
+  "include": ["scripts/review-bench.ts", "src/review-bench.ts"],
+  "exclude": ["node_modules", "dist"]
+}

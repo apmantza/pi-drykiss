@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "safe-exec",
+  "title": "Validated repository probe using execFile",
+  "diffFile": "diff.patch",
+  "contextFile": "app.js",
+  "scopePaths": ["app.js"],
+  "expectedFindings": [],
+  "allowedNonFindings": [
+    {
+      "path": "app.js",
+      "lineStart": 10,
+      "lineEnd": 18,
+      "summaryIncludes": "execFile"
+    }
+  ],
+  "knownFalsePositiveTraps": [
+    "The patch invokes a process, but uses execFile with a fixed executable and validated path component.",
+    "Password-adjacent state is represented only by hasPassword; no secret is returned."
+  ],
+  "materiality": "clean"
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "command-injection",
+  "title": "Shell command built from an upload name",
+  "diffFile": "diff.patch",
+  "contextFile": "app.js",
+  "scopePaths": ["app.js"],
+  "expectedFindings": [
+    {
+      "path": "app.js",
+      "lineStart": 9,
+      "lineEnd": 9,
+      "riskCode": "S1",
+      "minSeverity": "high",
+      "summaryIncludes": "command"
+    }
+  ],
+  "allowedNonFindings": [],
+  "knownFalsePositiveTraps": [
+    "The function is intentionally named deleteUpload; the issue is interpolation into execSync, not deletion itself."
+  ],
+  "materiality": "must-find"
+}

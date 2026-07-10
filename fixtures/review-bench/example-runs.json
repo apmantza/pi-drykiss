@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "fixtureId": "command-injection",
+      "findings": [
+        {
+          "file": "app.js",
+          "line": 9,
+          "severity": "high",
+          "riskCode": "S1",
+          "summary": "Command injection through the shell command"
+        }
+      ],
+      "calls": 9,
+      "estimatedTokens": 12000,
+      "elapsedMs": 42000
+    },
+    {
+      "fixtureId": "safe-exec",
+      "findings": []
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+diff --git a/app.js b/app.js
+index 4db2c3e..cd719a7 100644
+--- a/app.js
++++ b/app.js
+@@ -1,7 +1,15 @@
++import { execSync } from "node:child_process";
++
+ export function uploadPath(name) {
+-  return `uploads/${name.replaceAll("/", "")}`;
++  return `uploads/${name}`;
++}
++
++export function deleteUpload(name) {
++  try {
++    return execSync(`rm -rf uploads/${name}`);
++  } catch (error) {
++    throw error;
++  }
+ }
+ export function publicUser(user) {

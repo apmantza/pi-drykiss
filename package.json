@@ -28,6 +28,8 @@
   "files": [
     "index.ts",
     "src",
+    "scripts/review-bench.ts",
+    "fixtures/review-bench",
     "!src/**/*.test.ts",
     "README.md",
     "LICENSE"
@@ -38,9 +40,10 @@
     ]
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "test": "vitest run",
     "lint": "eslint src/",
+    "review:bench": "tsx scripts/review-bench.ts",
     "check:no-prompt-literals": "tsx scripts/check-no-prompt-literals.ts",
     "check:audit": "npm audit --audit-level=high --omit=dev",
     "check": "vitest run && tsc --noEmit && npm run check:audit && tsx scripts/check-no-prompt-literals.ts"
