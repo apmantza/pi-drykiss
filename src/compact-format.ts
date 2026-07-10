@@ -17,10 +17,9 @@
  *     truncated to keep the line scannable; the full text is
  *     available in the structured `ReviewResult.findings` array
  *     (passed via `details`).
- *   - Missing fields are omitted from the line, never printed
- *     as `undefined` or empty placeholders. A finding without a
- *     line number drops the `:line` segment; one without a
- *     source drops the `:symbol` segment.
+ *   - Missing line and source fields use a `-` placeholder, never
+ *     `undefined` or an empty segment. This keeps each line in a
+ *     fixed, scannable column layout.
  *   - Severity is lowercased and shortened (`critical` → `crit`,
  *     `medium` → `med`, `nit` → `nit`) so the column is
  *     width-predictable. The compact format is for human/agent

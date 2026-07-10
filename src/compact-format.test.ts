@@ -140,6 +140,8 @@ describe("formatReviewResultCompact", () => {
 	it("produces a header line with verdict and counts", () => {
 		const text = formatReviewResultCompact(reviewResult());
 		expect(text).toMatch(/^DRYKISS review complete /m);
+		expect(text).toContain("review status: done");
+		expect(text).toContain("code risk: comments");
 		expect(text).toContain("verdict: Request changes");
 		expect(text).toContain(
 			"findings: 1 (0 critical, 0 high, 1 medium, 0 low, 0 nit)",
@@ -274,6 +276,16 @@ describe("formatReviewResultCompact", () => {
 		expect(text).toContain("✅ quality gate: pass");
 	});
 
+	it("falls back to health-score gating for legacy results", () => {
+		const legacyResult = {
+			...reviewResult({ healthScore: 50 }),
+			qualityGate: undefined,
+		} as unknown as ReviewResult;
+
+		const text = formatReviewResultCompact(legacyResult);
+		expect(text).toContain("⛔ quality gate: FAIL");
+	});
+
 	it("shows WARN for validation-degraded reviews", () => {
 		const text = formatReviewResultCompact(
 			reviewResult({
@@ -320,10 +332,22 @@ describe("formatReviewResultCompact", () => {
 		expect(text).toContain("report: /home/user/review.json");
 	});
 
-	it("includes errors when present", () => {
+	it("renders execution errors separately from code risk", () => {
 		const text = formatReviewResultCompact(
-			reviewResult({ errors: ["lens security failed"] }),
+			reviewResult({
+				errors: ["lens security failed"],
+				reviewStatus: "error",
+				codeRisk: "clean",
+				qualityGate: {
+					status: "fail",
+					threshold: 70,
+					score: 95,
+					reasons: ["review execution failed"],
+				},
+			}),
 		);
+		expect(text).toContain("review status: error");
+		expect(text).toContain("code risk: clean");
 		expect(text).toContain("errors: lens security failed");
 	});
 

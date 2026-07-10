@@ -258,6 +258,7 @@ describe("buildReviewResult", () => {
 		expect(result.healthScore).toBe(100);
 		expect(result.reviewStatus).toBe("validation-degraded");
 		expect(result.codeRisk).toBe("clean");
+		expect(result.verdict).toBe("Approve");
 		expect(result.qualityGate.status).toBe("warn");
 		// The dropped findings are surfaced via validationIssues so the
 		// user can see what went wrong even though no findings made it
@@ -290,6 +291,11 @@ describe("buildReviewResult", () => {
 		);
 
 		expect(result.clean).toBe(false);
+		expect(result.reviewStatus).toBe("done");
+		expect(result.codeRisk).toBe("request-changes");
+		expect(result.verdict).toBe("Request changes");
+		expect(result.qualityGate.status).toBe("fail");
+		expect(result.verdictSource).toBe("deterministic");
 		expect(result.counts).toMatchObject({ total: 2, critical: 1, low: 1 });
 		expect(result.findings).toHaveLength(2);
 	});
@@ -316,8 +322,11 @@ describe("buildReviewResult", () => {
 		expect(result.findings).toEqual([]);
 		expect(result.counts.total).toBe(0);
 		expect(result.healthScore).toBe(100);
+		expect(result.reviewStatus).toBe("done");
 		expect(result.codeRisk).toBe("clean");
 		expect(result.verdict).toBe("Approve");
+		expect(result.qualityGate.status).toBe("pass");
+		expect(result.verdictSource).toBe("deterministic");
 		expect(result.clean).toBe(true);
 		expect(result.summary).toContain(
 			"dropped 1 finding(s) matching ignore patterns",
@@ -355,6 +364,7 @@ describe("buildReviewResult", () => {
 		expect(result.clean).toBe(false);
 		expect(result.reviewStatus).toBe("error");
 		expect(result.codeRisk).toBe("clean");
+		expect(result.verdict).toBe("Approve");
 		expect(result.qualityGate.status).toBe("fail");
 		expect(result.errors).toEqual([
 			"security: quota",
