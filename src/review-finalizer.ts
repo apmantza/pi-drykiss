@@ -1,5 +1,4 @@
 import type { Finding, SynthesisResult } from "./types.js";
-import type { ReviewValidationIssue } from "./review-result.js";
 
 export type ReviewStatus =
 	| "done"
@@ -34,7 +33,7 @@ export interface ReviewOutcome {
 export function finalizeReviewOutcome(options: {
 	findings: readonly Finding[];
 	errors: readonly string[];
-	validationIssues: readonly ReviewValidationIssue[];
+	validationIssues: readonly unknown[];
 	healthScore: number;
 	qualityGateThreshold?: number;
 }): ReviewOutcome {
@@ -64,7 +63,7 @@ export function finalizeReviewOutcome(options: {
 
 function getReviewStatus(
 	errors: readonly string[],
-	validationIssues: readonly ReviewValidationIssue[],
+	validationIssues: readonly unknown[],
 ): ReviewStatus {
 	if (errors.length > 0) return "error";
 	if (validationIssues.length > 0) return "validation-degraded";
@@ -79,7 +78,8 @@ function getCodeRisk(findings: readonly Finding[]): CodeRisk {
 	if (
 		blocking.some(
 			(finding) =>
-				finding.lens === "security" || finding.source?.includes("security"),
+				finding.lens === "security" ||
+				finding.source?.split("+").includes("security"),
 		)
 	) {
 		return "security-review";

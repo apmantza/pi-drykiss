@@ -14,7 +14,7 @@ import { toErrorMessage } from "./error-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
-import type { ReviewLens } from "./types.js";
+import { LENS_NAMES, type ReviewLens } from "./types.js";
 import type { FindingBudget } from "./finding-budget.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
@@ -486,13 +486,8 @@ function cleanPathFilters(value: unknown): ReviewPathFilters | undefined {
 
 function isReviewLens(value: unknown): value is ReviewLens {
 	return (
-		value === "simplicity" ||
-		value === "deduplication" ||
-		value === "clarity" ||
-		value === "resilience" ||
-		value === "architecture" ||
-		value === "tests" ||
-		value === "security"
+		typeof value === "string" &&
+		LENS_NAMES.includes(value as Exclude<ReviewLens, "all">)
 	);
 }
 async function loadConfigFile(

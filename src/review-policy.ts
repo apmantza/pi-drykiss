@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { ReviewPathInstruction } from "./config.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import type { ChangedFile, ReviewLens } from "./types.js";
-import { LOG_PREFIX } from "./constants.js";
+import { getNodeErrorCode, LOG_PREFIX } from "./constants.js";
 
 export interface LoadedReviewPolicy {
 	readonly markdown: string | null;
@@ -28,7 +28,7 @@ export async function loadProjectReviewPolicy(
 			const markdown = content.trim();
 			if (markdown) return { markdown, sourcePath: path };
 		} catch (err) {
-			if (getErrorCode(err) !== "ENOENT") {
+			if (getNodeErrorCode(err) !== "ENOENT") {
 				console.error(
 					`${LOG_PREFIX} Could not read review policy ${path}: ${err instanceof Error ? err.message : String(err)}`,
 				);
@@ -36,12 +36,6 @@ export async function loadProjectReviewPolicy(
 		}
 	}
 	return { markdown: null };
-}
-
-function getErrorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String(error.code)
-		: undefined;
 }
 
 export function selectPathInstructions(
