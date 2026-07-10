@@ -744,6 +744,7 @@ export class ReviewManager {
 			onProgress?: (job: ReviewJob) => void;
 			progressIntervalMs?: number;
 			severityOverrides?: readonly import("./config.js").SeverityOverrideRule[];
+			ignorePatterns?: readonly string[];
 			suppressions?: ReadonlyArray<{
 				riskCode: string;
 				pattern: string;
@@ -767,6 +768,8 @@ export class ReviewManager {
 			 * cost/latency budget.
 			 */
 			validate?: boolean;
+			/** Configured minimum health score for a passing quality gate. */
+			qualityGateThreshold?: number;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -803,9 +806,11 @@ export class ReviewManager {
 		let result = buildReviewResult(job, {
 			target: options.target,
 			severityOverrides: options.severityOverrides,
+			ignorePatterns: options.ignorePatterns,
 			suppressions: options.suppressions,
 			rejections,
 			prevScore: await computePrevScore(options.target?.label),
+			qualityGateThreshold: options.qualityGateThreshold,
 		});
 		// Optional validator stage — opt-in via `options.validate`.
 		// Runs an adversarial LLM call that tries to falsify each

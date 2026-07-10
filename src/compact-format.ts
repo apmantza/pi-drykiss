@@ -146,13 +146,15 @@ export function formatReviewResultCompact(
 		const diff = result.healthScore - result.prevScore;
 		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${diff >= 0 ? "+" : ""}${diff})`;
 	}
-	const qualityGate =
-		result.healthScore < threshold
-			? "⛔ quality gate: FAIL"
-			: "✅ quality gate: pass";
+	const qualityGate = formatQualityGate(
+		result.qualityGate?.status ??
+			(result.healthScore < threshold ? "fail" : "pass"),
+	);
 
 	const lines: string[] = [
 		`DRYKISS ${result.clean ? "clean" : "review complete"} — ${result.target?.label ?? "scope"}`,
+		`review status: ${result.reviewStatus ?? result.status}`,
+		`code risk: ${result.codeRisk ?? "unknown"}`,
 		`verdict: ${result.verdict}`,
 		findingsLine,
 		scoreLine,
@@ -205,4 +207,16 @@ export function formatReviewResultCompact(
 	}
 
 	return lines.join("\n");
+}
+
+function formatQualityGate(status: "pass" | "warn" | "fail"): string {
+	switch (status) {
+		case "pass":
+			return "✅ quality gate: pass";
+		case "warn":
+			return "⚠️ quality gate: WARN";
+		case "fail":
+		default:
+			return "⛔ quality gate: FAIL";
+	}
 }

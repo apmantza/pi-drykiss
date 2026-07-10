@@ -24,7 +24,11 @@ function reviewResult(overrides: Partial<ReviewResult> = {}): ReviewResult {
 		jobId: "job-1",
 		clean: false,
 		status: "done",
+		reviewStatus: "done",
+		codeRisk: "comments",
+		qualityGate: { status: "pass", threshold: 70, score: 95, reasons: [] },
 		verdict: "Request changes",
+		verdictSource: "deterministic",
 		files: ["src/a.ts"],
 		counts: {
 			total: 1,
@@ -246,17 +250,46 @@ describe("formatReviewResultCompact", () => {
 	});
 
 	it("shows FAIL when health score is below the quality gate threshold", () => {
-		const text = formatReviewResultCompact(reviewResult({ healthScore: 50 }), {
-			qualityGateThreshold: 70,
-		});
+		const text = formatReviewResultCompact(
+			reviewResult({
+				healthScore: 50,
+				qualityGate: {
+					status: "fail",
+					threshold: 70,
+					score: 50,
+					reasons: ["health score is below the configured threshold (70)"],
+				},
+			}),
+		);
 		expect(text).toContain("⛔ quality gate: FAIL");
 	});
 
 	it("shows pass when health score is at or above the threshold", () => {
-		const text = formatReviewResultCompact(reviewResult({ healthScore: 90 }), {
-			qualityGateThreshold: 70,
-		});
+		const text = formatReviewResultCompact(
+			reviewResult({
+				healthScore: 90,
+				qualityGate: { status: "pass", threshold: 70, score: 90, reasons: [] },
+			}),
+		);
 		expect(text).toContain("✅ quality gate: pass");
+	});
+
+	it("shows WARN for validation-degraded reviews", () => {
+		const text = formatReviewResultCompact(
+			reviewResult({
+				reviewStatus: "validation-degraded",
+				codeRisk: "clean",
+				qualityGate: {
+					status: "warn",
+					threshold: 70,
+					score: 100,
+					reasons: ["one or more synthesized findings failed validation"],
+				},
+			}),
+		);
+		expect(text).toContain("review status: validation-degraded");
+		expect(text).toContain("code risk: clean");
+		expect(text).toContain("⚠️ quality gate: WARN");
 	});
 
 	it("includes a trend line when prevScore is set", () => {

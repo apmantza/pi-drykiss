@@ -18,7 +18,7 @@ import {
 } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
-import { filterIgnored } from "./review-result.js";
+import { finalizeReviewOutcome } from "./review-finalizer.js";
 import { formatReviewResultCompact } from "./compact-format.js";
 import { LOG_PREFIX } from "./constants.js";
 
@@ -283,10 +283,12 @@ export async function executeDrykissAutoreviewTool(
 				metadata: cappedScope.metadata,
 			},
 			severityOverrides: effectiveConfig.riskTargeting?.severity,
+			ignorePatterns: effectiveConfig.riskTargeting?.ignore,
 			suppressions,
 			activeConstraints,
 			commands: effectiveConfig.commands,
 			validate: params.validate ?? effectiveConfig.validate ?? false,
+			qualityGateThreshold: effectiveConfig.qualityGate,
 			onProgress: onUpdate
 				? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
 				: undefined,
@@ -294,40 +296,9 @@ export async function executeDrykissAutoreviewTool(
 		signal,
 	);
 
-	// Apply ignore filter (Phase 2)
-	const ignorePatterns = effectiveConfig.riskTargeting?.ignore;
-	const filtered = ignorePatterns
-		? filterIgnored(result.findings, ignorePatterns)
-		: undefined;
-	const finalFindings = filtered?.findings ?? result.findings;
-	const droppedCount = filtered?.dropped ?? 0;
-	const finalSummary =
-		droppedCount > 0
-			? `${result.summary}\n(DRYKISS dropped ${droppedCount} finding(s) matching ignore patterns.)`
-			: result.summary;
-
-	const finalResult: ReviewResult =
-		droppedCount > 0
-			? {
-					...result,
-					findings: finalFindings,
-					summary: finalSummary,
-					counts: {
-						total: finalFindings.length,
-						critical: finalFindings.filter((f) => f.severity === "critical")
-							.length,
-						high: finalFindings.filter((f) => f.severity === "high").length,
-						medium: finalFindings.filter((f) => f.severity === "medium").length,
-						low: finalFindings.filter((f) => f.severity === "low").length,
-						nit: finalFindings.filter((f) => f.severity === "nit").length,
-						suppressed: result.counts.suppressed ?? 0,
-						previouslyRejected: result.counts.previouslyRejected ?? 0,
-						validatorReal: result.counts.validatorReal ?? 0,
-						validatorFalsePositive: result.counts.validatorFalsePositive ?? 0,
-						validatorUnverified: result.counts.validatorUnverified ?? 0,
-					},
-				}
-			: result;
+	// Ignore filtering runs inside buildReviewResult, before counts, verdict,
+	// score, and persistence are derived. Do not post-process the result here.
+	const finalResult: ReviewResult = result;
 
 	try {
 		manager.recordFinalResult(finalResult);
@@ -514,13 +485,20 @@ function formatReviewResultForTool(
 		const sign = diff >= 0 ? "+" : "";
 		trendLine = `trend: ${result.prevScore} → ${result.healthScore} (${sign}${diff})`;
 	}
-	const qualityGate =
-		result.healthScore < threshold
-			? "⛔ quality gate: FAIL"
-			: "✅ quality gate: pass";
+	const qualityGateStatus =
+		result.qualityGate?.status ??
+		(result.healthScore < threshold ? "fail" : "pass");
+	let qualityGate = "⛔ quality gate: FAIL";
+	if (qualityGateStatus === "pass") {
+		qualityGate = "✅ quality gate: pass";
+	} else if (qualityGateStatus === "warn") {
+		qualityGate = "⚠️ quality gate: WARN";
+	}
 	const lines = [
 		`DRYKISS autoreview ${result.clean ? "clean" : "completed with findings"}`,
 		`target: ${result.target?.label ?? "unknown"}`,
+		`review status: ${result.reviewStatus ?? result.status}`,
+		`code risk: ${result.codeRisk ?? "unknown"}`,
 		`verdict: ${result.verdict}`,
 		findingsLine,
 		scoreLine,
@@ -714,20 +692,21 @@ async function runDeepAutoreview(
 			scoreBreakdown.warning * 5 -
 			scoreBreakdown.suggestion * 1,
 	);
-	let verdict: "Approve" | "Request changes" | "Needs security review";
-	if (critical > 0) {
-		verdict = "Request changes";
-	} else if (high > 0) {
-		verdict = "Request changes";
-	} else {
-		verdict = "Approve";
-	}
-
+	const outcome = finalizeReviewOutcome({
+		findings,
+		errors: [],
+		validationIssues: [],
+		healthScore,
+	});
 	const reviewResult: ReviewResult = {
 		jobId: "deep",
-		clean: verdict === "Approve" && findings.length === 0,
+		clean: outcome.clean,
 		status: "done",
-		verdict,
+		reviewStatus: outcome.reviewStatus,
+		codeRisk: outcome.codeRisk,
+		qualityGate: outcome.qualityGate,
+		verdict: outcome.verdict,
+		verdictSource: outcome.verdictSource,
 		files: scope.files.map((f) => f.path),
 		counts: {
 			total: findings.length,

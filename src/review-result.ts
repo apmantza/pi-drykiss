@@ -1,10 +1,16 @@
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
-import { computeHealthScore, shouldApproveEmptyReview } from "./types.js";
+import { computeHealthScore } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
 import { compileGlobMatchers, matchesAnyGlob } from "./glob-utils.js";
 import { LOG_PREFIX, SEVERITY_VALUES } from "./constants.js";
 import { applyRejections, type RejectionRecord } from "./rejections.js";
+import {
+	finalizeReviewOutcome,
+	type CodeRisk,
+	type ReviewQualityGate,
+	type ReviewStatus,
+} from "./review-finalizer.js";
 
 const REQUIRED_FINDING_STRING_FIELDS = [
 	"category",
@@ -62,8 +68,16 @@ export interface ReviewValidationIssue {
 export interface ReviewResult {
 	readonly jobId: string;
 	readonly clean: boolean;
+	/** Legacy execution status retained for persisted-review compatibility. */
 	readonly status: ReviewJob["overallStatus"];
+	/** Completion quality, separate from risk in the reviewed code. */
+	readonly reviewStatus: ReviewStatus;
+	/** Risk derived from active, normalized findings. */
+	readonly codeRisk: CodeRisk;
+	/** Configured quality-gate evaluation with its explicit reasons. */
+	readonly qualityGate: ReviewQualityGate;
 	readonly verdict: SynthesisResult["verdict"];
+	readonly verdictSource: "deterministic";
 	readonly target?: ReviewResultTarget;
 	readonly reportPath?: string;
 	readonly files: string[];
@@ -80,6 +94,8 @@ export interface ReviewResult {
 	};
 	/** Health score from the previous run in the same mode (for trend delta). */
 	readonly prevScore?: number;
+	/** Configured minimum health score for a passing quality gate. */
+	readonly qualityGateThreshold?: number;
 	/**
 	 * Mermaid graph TD string showing file-level dependency structure.
 	 * Generated during review from the project index. Optional for
@@ -96,6 +112,11 @@ export interface BuildReviewResultOptions {
 	 * This runs after `validateFindings` but before `countFindings`.
 	 */
 	readonly severityOverrides?: readonly SeverityOverrideRule[];
+	/**
+	 * Findings in these paths are removed before suppression, counting, and
+	 * deterministic outcome derivation so every visible result field agrees.
+	 */
+	readonly ignorePatterns?: readonly string[];
 	/**
 	 * Suppressions to apply (Phase 3). Suppressed findings get
 	 * `severity: "nit"` and `_suppressed: true`. They are excluded
@@ -116,6 +137,8 @@ export interface BuildReviewResultOptions {
 	readonly rejections?: readonly RejectionRecord[];
 	/** Health score from the previous run in the same mode (for trend delta). */
 	readonly prevScore?: number;
+	/** Configured minimum health score for a passing quality gate. */
+	readonly qualityGateThreshold?: number;
 }
 
 const SEVERITY_SET = SEVERITY_VALUES;
@@ -130,9 +153,12 @@ export function buildReviewResult(
 	const overridden = options.severityOverrides
 		? applySeverityOverrides(validation.findings, options.severityOverrides)
 		: validation.findings;
+	const ignored = options.ignorePatterns
+		? filterIgnored(overridden, options.ignorePatterns)
+		: { findings: overridden, dropped: 0 };
 	const { suppressed, active } = options.suppressions
-		? applySuppressions(overridden, options.suppressions)
-		: { suppressed: [], active: overridden };
+		? applySuppressions(ignored.findings, options.suppressions)
+		: { suppressed: [], active: ignored.findings };
 	// applyRejections runs AFTER suppressions so a suppressed+rejected
 	// finding is just suppressed (the rejection is moot once it's gone).
 	// A rejection only downranks an *active* finding, never a suppressed
@@ -152,54 +178,27 @@ export function buildReviewResult(
 		previouslyRejected.length,
 	);
 	const errors = collectErrors(job);
-	// A failed review (any lens errored or synthesis errored) must
-	// never look "clean" — that misleads users into thinking the
-	// review ran successfully and produced no findings. A failed
-	// review has a non-empty `errors` array, so this condition
-	// short-circuits correctly even with empty findings and
-	// "Request changes" / default verdict. The second guard
-	// catches the case where synthesis returned findings but the
-	// validator dropped them all (e.g. all findings missing the
-	// required `suggestion` field). The dropped findings are
-	// surfaced via `validationIssues`, so the user can see them,
-	// but the review should not look pristine in that case.
-	const droppedByValidation = validation.issues.length > 0;
-	// Safety net: if the review has no actionable findings, no lens errors,
-	// and no validation drops, the verdict must be "Approve" regardless of
-	// what a confused synthesizer emitted. This prevents the UI from showing
-	// "Request changes" or "Needs security review" alongside an empty
-	// findings list and a perfect health score.
-	const verdict = shouldApproveEmptyReview(
-		activeFresh.length,
-		errors.length,
-		validation.issues.length,
-	)
-		? "Approve"
-		: (synthesis?.verdict ?? "Request changes");
-	const status = job.overallStatus;
-	const clean =
-		status === "done" &&
-		errors.length === 0 &&
-		activeFresh.length === 0 &&
-		verdict === "Approve" &&
-		!droppedByValidation;
-	// Health score: failed reviews must NOT score 100 just because
-	// there were no findings to deduct from. A failed review is
-	// missing evidence, not clean — score it as the worst possible
-	// (0) so it visibly fails the quality gate and the color band
-	// shows red instead of misleading green. Also drop the score
-	// when validation dropped findings, since dropping findings is
-	// a data-quality issue that should not produce a perfect score.
-	const reviewIncomplete = errors.length > 0 || droppedByValidation;
-	const hs = reviewIncomplete
-		? { score: 0, breakdown: { critical: 1, warning: 0, suggestion: 0 } }
-		: computeHealthScore(activeFresh);
+	// Health reflects only active code findings. Review failures and malformed
+	// synthesis output are represented independently by reviewStatus and the
+	// quality gate instead of masquerading as critical code risk.
+	const hs = computeHealthScore(activeFresh);
+	const outcome = finalizeReviewOutcome({
+		findings: activeFresh,
+		errors,
+		validationIssues: validation.issues,
+		healthScore: hs.score,
+		qualityGateThreshold: options.qualityGateThreshold,
+	});
 
 	return {
 		jobId: job.id,
-		clean,
-		status,
-		verdict,
+		clean: outcome.clean,
+		status: job.overallStatus,
+		reviewStatus: outcome.reviewStatus,
+		codeRisk: outcome.codeRisk,
+		qualityGate: outcome.qualityGate,
+		verdict: outcome.verdict,
+		verdictSource: outcome.verdictSource,
 		...(options.target ? { target: options.target } : {}),
 		...(job.reviewPath ? { reportPath: job.reviewPath } : {}),
 		files: [...job.files],
@@ -208,13 +207,16 @@ export function buildReviewResult(
 		// The last bucket is the "downrank" — same visual treatment as
 		// suppressed (collapsed under its own section in the widget).
 		findings: [...activeFresh, ...suppressed, ...previouslyRejected],
-		summary: synthesis?.summary ?? "Review did not produce a synthesis result.",
+		summary: formatSummary(synthesis?.summary, ignored.dropped),
 		errors,
 		validationIssues: validation.issues,
 		healthScore: hs.score,
 		scoreBreakdown: hs.breakdown,
 		...(options.prevScore !== null && options.prevScore !== undefined
 			? { prevScore: options.prevScore }
+			: {}),
+		...(options.qualityGateThreshold !== undefined
+			? { qualityGateThreshold: options.qualityGateThreshold }
 			: {}),
 		...(synthesis?.mermaidGraph
 			? { mermaidGraph: synthesis.mermaidGraph }
@@ -308,6 +310,16 @@ function countFindings(
 		// Validator counts are only populated when the validator stage runs.
 		// Leaving them undefined makes it clear the stage did not run.
 	};
+}
+
+function formatSummary(
+	summary: string | undefined,
+	ignoredCount: number,
+): string {
+	const base = summary ?? "Review did not produce a synthesis result.";
+	return ignoredCount > 0
+		? `${base}\n(DRYKISS dropped ${ignoredCount} finding(s) matching ignore patterns.)`
+		: base;
 }
 
 function collectErrors(job: ReviewJob): string[] {

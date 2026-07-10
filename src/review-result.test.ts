@@ -229,14 +229,11 @@ describe("buildReviewResult", () => {
 		expect(result.clean).toBe(true);
 	});
 
-	it("marks the result non-clean + score 0 when validation drops every finding", () => {
-		// Regression guard: previously, when the LLM produced findings
-		// that the validator dropped (e.g. all missing the required
-		// `suggestion` field), the active findings array ended up
-		// empty while validationIssues had entries. The review then
-		// scored 100/100 and looked pristine even though the
-		// synthesis output was malformed. Force non-clean + score 0
-		// in that case so the validation issue is visible.
+	it("marks malformed synthesis as validation-degraded without falsifying code health", () => {
+		// The review must not look clean when malformed findings are dropped,
+		// but a malformed LLM response is not evidence of a code defect. Keep
+		// health tied to active code findings and expose the infrastructure
+		// problem through reviewStatus and the quality gate.
 		const result = buildReviewResult(
 			job({
 				synthesisResult: {
@@ -258,7 +255,10 @@ describe("buildReviewResult", () => {
 		);
 
 		expect(result.clean).toBe(false);
-		expect(result.healthScore).toBe(0);
+		expect(result.healthScore).toBe(100);
+		expect(result.reviewStatus).toBe("validation-degraded");
+		expect(result.codeRisk).toBe("clean");
+		expect(result.qualityGate.status).toBe("warn");
 		// The dropped findings are surfaced via validationIssues so the
 		// user can see what went wrong even though no findings made it
 		// into the active list.
@@ -294,6 +294,36 @@ describe("buildReviewResult", () => {
 		expect(result.findings).toHaveLength(2);
 	});
 
+	it("derives all result fields after ignore filtering", () => {
+		const result = buildReviewResult(
+			job({
+				synthesisResult: {
+					findings: [finding({ severity: "critical" })],
+					summary: "One ignored issue.",
+					verdict: "Request changes",
+					criticalCount: 1,
+					highCount: 0,
+					mediumCount: 0,
+					lowCount: 0,
+					nitCount: 0,
+					healthScore: 85,
+					scoreBreakdown: { critical: 1, warning: 0, suggestion: 0 },
+				},
+			}),
+			{ ignorePatterns: ["src/a.ts"] },
+		);
+
+		expect(result.findings).toEqual([]);
+		expect(result.counts.total).toBe(0);
+		expect(result.healthScore).toBe(100);
+		expect(result.codeRisk).toBe("clean");
+		expect(result.verdict).toBe("Approve");
+		expect(result.clean).toBe(true);
+		expect(result.summary).toContain(
+			"dropped 1 finding(s) matching ignore patterns",
+		);
+	});
+
 	it("collects lens and synthesis errors", () => {
 		const base = job({
 			overallStatus: "error",
@@ -323,6 +353,9 @@ describe("buildReviewResult", () => {
 		const result = buildReviewResult(base);
 
 		expect(result.clean).toBe(false);
+		expect(result.reviewStatus).toBe("error");
+		expect(result.codeRisk).toBe("clean");
+		expect(result.qualityGate.status).toBe("fail");
 		expect(result.errors).toEqual([
 			"security: quota",
 			"synthesis: Synthesis failed: boom",
