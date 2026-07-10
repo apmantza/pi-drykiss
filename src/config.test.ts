@@ -275,6 +275,33 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 		]);
 	});
 
+	it("retains only reviewable lens names in path instructions", async () => {
+		vi.mocked(readFile).mockResolvedValue(
+			JSON.stringify({
+				review: {
+					pathInstructions: [
+						{
+							glob: "src/auth/**",
+							instruction: "Check authorization.",
+							lenses: ["security", "docs", "all", "unknown"],
+						},
+					],
+				},
+			}),
+		);
+
+		const result = await loadEffectiveConfig();
+
+		expect(result.warnings).toEqual([]);
+		expect(result.config.review?.pathInstructions).toEqual([
+			{
+				glob: "src/auth/**",
+				instruction: "Check authorization.",
+				lenses: ["security", "docs"],
+			},
+		]);
+	});
+
 	it("deduplicates overlapping global and project suppressions", async () => {
 		vi.mocked(readFile).mockImplementation(async (path) => {
 			const p = String(path).replaceAll(/\\/g, "/");

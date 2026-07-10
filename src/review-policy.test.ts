@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +35,26 @@ describe("loadProjectReviewPolicy", () => {
 				sourcePath: join(dir, ".pi", "drykiss", "REVIEW.md"),
 			});
 		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("logs and skips policy paths that cannot be read", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "drykiss-policy-"));
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			await mkdir(join(dir, ".pi", "drykiss", "REVIEW.md"), {
+				recursive: true,
+			});
+
+			await expect(loadProjectReviewPolicy(dir)).resolves.toEqual({
+				markdown: null,
+			});
+			expect(log).toHaveBeenCalledWith(
+				expect.stringContaining("Could not read review policy"),
+			);
+		} finally {
+			log.mockRestore();
 			await rm(dir, { recursive: true, force: true });
 		}
 	});

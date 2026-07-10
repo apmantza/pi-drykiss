@@ -62,6 +62,21 @@ describe("finalizeReviewOutcome", () => {
 		expect(result.qualityGate.status).toBe("warn");
 	});
 
+	it("fails the gate for validation degradation below the health threshold", () => {
+		const result = finalize({
+			validationIssues: [{ findingIndex: 0, reason: "missing suggestion" }],
+			healthScore: 69,
+		});
+
+		expect(result.qualityGate).toMatchObject({
+			status: "fail",
+			reasons: [
+				"one or more synthesized findings failed validation",
+				"health score is below the configured threshold (70)",
+			],
+		});
+	});
+
 	it("derives request-changes from active blocking findings", () => {
 		const result = finalize({
 			findings: [finding({ severity: "high" })],
@@ -73,6 +88,23 @@ describe("finalizeReviewOutcome", () => {
 		expect(result.qualityGate.status).toBe("fail");
 	});
 
+	it("fails the gate for blocking findings despite validation degradation", () => {
+		const result = finalize({
+			findings: [finding({ severity: "high" })],
+			validationIssues: [{ findingIndex: 1, reason: "missing suggestion" }],
+		});
+
+		expect(result.reviewStatus).toBe("validation-degraded");
+		expect(result.codeRisk).toBe("request-changes");
+		expect(result.qualityGate).toMatchObject({
+			status: "fail",
+			reasons: [
+				"one or more synthesized findings failed validation",
+				"active blocking finding requires changes",
+			],
+		});
+	});
+
 	it("derives security review from a blocking security finding", () => {
 		const result = finalize({
 			findings: [finding({ severity: "critical", lens: "security" })],
@@ -81,6 +113,35 @@ describe("finalizeReviewOutcome", () => {
 
 		expect(result.codeRisk).toBe("security-review");
 		expect(result.verdict).toBe("Needs security review");
+	});
+
+	it("recognizes security as a plus-separated synthesis source", () => {
+		const result = finalize({
+			findings: [
+				finding({ severity: "high", source: "resilience+security+tests" }),
+			],
+		});
+
+		expect(result.codeRisk).toBe("security-review");
+	});
+
+	it("does not infer security risk from a partial or absent source token", () => {
+		const result = finalize({
+			findings: [
+				finding({ severity: "high", source: "security-review" }),
+				finding({ severity: "high", source: undefined }),
+			],
+		});
+
+		expect(result.codeRisk).toBe("request-changes");
+	});
+
+	it("does not infer security risk from a non-blocking source token", () => {
+		const result = finalize({
+			findings: [finding({ severity: "medium", source: "security" })],
+		});
+
+		expect(result.codeRisk).toBe("comments");
 	});
 
 	it("does not block on explicitly ignored findings", () => {

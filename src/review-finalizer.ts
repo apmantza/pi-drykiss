@@ -1,4 +1,7 @@
 import type { Finding, SynthesisResult } from "./types.js";
+import type { ReviewValidationIssue } from "./review-result.js";
+
+const SECURITY_LENS = "security";
 
 export type ReviewStatus =
 	| "done"
@@ -33,7 +36,7 @@ export interface ReviewOutcome {
 export function finalizeReviewOutcome(options: {
 	findings: readonly Finding[];
 	errors: readonly string[];
-	validationIssues: readonly unknown[];
+	validationIssues: readonly ReviewValidationIssue[];
 	healthScore: number;
 	qualityGateThreshold?: number;
 }): ReviewOutcome {
@@ -63,7 +66,7 @@ export function finalizeReviewOutcome(options: {
 
 function getReviewStatus(
 	errors: readonly string[],
-	validationIssues: readonly unknown[],
+	validationIssues: readonly ReviewValidationIssue[],
 ): ReviewStatus {
 	if (errors.length > 0) return "error";
 	if (validationIssues.length > 0) return "validation-degraded";
@@ -75,13 +78,13 @@ function getCodeRisk(findings: readonly Finding[]): CodeRisk {
 	const blocking = actionable.filter(
 		(finding) => finding.severity === "critical" || finding.severity === "high",
 	);
-	if (
-		blocking.some(
-			(finding) =>
-				finding.lens === "security" ||
-				finding.source?.split("+").includes("security"),
-		)
-	) {
+	const hasSecurityFinding = blocking.some((finding) => {
+		const sourceLenses = finding.source?.split("+") ?? [];
+		return (
+			finding.lens === SECURITY_LENS || sourceLenses.includes(SECURITY_LENS)
+		);
+	});
+	if (hasSecurityFinding) {
 		return "security-review";
 	}
 	if (blocking.length > 0) return "request-changes";
@@ -114,12 +117,6 @@ function getQualityGate(options: {
 	}
 	if (options.reviewStatus === "validation-degraded") {
 		reasons.push("one or more synthesized findings failed validation");
-		return {
-			status: "warn",
-			threshold: options.threshold,
-			score: options.healthScore,
-			reasons,
-		};
 	}
 	if (options.healthScore < options.threshold) {
 		reasons.push(
@@ -132,8 +129,17 @@ function getQualityGate(options: {
 		reasons.push("active blocking finding requires changes");
 	}
 
+	const hasBlockingRisk =
+		options.codeRisk === "security-review" ||
+		options.codeRisk === "request-changes";
+	let status: GateStatus = "pass";
+	if (hasBlockingRisk || options.healthScore < options.threshold) {
+		status = "fail";
+	} else if (options.reviewStatus === "validation-degraded") {
+		status = "warn";
+	}
 	return {
-		status: reasons.length > 0 ? "fail" : "pass",
+		status,
 		threshold: options.threshold,
 		score: options.healthScore,
 		reasons,
