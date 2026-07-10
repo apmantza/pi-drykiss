@@ -139,6 +139,12 @@ export function formatReviewResultCompact(
 		? ` (raw synthesis output preserved: ${rawFindingsCount} finding(s) — see validation issues below)`
 		: "";
 	const findingsLine = `findings: ${counts.total} (${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low, ${counts.nit} nit${suppressedNote}${rejectedNote}${validatorNote})${validationNote}`;
+	const omissions = result.omissions;
+	const omissionNote =
+		omissions?.findingBudgetApplied &&
+		(omissions.omittedLowPriorityCount > 0 || omissions.omittedNitCount > 0)
+			? `omitted by budget: ${omissions.omittedLowPriorityCount} low-priority, ${omissions.omittedNitCount} nit`
+			: "";
 	const scoreLine = `health score: ${result.healthScore}/100`;
 	let trendLine = "";
 	if (result.prevScore !== null && result.prevScore !== undefined) {
@@ -159,6 +165,7 @@ export function formatReviewResultCompact(
 		scoreLine,
 	];
 	if (trendLine) lines.push(trendLine);
+	if (omissionNote) lines.push(omissionNote);
 	lines.push(qualityGate);
 
 	// Pull active findings (skip suppressed / previously-rejected —

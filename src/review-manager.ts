@@ -773,6 +773,7 @@ export class ReviewManager {
 			validate?: boolean;
 			/** Configured minimum health score for a passing quality gate. */
 			qualityGateThreshold?: number;
+			findingBudget?: import("./finding-budget.js").FindingBudget;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -815,6 +816,7 @@ export class ReviewManager {
 			rejections,
 			prevScore: await computePrevScore(options.target?.label),
 			qualityGateThreshold: options.qualityGateThreshold,
+			findingBudget: options.findingBudget,
 		});
 		// Optional validator stage — opt-in via `options.validate`.
 		// Runs an adversarial LLM call that tries to falsify each

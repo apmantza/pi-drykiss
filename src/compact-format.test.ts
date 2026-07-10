@@ -251,6 +251,19 @@ describe("formatReviewResultCompact", () => {
 		expect(text).toContain("3 validator-refuted");
 	});
 
+	it("reports findings omitted by an active budget", () => {
+		const text = formatReviewResultCompact(
+			reviewResult({
+				omissions: {
+					findingBudgetApplied: true,
+					omittedLowPriorityCount: 2,
+					omittedNitCount: 1,
+				},
+			}),
+		);
+		expect(text).toContain("omitted by budget: 2 low-priority, 1 nit");
+	});
+
 	it("shows FAIL when health score is below the quality gate threshold", () => {
 		const text = formatReviewResultCompact(
 			reviewResult({

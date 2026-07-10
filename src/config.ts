@@ -453,7 +453,9 @@ function cleanFindingBudget(value: unknown): FindingBudget | undefined {
 	const maxFindings = isNonNegativeInteger(value.maxFindings)
 		? value.maxFindings
 		: undefined;
-	const maxNits = isNonNegativeInteger(value.maxNits) ? value.maxNits : undefined;
+	const maxNits = isNonNegativeInteger(value.maxNits)
+		? value.maxNits
+		: undefined;
 	return maxFindings === undefined && maxNits === undefined
 		? undefined
 		: {
