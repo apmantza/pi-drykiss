@@ -5,6 +5,7 @@ import type { SeverityOverrideRule } from "./config.js";
 import { compileGlobMatchers, matchesAnyGlob } from "./glob-utils.js";
 import { LOG_PREFIX, SEVERITY_VALUES } from "./constants.js";
 import { applyRejections, type RejectionRecord } from "./rejections.js";
+import { applyFindingBudget, type FindingBudget } from "./finding-budget.js";
 import {
 	finalizeReviewOutcome,
 	type CodeRisk,
@@ -78,6 +79,11 @@ export interface ReviewResult {
 	readonly qualityGate: ReviewQualityGate;
 	readonly verdict: SynthesisResult["verdict"];
 	readonly verdictSource: "deterministic";
+	readonly omissions?: {
+		readonly findingBudgetApplied: boolean;
+		readonly omittedLowPriorityCount: number;
+		readonly omittedNitCount: number;
+	};
 	readonly target?: ReviewResultTarget;
 	readonly reportPath?: string;
 	readonly files: string[];
@@ -139,6 +145,8 @@ export interface BuildReviewResultOptions {
 	readonly prevScore?: number;
 	/** Configured minimum health score for a passing quality gate. */
 	readonly qualityGateThreshold?: number;
+	/** Optional deterministic cap applied after suppression/rejection handling. */
+	readonly findingBudget?: FindingBudget;
 }
 
 const SEVERITY_SET = SEVERITY_VALUES;
@@ -172,8 +180,9 @@ export function buildReviewResult(
 	const previouslyRejected = reordered.filter(
 		(f) => (f as Finding & { _previouslyRejected?: true })._previouslyRejected,
 	);
+	const budgeted = applyFindingBudget(activeFresh, options.findingBudget);
 	const counts = countFindings(
-		activeFresh,
+		budgeted.findings,
 		suppressed.length,
 		previouslyRejected.length,
 	);
@@ -181,9 +190,9 @@ export function buildReviewResult(
 	// Health reflects only active code findings. Review failures and malformed
 	// synthesis output are represented independently by reviewStatus and the
 	// quality gate instead of masquerading as critical code risk.
-	const hs = computeHealthScore(activeFresh);
+	const hs = computeHealthScore(budgeted.findings);
 	const outcome = finalizeReviewOutcome({
-		findings: activeFresh,
+		findings: budgeted.findings,
 		errors,
 		validationIssues: validation.issues,
 		healthScore: hs.score,
@@ -199,6 +208,11 @@ export function buildReviewResult(
 		qualityGate: outcome.qualityGate,
 		verdict: outcome.verdict,
 		verdictSource: outcome.verdictSource,
+		omissions: {
+			findingBudgetApplied: budgeted.applied,
+			omittedLowPriorityCount: budgeted.omittedLowPriorityCount,
+			omittedNitCount: budgeted.omittedNitCount,
+		},
 		...(options.target ? { target: options.target } : {}),
 		...(job.reviewPath ? { reportPath: job.reviewPath } : {}),
 		files: [...job.files],
@@ -206,7 +220,7 @@ export function buildReviewResult(
 		// Render order: fresh active → suppressed → previously-rejected.
 		// The last bucket is the "downrank" — same visual treatment as
 		// suppressed (collapsed under its own section in the widget).
-		findings: [...activeFresh, ...suppressed, ...previouslyRejected],
+		findings: [...budgeted.findings, ...suppressed, ...previouslyRejected],
 		summary: formatSummary(synthesis?.summary, ignored.dropped),
 		errors,
 		validationIssues: validation.issues,

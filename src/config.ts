@@ -15,6 +15,7 @@ import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
 import type { ReviewLens } from "./types.js";
+import type { FindingBudget } from "./finding-budget.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
 
@@ -82,6 +83,7 @@ export interface ReviewPathFilters {
 export interface ReviewPolicyConfig {
 	readonly pathFilters?: ReviewPathFilters;
 	readonly pathInstructions?: readonly ReviewPathInstruction[];
+	readonly findingBudget?: FindingBudget;
 }
 
 /** Per-project config (Phase 2) for risk-code targeting. */
@@ -416,8 +418,12 @@ function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
 	if (!isPlainObject(value)) return undefined;
 	const rawInstructions = value.pathInstructions;
 	const pathFilters = cleanPathFilters(value.pathFilters);
+	const findingBudget = cleanFindingBudget(value.findingBudget);
 	if (!Array.isArray(rawInstructions)) {
-		return pathFilters ? { pathFilters } : {};
+		return {
+			...(pathFilters ? { pathFilters } : {}),
+			...(findingBudget ? { findingBudget } : {}),
+		};
 	}
 
 	const pathInstructions: ReviewPathInstruction[] = [];
@@ -437,8 +443,27 @@ function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
 	}
 	return {
 		...(pathFilters ? { pathFilters } : {}),
+		...(findingBudget ? { findingBudget } : {}),
 		pathInstructions,
 	};
+}
+
+function cleanFindingBudget(value: unknown): FindingBudget | undefined {
+	if (!isPlainObject(value)) return undefined;
+	const maxFindings = isNonNegativeInteger(value.maxFindings)
+		? value.maxFindings
+		: undefined;
+	const maxNits = isNonNegativeInteger(value.maxNits) ? value.maxNits : undefined;
+	return maxFindings === undefined && maxNits === undefined
+		? undefined
+		: {
+				...(maxFindings !== undefined ? { maxFindings } : {}),
+				...(maxNits !== undefined ? { maxNits } : {}),
+			};
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function cleanPathFilters(value: unknown): ReviewPathFilters | undefined {
