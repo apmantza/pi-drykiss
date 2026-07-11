@@ -63,8 +63,10 @@ export function formatReviewResultForTool(
 		lines.push("", "=== Dependency Graph ===", result.mermaidGraph);
 	}
 	if (result.reportPath) lines.push(`report: ${result.reportPath}`);
-	if (result.validatorError) lines.push(`validator error: ${result.validatorError}`);
-	if (result.errors.length > 0) lines.push(`errors: ${result.errors.join("; ")}`);
+	if (result.validatorError)
+		lines.push(`validator error: ${result.validatorError}`);
+	if (result.errors.length > 0)
+		lines.push(`errors: ${result.errors.join("; ")}`);
 	if (result.validationIssues.length > 0) {
 		lines.push(`validation issues: ${result.validationIssues.length}`);
 	}
