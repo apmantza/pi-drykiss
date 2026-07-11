@@ -9,6 +9,7 @@ import { ensureDefaultPrompts } from "./prompt-builder.js";
 import { loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
 import { runDeepAutoreview } from "./deep-review-command.js";
+import { executeFlatReview } from "./review-tool-executor.js";
 import type { ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import {
@@ -262,53 +263,24 @@ export async function executeDrykissAutoreviewTool(
 		effectiveConfig.riskTargeting,
 	);
 
-	// Model selection: config-driven only. The LLM-facing schema
-	// removed `params.model` so the agent cannot override the
-	// user's per-lens / autoroute / quality-gate config. Internal
-	// callers (runDeepAutoreview, tests) can still pass it.
-	const result = await manager.runReview(
+	// Model selection and result recording live in the flat executor so this
+	// command remains focused on scope and output orchestration.
+	const finalResult = await executeFlatReview({
 		ctx,
 		pi,
-		ctx.cwd,
-		cappedScope.files,
-		cappedScope.diffs,
-		cappedScope.contents,
-		cappedScope.projectIndex,
-		{
-			model: params.model,
-			lenses,
-			target: {
-				mode: cappedScope.mode,
-				label: cappedScope.label,
-				metadata: cappedScope.metadata,
-			},
-			severityOverrides: effectiveConfig.riskTargeting?.severity,
-			ignorePatterns: effectiveConfig.riskTargeting?.ignore,
-			suppressions,
-			pathInstructions: effectiveConfig.review?.pathInstructions,
-			activeConstraints,
-			commands: effectiveConfig.commands,
-			validate: params.validate ?? effectiveConfig.validate,
-			qualityGateThreshold: effectiveConfig.qualityGate,
-			findingBudget: effectiveConfig.review?.findingBudget,
-			preparationErrors: cappedScope.preparationErrors,
-			onProgress: onUpdate
-				? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
-				: undefined,
-		},
+		manager,
+		scope: cappedScope,
+		config: effectiveConfig,
+		lenses,
+		activeConstraints,
+		suppressions,
+		model: params.model,
+		validate: params.validate,
 		signal,
-	);
-
-	// Ignore filtering runs inside buildReviewResult, before counts, verdict,
-	// score, and persistence are derived. Do not post-process the result here.
-	const finalResult: ReviewResult = result;
-
-	try {
-		manager.recordFinalResult(finalResult);
-	} catch (err) {
-		console.warn("%s Failed to record final review result:", LOG_PREFIX, err);
-	}
-
+		onProgress: onUpdate
+			? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
+			: undefined,
+	});
 	const formatMode = params.format ?? "compact";
 	const jobs =
 		typeof (manager as { listJobs?: unknown }).listJobs === "function"

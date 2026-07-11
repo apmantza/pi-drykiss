@@ -16,6 +16,7 @@ src/
   synthesis-runner.ts # Executes synthesis, retries, persistence, and completion notification
   review-output.ts    # Formats structured review results for tool output
   deep-review-command.ts # Deep-review tool workflow and result mapping
+  review-tool-executor.ts # Flat-review execution and final-result recording
   llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
   prompt-loader.ts    # Pure file-reading: reads .md files from user dir (with bundled fallback)
   prompt-composer.ts  # Composes a lens system prompt from shared fragments + per-lens body
