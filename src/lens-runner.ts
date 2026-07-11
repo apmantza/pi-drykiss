@@ -41,7 +41,11 @@ export interface LensRunnerOptions {
 		cwd: string,
 		job: ReviewJob,
 	) => Promise<void>;
-	readonly drain: (ctx: ExtensionContext, pi: ExtensionAPI, cwd: string) => void;
+	readonly drain: (
+		ctx: ExtensionContext,
+		pi: ExtensionAPI,
+		cwd: string,
+	) => void;
 }
 
 function applySuccessfulOutput(
@@ -66,7 +70,10 @@ function applySuccessfulOutput(
 	state.findingsCount = findings.length;
 }
 
-function notify(onUpdate: ((job: ReviewJob) => void) | undefined, job: ReviewJob): void {
+function notify(
+	onUpdate: ((job: ReviewJob) => void) | undefined,
+	job: ReviewJob,
+): void {
 	try {
 		onUpdate?.(job);
 	} catch {

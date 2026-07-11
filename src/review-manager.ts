@@ -6,28 +6,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
-import {
-	LENS_NAMES,
-	createFallbackSynthesis,
-	parseSynthesis,
-} from "./types.js";
-import {
-	buildReviewPrompts,
-	buildBucketedSynthesisPrompt,
-	buildSynthesisPrompt,
-} from "./prompt-builder.js";
-import {
-	saveReview,
-	appendHistory,
-	loadHistory,
-} from "./persist.js";
+import { LENS_NAMES, createFallbackSynthesis } from "./types.js";
+import { buildReviewPrompts } from "./prompt-builder.js";
+import { appendHistory, loadHistory } from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
 import {
 	runLens as runLensTask,
 	type LensExecutionTask,
 } from "./lens-runner.js";
+import { runSynthesis as runSynthesisTask } from "./synthesis-runner.js";
 import { findModelByHint } from "./llm.js";
-import { isModelError, selectModelOnError } from "./model-selector.js";
+import { selectModelOnError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
 
 /**
@@ -434,7 +423,9 @@ export class ReviewManager {
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			job.synthesisStatus = "error";
-			job.synthesisResult = createFallbackSynthesis(`Synthesis crashed: ${msg}`);
+			job.synthesisResult = createFallbackSynthesis(
+				`Synthesis crashed: ${msg}`,
+			);
 			job.overallStatus = "error";
 			job.completedAt = Date.now();
 			try {
@@ -451,132 +442,11 @@ export class ReviewManager {
 		ctx: ExtensionContext,
 		cwd: string,
 		job: ReviewJob,
-	) {
-		const { runLensSubagent } = await import("./subagent-runner.js");
-		const { resolveModel } = await import("./subagent-runner.js");
-
-		const lensReviews = job.lenses.map((l) => ({
-			lens: l,
-			rawOutput: job.states.get(l)!.rawOutput,
-		}));
-
-		// Cluster lens findings by file + line proximity + Jaccard before
-		// the synthesis prompt is built. The LLM still does the final
-		// semantic merge — cluster boundaries are advisory — but it
-		// reasons over a pre-deduplicated view that's dramatically
-		// smaller and more reliable than the raw N-lens output.
-		// Fall back to the raw prompt builder if the bucketed one fails
-		// (shouldn't happen, but the synthesis must never break on a
-		// bucketing glitch).
-		let systemPrompt: string;
-		let userPrompt: string;
-		try {
-			({ systemPrompt, userPrompt } =
-				await buildBucketedSynthesisPrompt(lensReviews));
-		} catch (err) {
-			console.warn(
-				"%s Bucketed synthesis prompt failed, falling back to raw:",
-				LOG_PREFIX,
-				err,
-			);
-			({ systemPrompt, userPrompt } = await buildSynthesisPrompt(
-				cwd,
-				lensReviews,
-			));
-		}
-
-		const model = await resolveModel(ctx, "synthesis");
-
-		try {
-			const result = await runLensSubagent(
-				ctx,
-				cwd,
-				model,
-				systemPrompt,
-				userPrompt,
-				"synthesis",
-			);
-
-			// Store the synthesis session so it can be disposed on job cleanup
-			if (result.session) {
-				// Dispose previous session if this is a retry
-				if (job.synthesisSession && job.synthesisSession !== result.session) {
-					try {
-						job.synthesisSession.dispose();
-					} catch {
-						/* ignore */
-					}
-				}
-				job.synthesisSession = result.session;
-			}
-
-			// Check for model error and retry with user-selected model
-			if (result.errorMessage && isModelError(result.errorMessage)) {
-				// Auto-route to a free model if the user has configured it;
-				// otherwise show the standard picker popup. Exclude the model
-				// that just failed so autorouting can't loop on it. When the
-				// error is server-gated, the retry path skips free models and
-				// falls back to the default config model (paid tier).
-				const retryResult = await this.retryOnModelError(
-					ctx,
-					model,
-					job.synthesisSession,
-					"synthesis",
-					async (m) =>
-						runLensSubagent(ctx, cwd, m, systemPrompt, userPrompt, "synthesis"),
-					{ error: result.errorMessage, lens: "synthesis" },
-				);
-				if (retryResult) {
-					if (retryResult.session) {
-						job.synthesisSession = retryResult.session;
-					}
-					if (retryResult.errorMessage) {
-						job.synthesisResult = createFallbackSynthesis(
-							`Synthesis failed: ${retryResult.errorMessage}`,
-						);
-					} else {
-						const rawText = retryResult.text || "{}";
-						job.synthesisResult = parseSynthesis(rawText);
-					}
-				} else {
-					job.synthesisResult = createFallbackSynthesis(
-						`Synthesis failed: ${result.errorMessage}`,
-					);
-				}
-			} else if (result.errorMessage) {
-				job.synthesisResult = createFallbackSynthesis(
-					`Synthesis failed: ${result.errorMessage}`,
-				);
-			} else {
-				const rawText = result.text || "{}";
-				job.synthesisResult = parseSynthesis(rawText);
-			}
-			job.synthesisStatus = result.errorMessage ? "error" : "done";
-		} catch (err: any) {
-			job.synthesisStatus = "error";
-			job.synthesisResult = createFallbackSynthesis(
-				`Synthesis failed: ${err.message}`,
-			);
-		}
-
-		job.overallStatus =
-			job.lenses.some((l) => job.states.get(l)!.status === "error") ||
-			job.synthesisStatus === "error"
-				? "error"
-				: "done";
-		job.completedAt = Date.now();
-
-		// Release synthesis lock
-		this.synthesisLocks.delete(job.id);
-		if (job.synthesisResult) {
-			try {
-				job.reviewPath = await saveReview(job.files, job.synthesisResult);
-			} catch {
-				/* Non-fatal: review result is still valid without persistence */
-			}
-		}
-
-		this.onComplete?.(job);
+	): Promise<void> {
+		await runSynthesisTask(ctx, cwd, job, {
+			retryOnModelError: this.retryOnModelError.bind(this),
+			onComplete: (completedJob) => this.onComplete?.(completedJob),
+		});
 	}
 
 	async runReview(
