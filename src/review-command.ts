@@ -257,12 +257,6 @@ export async function executeDrykissAutoreviewTool(
 		);
 	}
 
-	if (effectiveConfig.scout?.enabled && scope.mode === "full") {
-		safeOnUpdate(
-			onUpdate,
-			`DRYKISS scout: mapping project and selecting files for review...`,
-		);
-	}
 
 	safeOnUpdate(
 		onUpdate,
@@ -334,10 +328,16 @@ function buildScoutNote(scope: ReviewScope): string {
 	if (status === "success") {
 		const selected = scope.metadata.selectedFiles;
 		const total = scope.metadata.totalFiles;
-		return ` · scout selected ${selected}/${total} file(s)`;
+		const model = scope.metadata.modelName;
+		return ` · scout selected ${selected}/${total} file(s)${model ? ` via ${model}` : ""}`;
 	}
-	if (status === "fallback") return " · scout failed; using full file list";
-	if (status === "no-context") return " · scout unavailable (no context)";
+	if (status === "fallback") {
+		const reason =
+			typeof scope.metadata.reason === "string"
+				? ` (${scope.metadata.reason})`
+				: "";
+		return ` · scout failed; using full file list${reason}`;
+	}
 	return "";
 }
 

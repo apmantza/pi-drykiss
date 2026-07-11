@@ -9,7 +9,6 @@ import {
 	getProjectIndex,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import { LOG_PREFIX } from "./constants.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import type { ChangedFile } from "./types.js";
 
@@ -26,6 +25,14 @@ export interface ScoutResult {
 	readonly notDone: readonly string[];
 }
 
+export interface ScoutStatus {
+	readonly phase: "started" | "success" | "fallback";
+	readonly totalFiles?: number;
+	readonly selectedFiles?: number;
+	readonly modelName?: string;
+	readonly reason?: string;
+}
+
 export interface ScoutOptions {
 	readonly cwd: string;
 	/**
@@ -35,6 +42,7 @@ export interface ScoutOptions {
 	 */
 	readonly allFiles?: readonly ChangedFile[];
 	readonly maxFiles?: number;
+	readonly onStatus?: (status: ScoutStatus) => void;
 	/**
 	 * Glob patterns for docs the scout should read. Relative to the
 	 * project root. Defaults to a standard set of project docs.
@@ -58,10 +66,13 @@ const DEFAULT_DOC_GLOBS: readonly string[] = [
 const DEFAULT_MAX_FILES = 40;
 
 /** Maximum characters of a single doc to include in the scout prompt. */
-const DOC_BUDGET_PER_FILE = 8_000;
+const DOC_BUDGET_PER_FILE = 4_000;
 
 /** Maximum total doc characters to include in the scout prompt. */
-const DOC_TOTAL_BUDGET = 20_000;
+const DOC_TOTAL_BUDGET = 10_000;
+
+/** Maximum project-index entries to include in the scout prompt. */
+const MAX_PROJECT_INDEX_ENTRIES = 50;
 
 /**
  * Run the scout stage. On failure, returns `undefined` so the caller can
@@ -83,7 +94,11 @@ export async function runScout(
 		options.allFiles ?? (await getAllSourceFiles(cwd, options.ignorePatterns));
 
 	if (allFiles.length === 0) {
-		console.warn(`${LOG_PREFIX} Scout found no source files; skipping scout.`);
+		options.onStatus?.({
+			phase: "fallback",
+			totalFiles: 0,
+			reason: "No source files found",
+		});
 		return undefined;
 	}
 
@@ -96,7 +111,8 @@ export async function runScout(
 		maxFiles,
 	});
 
-	console.log(`${LOG_PREFIX} Scout running on ${allFiles.length} file(s)...`);
+	options.onStatus?.({ phase: "started", totalFiles: allFiles.length });
+	let modelName = "unknown";
 	try {
 		const response = await callLLM(
 			ctx,
@@ -108,18 +124,32 @@ export async function runScout(
 			},
 			"scout",
 		);
+		modelName = response.model.name;
 		const result = parseScoutResult(response.text, allFiles);
 		if (result) {
-			console.log(
-				`${LOG_PREFIX} Scout selected ${result.files.length} file(s); excluded ${result.excludedPatterns.length} pattern(s).`,
-			);
+			options.onStatus?.({
+				phase: "success",
+				totalFiles: allFiles.length,
+				selectedFiles: result.files.length,
+				modelName,
+			});
+			return result;
 		}
-		return result;
+		options.onStatus?.({
+			phase: "fallback",
+			totalFiles: allFiles.length,
+			modelName,
+			reason: "Invalid or empty scout response",
+		});
+		return undefined;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		console.warn(
-			`${LOG_PREFIX} Scout failed; falling back to full file list: ${msg}`,
-		);
+		options.onStatus?.({
+			phase: "fallback",
+			totalFiles: allFiles.length,
+			modelName,
+			reason: msg.slice(0, 240),
+		});
 		return undefined;
 	}
 }
@@ -169,12 +199,13 @@ function buildScoutUserPrompt(context: ScoutPromptContext): string {
 	}
 
 	if (context.projectIndex.length > 0) {
+		const limited = context.projectIndex.slice(0, MAX_PROJECT_INDEX_ENTRIES);
 		parts.push(
-			`\n\n## Project Index — Exported Symbols (${context.projectIndex.length} files)\n\n`,
+			`\n\n## Project Index — Exported Symbols (${limited.length} of ${context.projectIndex.length} files)\n\n`,
 		);
-		for (const entry of context.projectIndex) {
-			const symbols = entry.exports.slice(0, 12).join(", ");
-			const suffix = entry.exports.length > 12 ? " ..." : "";
+		for (const entry of limited) {
+			const symbols = entry.exports.slice(0, 8).join(", ");
+			const suffix = entry.exports.length > 8 ? " ..." : "";
 			parts.push(`- ${entry.path}: ${symbols}${suffix}`);
 		}
 	}
@@ -212,12 +243,7 @@ export async function loadScoutDocs(
 						? text.slice(0, DOC_BUDGET_PER_FILE) +
 							"\n\n... (truncated for scout budget) ..."
 						: text;
-				if (totalLength + truncated.length > DOC_TOTAL_BUDGET) {
-					console.warn(
-						`${LOG_PREFIX} Scout doc budget exceeded; skipping remaining docs.`,
-					);
-					break;
-				}
+				if (totalLength + truncated.length > DOC_TOTAL_BUDGET) break;
 				docs.set(candidate, truncated);
 				totalLength += truncated.length;
 			} catch {
@@ -249,10 +275,7 @@ function parseScoutResult(
 	allFiles: readonly ChangedFile[],
 ): ScoutResult | undefined {
 	const parsed = lenientJsonParse<unknown>(raw);
-	if (!isPlainObject(parsed)) {
-		console.warn(`${LOG_PREFIX} Scout returned non-object JSON; falling back.`);
-		return undefined;
-	}
+	if (!isPlainObject(parsed)) return undefined;
 
 	const allowedPaths = new Set(allFiles.map((f) => f.path));
 	const files = parseScoutFiles(parsed.files, allowedPaths);
@@ -260,12 +283,7 @@ function parseScoutResult(
 	const notDone = parseStringArray(parsed.notDone);
 	const summary = typeof parsed.summary === "string" ? parsed.summary : "";
 
-	if (files.length === 0) {
-		console.warn(
-			`${LOG_PREFIX} Scout selected no files; falling back to full file list.`,
-		);
-		return undefined;
-	}
+	if (files.length === 0) return undefined;
 
 	return { summary, files, excludedPatterns, notDone };
 }
@@ -281,12 +299,7 @@ function parseScoutFiles(
 	for (const item of value) {
 		if (!isPlainObject(item)) continue;
 		const path = String(item.path ?? "");
-		if (!path || !allowedPaths.has(path)) {
-			console.warn(
-				`${LOG_PREFIX} Scout selected unknown file; skipping: ${path}`,
-			);
-			continue;
-		}
+		if (!path || !allowedPaths.has(path)) continue;
 		if (seen.has(path)) continue;
 		seen.add(path);
 

@@ -10,8 +10,12 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import { runScout, applyScoutResult } from "./scout.js";
-import { assertSafeGitRef, LOG_PREFIX } from "./constants.js";
+import {
+	applyScoutResult,
+	runScout,
+	type ScoutStatus,
+} from "./scout.js";
+import { assertSafeGitRef } from "./constants.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import {
 	fetchPrDiff,
@@ -69,6 +73,8 @@ export interface ResolveReviewScopeOptions {
 		readonly maxFiles?: number;
 		readonly docs?: readonly string[];
 	};
+	/** Receives the scout outcome for progress and final-result reporting. */
+	readonly onScoutStatus?: (status: ScoutStatus) => void;
 	/**
 	 * Abort signal that can cancel the scout stage and scope preparation.
 	 */
@@ -131,15 +137,15 @@ export async function resolveReviewScope(
 	let discoveredFiles: ChangedFile[];
 	if (mode === "full" && options.scout?.enabled) {
 		if (!ctx) {
-			scoutMetadata.status = "no-context";
-			console.warn(
-				`${LOG_PREFIX} Scout requested but no ExtensionContext available; falling back to full file list.`,
-			);
+			scoutMetadata.status = "fallback";
+			scoutMetadata.reason = "No ExtensionContext available";
+			options.onScoutStatus?.({
+				phase: "fallback",
+				reason: "No ExtensionContext available",
+			});
 			discoveredFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
 		} else {
-			scoutMetadata.status = "running";
 			const allFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
-			scoutMetadata.totalFiles = allFiles.length;
 			const scoutResult = await runScout(ctx, {
 				cwd,
 				allFiles,
@@ -147,18 +153,14 @@ export async function resolveReviewScope(
 				docs: options.scout.docs,
 				ignorePatterns: options.ignorePatterns,
 				signal: options.signal,
+				onStatus: (status) => {
+					Object.assign(scoutMetadata, status);
+					options.onScoutStatus?.(status);
+				},
 			});
-			if (scoutResult) {
-				scoutMetadata.status = "success";
-				scoutMetadata.selectedFiles = scoutResult.files.length;
-				scoutMetadata.excludedPatterns = scoutResult.excludedPatterns;
-				scoutMetadata.summary = scoutResult.summary;
-				discoveredFiles = applyScoutResult(allFiles, scoutResult);
-			} else {
-				scoutMetadata.status = "fallback";
-				scoutMetadata.reason = "Scout returned undefined (LLM/parse failure)";
-				discoveredFiles = allFiles;
-			}
+			discoveredFiles = scoutResult
+			? applyScoutResult(allFiles, scoutResult)
+			: allFiles;
 		}
 	} else {
 		discoveredFiles =
