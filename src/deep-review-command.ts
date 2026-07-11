@@ -73,7 +73,9 @@ export async function runDeepAutoreview(
 	});
 	const caller = makePiCallerAdapter(ctx, sessionModel);
 	const onStage = (stage: string) => {
-		onUpdate?.({ content: [{ type: "text", text: `Deep review: ${stage}...` }] });
+		onUpdate?.({
+			content: [{ type: "text", text: `Deep review: ${stage}...` }],
+		});
 	};
 	const result = await runDeepReview({
 		baseUserPrompt,
@@ -113,9 +115,13 @@ export async function runDeepAutoreview(
 		_validatorVerdict: finding.verdict === "real" ? "real" : "unverified",
 		_validatorJustification: finding.justification,
 	}));
-	const critical = findings.filter((finding) => finding.severity === "critical").length;
+	const critical = findings.filter(
+		(finding) => finding.severity === "critical",
+	).length;
 	const high = findings.filter((finding) => finding.severity === "high").length;
-	const medium = findings.filter((finding) => finding.severity === "medium").length;
+	const medium = findings.filter(
+		(finding) => finding.severity === "medium",
+	).length;
 	const low = findings.filter((finding) => finding.severity === "low").length;
 	const nit = findings.filter((finding) => finding.severity === "nit").length;
 	const scoreBreakdown = {
@@ -127,8 +133,8 @@ export async function runDeepAutoreview(
 		0,
 		100 -
 			scoreBreakdown.critical * 15 -
-				scoreBreakdown.warning * 5 -
-				scoreBreakdown.suggestion,
+			scoreBreakdown.warning * 5 -
+			scoreBreakdown.suggestion,
 	);
 	const outcome = finalizeReviewOutcome({
 		findings,
@@ -170,7 +176,10 @@ export async function runDeepAutoreview(
 		(params.format ?? "compact") === "compact"
 			? formatReviewResultCompact(reviewResult, { qualityGateThreshold: 70 })
 			: formatReviewResultForTool(reviewResult, { qualityGateThreshold: 70 });
-	return { content: [{ type: "text", text }], details: { result: reviewResult } };
+	return {
+		content: [{ type: "text", text }],
+		details: { result: reviewResult },
+	};
 }
 
 function formatDiffsForDeepAutoreview(scope: ReviewScope): string {
