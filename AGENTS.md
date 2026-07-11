@@ -23,9 +23,10 @@ src/
   prompt-seed.ts      # Seeds bundled Markdown prompts into the user customization directory
   prompt-builder.ts   # Thin orchestrator: ties loader + composer together; builds review context
   mode-context.ts     # Resolves review posture (proposed vs audit) and loads mode-context-{proposed,audit}.md
+  scout.ts            # Pre-flight scout stage: maps the project, reads docs, selects important files for full-codebase reviews
   prompts/            # The bundled default prompt text — the source of truth (see prompt-architecture.md)
-    _shared/          # iron-law, json-output, json-output-synthesis, grounding-rules, grounding-rules-synthesis, active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
-    simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, docs.md, synthesis.md
+    _shared/          # iron-law, json-output, json-output-synthesis, json-output-scout, grounding-rules, grounding-rules-synthesis, active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
+    simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, docs.md, synthesis.md, scout.md
   model-selector.ts   # Resolves model hints, interactive selection, isModelError detection
   git-diff.ts         # Git diff parsing, file status detection, project index generation
   edit-tracker.ts     # Tracks file edits across turns via tool_execution_end events
@@ -51,6 +52,7 @@ scripts/
 7. **Model error retry** — When a subagent completes with a quota/auth/5xx/stream-termination error, `review-manager.ts` detects it via `isModelError()`, prompts the user to select a different model (or autoroutes), and retries the lens review automatically.
 8. **Flat default review topology** — `/drykiss --all` should stay a flat parallel lens fan-out plus synthesis. Do not add nested subagents to every lens by default; use nested/child agents only for selective verification or a separate improve/advisor workflow.
 9. **Failed lenses must be visible** — A review with a failed lens is incomplete. Synthesis prompts and final notifications should surface lens failures instead of silently approving based on the remaining lenses.
+10. **Scout is a pre-flight stage, not a lens** — For full-codebase reviews, an optional scout stage maps the project (docs, file list, exports) and selects the most important files before the flat lens fan-out. It runs as a scope-preparation phase, not a parallel lens, preserving the flat topology. Scout failure falls back to the full file list (fail-open).
 
 ## Testing
 

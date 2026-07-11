@@ -10,7 +10,8 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import { assertSafeGitRef } from "./constants.js";
+import { runScout, applyScoutResult } from "./scout.js";
+import { assertSafeGitRef, LOG_PREFIX } from "./constants.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import {
 	fetchPrDiff,
@@ -58,6 +59,20 @@ export interface ResolveReviewScopeOptions {
 		total: number,
 		label: string,
 	) => void;
+	/**
+	 * Scout pre-flight configuration. When `enabled` is true and the review
+	 * mode is "full", the scout runs first to map the project and select
+	 * the most important files for the review lenses.
+	 */
+	scout?: {
+		readonly enabled?: boolean;
+		readonly maxFiles?: number;
+		readonly docs?: readonly string[];
+	};
+	/**
+	 * Abort signal that can cancel the scout stage and scope preparation.
+	 */
+	signal?: AbortSignal;
 }
 
 export interface ReviewScope {
@@ -83,6 +98,7 @@ export async function resolveReviewScope(
 	cwd: string,
 	request: ReviewScopeRequest,
 	options: ResolveReviewScopeOptions = {},
+	ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext,
 ): Promise<ReviewScope> {
 	const contextMode = options.contextMode ?? "full";
 	const mode = inferMode(request);
@@ -111,10 +127,33 @@ export async function resolveReviewScope(
 	}
 
 	const reviewOptions = toReviewOptions(mode, request);
-	const discoveredFiles =
-		mode === "full"
-			? await getAllSourceFiles(cwd, options.ignorePatterns)
-			: await getChangedFiles(pi, cwd, reviewOptions, options.ignorePatterns);
+	let discoveredFiles: ChangedFile[];
+	if (mode === "full" && options.scout?.enabled) {
+		if (!ctx) {
+			console.warn(
+				`${LOG_PREFIX} Scout requested but no ExtensionContext available; falling back to full file list.`,
+			);
+			discoveredFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
+		} else {
+			const allFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
+			const scoutResult = await runScout(ctx, {
+				cwd,
+				allFiles,
+				maxFiles: options.scout.maxFiles,
+				docs: options.scout.docs,
+				ignorePatterns: options.ignorePatterns,
+				signal: options.signal,
+			});
+			discoveredFiles = scoutResult
+				? applyScoutResult(allFiles, scoutResult)
+				: allFiles;
+		}
+	} else {
+		discoveredFiles =
+			mode === "full"
+				? await getAllSourceFiles(cwd, options.ignorePatterns)
+				: await getChangedFiles(pi, cwd, reviewOptions, options.ignorePatterns);
+	}
 	const files = applyPathFilters(
 		discoveredFiles,
 		options.pathFilters,

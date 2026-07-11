@@ -211,7 +211,10 @@ export async function executeDrykissAutoreviewTool(
 			ignorePatterns: effectiveConfig.ignorePatterns,
 			pathFilters: effectiveConfig.review?.pathFilters,
 			onFileProgress: fileProgress,
+			scout: effectiveConfig.scout,
+			signal,
 		},
+		ctx,
 	);
 
 	const maxFiles =

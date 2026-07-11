@@ -20,12 +20,14 @@ const BUNDLED_LENS_FILES = [
 	"security.md",
 	"docs.md",
 	"synthesis.md",
+	"scout.md",
 ] as const;
 
 const BUNDLED_SHARED_FILES = [
 	"iron-law.md",
 	"json-output.md",
 	"json-output-synthesis.md",
+	"json-output-scout.md",
 	"grounding-rules.md",
 	"grounding-rules-synthesis.md",
 	"active-constraints.md",

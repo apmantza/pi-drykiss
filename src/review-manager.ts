@@ -574,8 +574,7 @@ export class ReviewManager {
 							_validatorVerdict: annotated._validatorVerdict,
 							...(annotated._validatorJustification
 								? {
-										_validatorJustification:
-											annotated._validatorJustification,
+										_validatorJustification: annotated._validatorJustification,
 									}
 								: {}),
 						},

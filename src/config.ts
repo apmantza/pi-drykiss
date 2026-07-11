@@ -114,6 +114,24 @@ export interface RiskTargeting {
 	readonly focus?: readonly string[];
 }
 
+export interface ScoutConfig {
+	/**
+	 * When true, the scout stage runs before full-codebase reviews to map
+	 * the project and narrow the file list. Defaults to false.
+	 */
+	readonly enabled?: boolean;
+	/**
+	 * Maximum files the scout should select. The review's own maxFiles cap
+	 * still applies afterward. Defaults to 40.
+	 */
+	readonly maxFiles?: number;
+	/**
+	 * Glob patterns for docs the scout should read. Defaults to a standard
+	 * set (README.md, AGENTS.md, claude.md, package.json, etc.).
+	 */
+	readonly docs?: string[];
+}
+
 export interface DrykissAutoreviewConfig {
 	/** Opt-in automatic review at agent_end after code edits. Disabled by default. */
 	enabled?: boolean;
@@ -146,7 +164,7 @@ export interface DrykissAutoreviewConfig {
 export interface DrykissConfig {
 	/** Default model for all lenses when not specified */
 	defaultModel?: string;
-	/** Per-lens model overrides */
+	/** Per-lens model overrides, including the scout pre-flight stage. */
 	lensModels?: {
 		simplicity?: string;
 		deduplication?: string;
@@ -156,6 +174,7 @@ export interface DrykissConfig {
 		tests?: string;
 		security?: string;
 		synthesis?: string;
+		scout?: string;
 	};
 	/** Whether to prompt for model selection on first use */
 	interactive?: boolean;
@@ -192,6 +211,12 @@ export interface DrykissConfig {
 	 * If unset (or no scoped match is found), any free model is used.
 	 */
 	modelScope?: string | string[];
+	/**
+	 * Scout-stage configuration for full-codebase reviews. When enabled, the
+	 * scout maps the project and selects the most important files before the
+	 * review lenses run.
+	 */
+	scout?: ScoutConfig;
 	/** Risk-code targeting (Phase 2). */
 	riskTargeting?: RiskTargeting;
 	/** Suppressions (Phase 3) — stored in per-project config. */
@@ -255,12 +280,13 @@ export async function loadConfig(): Promise<DrykissConfig> {
 /** Default config values used when no config file exists. */
 const DEFAULT_CONFIG: Pick<
 	DrykissConfig,
-	"interactive" | "confirmBeforeRun" | "autoreview" | "review"
+	"interactive" | "confirmBeforeRun" | "autoreview" | "review" | "scout"
 > = {
 	interactive: true,
 	confirmBeforeRun: true,
 	autoreview: { maxFiles: 40 },
 	review: {},
+	scout: { enabled: false },
 };
 
 /**
@@ -302,6 +328,11 @@ export async function loadEffectiveConfig(
 					...DEFAULT_CONFIG.autoreview,
 					...baseConfig.autoreview,
 					...projectConfig.autoreview,
+				},
+				scout: {
+					...DEFAULT_CONFIG.scout,
+					...baseConfig.scout,
+					...projectConfig.scout,
 				},
 				review: {
 					...baseConfig.review,
@@ -382,6 +413,7 @@ export async function loadEffectiveConfig(
 			)
 		: undefined;
 	const cleanedReview = cleanReviewPolicy(config.review);
+	const cleanedScout = cleanScoutConfig(config.scout);
 
 	return {
 		config: {
@@ -389,6 +421,11 @@ export async function loadEffectiveConfig(
 			autoreview: {
 				...DEFAULT_CONFIG.autoreview,
 				...config.autoreview,
+			},
+			scout: {
+				...DEFAULT_CONFIG.scout,
+				...config.scout,
+				...cleanedScout,
 			},
 			...(rt
 				? {
@@ -460,6 +497,26 @@ function cleanFindingBudget(value: unknown): FindingBudget | undefined {
 				...(maxFindings !== undefined ? { maxFindings } : {}),
 				...(maxNits !== undefined ? { maxNits } : {}),
 			};
+}
+
+function cleanScoutConfig(value: unknown): ScoutConfig | undefined {
+	if (!isPlainObject(value)) return undefined;
+	const enabled =
+		typeof value.enabled === "boolean" ? value.enabled : undefined;
+	const maxFiles = isNonNegativeInteger(value.maxFiles)
+		? value.maxFiles
+		: undefined;
+	const docs = Array.isArray(value.docs)
+		? value.docs.filter(isNonEmptyString)
+		: undefined;
+	if (enabled === undefined && maxFiles === undefined && docs === undefined) {
+		return undefined;
+	}
+	return {
+		...(enabled !== undefined ? { enabled } : {}),
+		...(maxFiles !== undefined ? { maxFiles } : {}),
+		...(docs !== undefined ? { docs } : {}),
+	};
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

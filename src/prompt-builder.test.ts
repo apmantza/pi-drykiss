@@ -748,9 +748,9 @@ describe("prompt template management", () => {
 				// 8 lens + synthesis + 8 shared + 1 sentinel = 18 files
 				const entries = await readdir(userDir);
 				const sharedEntries = await readdir(join(userDir, "_shared"));
-				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(9);
+				expect(entries.filter((n) => n.endsWith(".md"))).toHaveLength(10);
 				expect(entries).toContain("docs.md");
-				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(8);
+				expect(sharedEntries.filter((n) => n.endsWith(".md"))).toHaveLength(9);
 				expect(entries.some((n) => n.startsWith(".drykiss-prompt-v"))).toBe(
 					true,
 				);
