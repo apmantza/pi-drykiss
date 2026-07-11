@@ -90,8 +90,8 @@ export interface ReviewJob {
 	completedAt?: number;
 }
 
-export type OnReviewUpdate = (job: ReviewJob) => void;
-export type OnReviewComplete = (job: ReviewJob) => void;
+type OnReviewUpdate = (job: ReviewJob) => void;
+type OnReviewComplete = (job: ReviewJob) => void;
 
 function safeProgress(
 	onProgress: ((job: ReviewJob) => void) | undefined,

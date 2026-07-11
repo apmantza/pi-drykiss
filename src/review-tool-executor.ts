@@ -9,7 +9,7 @@ import type { ReviewResult } from "./review-result.js";
 import type { ReviewScope } from "./review-scope.js";
 import { LOG_PREFIX } from "./constants.js";
 
-export interface FlatReviewExecution {
+interface FlatReviewExecution {
 	readonly ctx: ExtensionContext;
 	readonly pi: ExtensionAPI;
 	readonly manager: ReviewManager;

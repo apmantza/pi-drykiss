@@ -1,4 +1,3 @@
-import type { Model, Api } from "@earendil-works/pi-ai";
 import type {
 	ExtensionContext,
 	AgentSession,
@@ -20,7 +19,7 @@ import { LOG_PREFIX } from "./constants.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { RetryLensOnModelError } from "./lens-runner.js";
 
-export interface SynthesisRunnerOptions {
+interface SynthesisRunnerOptions {
 	readonly retryOnModelError: RetryLensOnModelError;
 	readonly onComplete: (job: ReviewJob) => void;
 }

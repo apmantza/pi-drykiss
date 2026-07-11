@@ -32,7 +32,7 @@ export type RetryLensOnModelError = (
 	options?: { error?: unknown; lens?: string },
 ) => Promise<SubagentResult | null>;
 
-export interface LensRunnerOptions {
+interface LensRunnerOptions {
 	readonly getJob: (jobId: string) => ReviewJob | undefined;
 	readonly onUpdate?: (job: ReviewJob) => void;
 	readonly retryOnModelError: RetryLensOnModelError;

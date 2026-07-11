@@ -7,7 +7,7 @@ import { formatReviewResultCompact } from "./compact-format.js";
 import { formatReviewResultForTool } from "./review-output.js";
 import { loadValidatorSystemPrompt } from "./validator.js";
 
-export interface DeepReviewCommandParams {
+interface DeepReviewCommandParams {
 	readonly deep: ReviewLens;
 	readonly deepPasses?: number;
 	readonly deepMinVotes?: number;
