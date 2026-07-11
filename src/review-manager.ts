@@ -43,11 +43,12 @@ async function computePrevScore(mode?: string): Promise<number | undefined> {
 }
 import {
 	buildReviewResult,
+	getFindingIdentity,
 	type ReviewResult,
 	type ReviewResultTarget,
 } from "./review-result.js";
 import { loadRejections } from "./rejections.js";
-import { runValidator } from "./validator.js";
+import { runValidator, selectFindingsForValidation } from "./validator.js";
 
 const CONCURRENCY = 3;
 const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
@@ -763,12 +764,8 @@ export class ReviewManager {
 			 */
 			activeConstraints?: string;
 			/**
-			 * Opt-in: run the validator stage over the synthesized
-			 * findings. The validator is a separate LLM call whose
-			 * system prompt is in `_shared/validator.md`; it tries to
-			 * falsify each finding and tags it "real" or
-			 * "false-positive". Default false to preserve the existing
-			 * cost/latency budget.
+			 * Run the selective validator stage. Defaults to true; set false
+			 * only for an explicitly latency-sensitive review.
 			 */
 			validate?: boolean;
 			/** Configured minimum health score for a passing quality gate. */
@@ -810,7 +807,7 @@ export class ReviewManager {
 		// loadRejections is best-effort: a missing or garbled file
 		// degrades to [], so a broken store never breaks a review.
 		const rejections = await loadRejections(cwd);
-		let result = buildReviewResult(job, {
+		const resultOptions = {
 			target: options.target,
 			severityOverrides: options.severityOverrides,
 			ignorePatterns: options.ignorePatterns,
@@ -820,30 +817,64 @@ export class ReviewManager {
 			qualityGateThreshold: options.qualityGateThreshold,
 			findingBudget: options.findingBudget,
 			preparationErrors: options.preparationErrors,
-		});
-		// Optional validator stage — opt-in via `options.validate`.
-		// Runs an adversarial LLM call that tries to falsify each
-		// synthesized finding. Fail-open: a flaky validator surfaces
-		// findings unchanged, never silently drops them. The diff
-		// block is included so the validator can see the actual code.
-		if (options.validate && result.findings.length > 0) {
+		};
+		let result = buildReviewResult(job, resultOptions);
+
+		// Validation is on by default, but only high-impact or weakly-grounded
+		// singleton findings warrant another model call. Refuted findings are
+		// removed from the active result before scoring and finalization.
+		const candidates =
+			options.validate === false
+				? []
+				: selectFindingsForValidation(result.findings);
+		if (candidates.length > 0) {
 			const diffBlock = formatDiffsForValidator(diffs);
-			const validation = await runValidator(ctx, result.findings, diffBlock, {
+			const validation = await runValidator(ctx, candidates, diffBlock, {
 				signal,
 			});
-			// Build a new result with the validator-annotated findings
-			// + extra counts. The base `findings` and `counts` are
-			// read-only on ReviewResult, so we spread.
-			result = {
-				...result,
-				findings: validation.findings,
-				counts: {
-					...result.counts,
-					validatorReal: validation.confirmedReal,
-					validatorFalsePositive: validation.droppedFalsePositives,
-					validatorUnverified: validation.unverified,
+			const annotatedByKey = new Map(
+				validation.findings.map((finding) => [
+					getFindingIdentity(finding),
+					finding,
+				]),
+			);
+			const discarded = validation.findings.filter(
+				(finding) => finding._validatorVerdict === "false-positive",
+			);
+			// Rebuild from the raw synthesis findings, not the already-rendered
+			// result. This preserves ignore/suppression/rejection accounting and
+			// avoids running policy transforms twice.
+			const survivors = (job.synthesisResult?.findings ?? []).flatMap(
+				(finding) => {
+					const annotated = annotatedByKey.get(getFindingIdentity(finding));
+					if (annotated?._validatorVerdict === "false-positive") return [];
+					return annotated
+						? [
+							{
+								...finding,
+								_validatorVerdict: annotated._validatorVerdict,
+								...(annotated._validatorJustification
+									? {
+										_validatorJustification:
+											annotated._validatorJustification,
+									}
+									: {}),
+							},
+						]
+						: [finding];
 				},
-			};
+			);
+			result = buildReviewResult(job, {
+				...resultOptions,
+				findings: survivors,
+				discardedFindings: discarded,
+				validatorError: validation.errorMessage,
+				validatorCounts: {
+					real: validation.confirmedReal,
+					falsePositive: validation.droppedFalsePositives,
+					unverified: validation.unverified,
+				},
+			});
 		}
 		// Fire-and-forget persist history
 		appendHistory({

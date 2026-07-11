@@ -108,6 +108,7 @@ describe("drykiss_autoreview tool", () => {
 			undefined,
 			expect.objectContaining({
 				lenses: ["security"],
+				validate: undefined,
 				target: expect.objectContaining({ label: "local changes" }),
 			}),
 			undefined,

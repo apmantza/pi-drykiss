@@ -157,11 +157,10 @@ export interface Finding {
 	 * to falsify this finding:
 	 *   - "real": validator confirmed the finding is triggered by a
 	 *     concrete input or execution path.
-	 *   - "false-positive": validator refuted the finding — the defect
-	 *     is not present in the shown code.
+	 *   - "false-positive": validator refuted the finding. It is retained in
+	 *     `ReviewResult.discardedFindings` but excluded from active risk.
 	 *   - "unverified": validator was unavailable, errored, or could
-	 *     not conclude from the truncated context. Findings are
-	 *     surfaced unchanged and never silently dropped.
+	 *     not conclude from the truncated context. It remains active.
 	 * Not part of the LLM output contract — added post-hoc.
 	 */
 	readonly _validatorVerdict?: "real" | "false-positive" | "unverified";

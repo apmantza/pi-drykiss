@@ -218,12 +218,10 @@ export interface DrykissConfig {
 	 */
 	commands?: DrykissCommands;
 	/**
-	 * When true, run the validator stage (see ./validator.ts) over the
-	 * synthesized findings. The validator is a separate LLM call that
-	 * tries to falsify each finding; findings are tagged "real" or
-	 * "false-positive" (or "unverified" if the validator is
-	 * unavailable). Default false to preserve the existing
-	 * cost/latency budget. CLI flag `--validate` overrides this.
+	 * Run the selective validator stage (see ./validator.ts). It is enabled
+	 * by default; set this to false only for an explicitly latency-sensitive
+	 * review. Validator-refuted findings are retained separately for audit but
+	 * excluded from active counts, risk, and quality-gate evaluation.
 	 */
 	validate?: boolean;
 }

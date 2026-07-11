@@ -6,6 +6,7 @@ import {
 	loadValidatorSystemPrompt,
 	parseValidatorOutput,
 	runValidator,
+	selectFindingsForValidation,
 	type ValidatorVerdict,
 } from "./validator.js";
 import type { Finding } from "./types.js";
@@ -215,6 +216,29 @@ describe("applyValidatorVerdicts", () => {
 		expect(out[0]._validatorVerdict).toBe("real");
 	});
 });
+
+describe("selectFindingsForValidation", () => {
+	it("selects blockers and weakly grounded findings only", () => {
+		const selected = selectFindingsForValidation([
+			finding({ severity: "critical" }),
+			finding({ severity: "high" }),
+			finding({ severity: "medium", confidence: "suspect" }),
+			finding({ severity: "medium" }),
+			finding({ severity: "medium", confidence: "confirmed" }),
+			finding({ severity: "medium", confidence: "likely" }),
+			finding({ severity: "low", _suppressed: true }),
+			finding({ severity: "low", _previouslyRejected: true }),
+		]);
+		expect(selected).toHaveLength(4);
+		expect(selected.map((item) => item.severity)).toEqual([
+			"critical",
+			"high",
+			"medium",
+			"medium",
+		]);
+	});
+});
+
 
 describe("runValidator — fail-open behavior", () => {
 	function ctx(): {

@@ -186,6 +186,9 @@ export function formatReviewResultCompact(
 	}
 
 	// Footer: errors + path + summary line.
+	if (result.validatorError) {
+		lines.push(`validator error: ${result.validatorError}`);
+	}
 	if (result.errors.length > 0) {
 		lines.push("");
 		lines.push(`errors: ${result.errors.join("; ")}`);

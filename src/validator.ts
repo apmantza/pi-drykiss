@@ -14,13 +14,10 @@
  *   - "Fail open": if the validator errors or returns no parseable output,
  *     every finding is tagged `_validatorVerdict: "unverified"` and surfaced
  *     unchanged. A flaky model never silently drops a real finding.
- *   - The validator is opt-in. Default `/drykiss` flow runs without it to
- *     keep the existing cost/latency budget. Enable with `--validate` or
- *     `config.validate: true` in `.pi/drykiss/config.json`.
- *   - Findings tagged "false-positive" are NOT removed from the rendered
- *     list. They get a visible `[✗ false positive]` tag and are downranked
- *     to the bottom so the user can see and override the validator's
- *     judgment — the same "never hide" principle as the rejection store.
+ *   - The validator runs by default. Set `config.validate: false` to skip it
+ *     for an explicitly latency-sensitive review.
+ *   - Findings tagged "false-positive" are removed from active results and
+ *     retained in a structured discarded-findings section for auditability.
  */
 
 import { extractBalancedJsonArray } from "./json-extract.js";
@@ -155,6 +152,26 @@ export function applyValidatorVerdicts(
 		};
 	});
 }
+
+/**
+ * Select only findings for which another model call can materially reduce
+ * noise. Blockers always qualify; medium/low findings must be explicitly
+ * suspect or omit confidence. Confirmed and likely findings already have
+ * sufficient evidence, while suppressions and rejections are never
+ * candidates.
+ */
+export function selectFindingsForValidation(
+	findings: readonly Finding[],
+): Finding[] {
+	return findings.filter((finding) => {
+		if (finding._suppressed || finding._previouslyRejected) return false;
+		if (finding.severity === "critical" || finding.severity === "high") {
+			return true;
+		}
+		return finding.confidence === "suspect" || finding.confidence === undefined;
+	});
+}
+
 
 /**
  * Run the validator stage over the synthesized findings. On any error

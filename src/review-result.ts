@@ -42,18 +42,9 @@ export interface ReviewResultCounts {
 	 */
 	readonly previouslyRejected: number;
 	/**
-	 * Validator stage output. Populated only when the review ran with
-	 * `validate: true`; otherwise all three are undefined.
-	 *
-	 * `validatorReal` = number of findings the validator confirmed.
-	 * `validatorFalsePositive` = number of findings the validator
-	 *   refuted (still surfaced, never hidden — see validator.ts).
-	 * `validatorUnverified` = number of findings left untagged because
-	 *   the validator was unavailable, errored, or could not conclude.
-	 *
-	 * The validator never drops a finding; false-positives are still
-	 * rendered (with a tag) so the user can see and override the
-	 * validator's judgment.
+	 * Validator stage output. Populated when validation ran.
+	 * Refuted findings are retained in `discardedFindings`, never in these
+	 * active counts or the deterministic outcome.
 	 */
 	readonly validatorReal?: number;
 	readonly validatorFalsePositive?: number;
@@ -89,6 +80,10 @@ export interface ReviewResult {
 	readonly files: string[];
 	readonly counts: ReviewResultCounts;
 	readonly findings: Finding[];
+	/** Findings refuted by the validator, retained for auditability only. */
+	readonly discardedFindings?: Finding[];
+	/** Best-effort reason when the validator failed open. */
+	readonly validatorError?: string;
 	readonly summary: string;
 	readonly errors: string[];
 	readonly validationIssues: ReviewValidationIssue[];
@@ -111,6 +106,16 @@ export interface ReviewResult {
 }
 
 export interface BuildReviewResultOptions {
+	/** Override synthesized findings after a verification pass. */
+	readonly findings?: readonly Finding[];
+	/** Validator-refuted findings to retain outside the active result. */
+	readonly discardedFindings?: readonly Finding[];
+	readonly validatorCounts?: {
+		readonly real: number;
+		readonly falsePositive: number;
+		readonly unverified: number;
+	};
+	readonly validatorError?: string;
 	readonly target?: ReviewResultTarget;
 	/**
 	 * Severity overrides to apply after validation (Phase 2).
@@ -159,7 +164,14 @@ export function buildReviewResult(
 ): ReviewResult {
 	const synthesis = job.synthesisResult;
 	const scope = new Set(job.files.map(normalizePath));
-	const validation = validateFindings(synthesis?.findings ?? [], scope);
+	const discardedKeys = new Set(
+		(options.discardedFindings ?? []).map(getFindingIdentity),
+	);
+	const sourceFindings = (options.findings ?? synthesis?.findings ?? []).filter(
+		(finding) => !discardedKeys.has(getFindingIdentity(finding)),
+	);
+	const validation = validateFindings(sourceFindings, scope);
+	const validationIssues = validation.issues;
 	const overridden = options.severityOverrides
 		? applySeverityOverrides(validation.findings, options.severityOverrides)
 		: validation.findings;
@@ -183,11 +195,21 @@ export function buildReviewResult(
 		(f) => (f as Finding & { _previouslyRejected?: true })._previouslyRejected,
 	);
 	const budgeted = applyFindingBudget(activeFresh, options.findingBudget);
-	const counts = countFindings(
+	const baseCounts = countFindings(
 		budgeted.findings,
 		suppressed.length,
 		previouslyRejected.length,
 	);
+	const counts: ReviewResultCounts = {
+		...baseCounts,
+		...(options.validatorCounts
+			? {
+					validatorReal: options.validatorCounts.real,
+					validatorFalsePositive: options.validatorCounts.falsePositive,
+					validatorUnverified: options.validatorCounts.unverified,
+				}
+			: {}),
+	};
 	const errors = collectErrors(job, options.preparationErrors);
 	// Health reflects only active code findings. Review failures and malformed
 	// synthesis output are represented independently by reviewStatus and the
@@ -196,7 +218,7 @@ export function buildReviewResult(
 	const outcome = finalizeReviewOutcome({
 		findings: budgeted.findings,
 		errors,
-		validationIssues: validation.issues,
+		validationIssues,
 		healthScore: hs.score,
 		qualityGateThreshold: options.qualityGateThreshold,
 	});
@@ -223,9 +245,17 @@ export function buildReviewResult(
 		// The last bucket is the "downrank" — same visual treatment as
 		// suppressed (collapsed under its own section in the widget).
 		findings: [...budgeted.findings, ...suppressed, ...previouslyRejected],
-		summary: formatSummary(synthesis?.summary, ignored.dropped),
+		...(options.discardedFindings && options.discardedFindings.length > 0
+			? { discardedFindings: [...options.discardedFindings] }
+			: {}),
+		...(options.validatorError ? { validatorError: options.validatorError } : {}),
+		summary: formatSummary(
+			synthesis?.summary,
+			ignored.dropped,
+			options.discardedFindings?.length ?? 0,
+		),
 		errors,
-		validationIssues: validation.issues,
+		validationIssues,
 		healthScore: hs.score,
 		scoreBreakdown: hs.breakdown,
 		...(options.prevScore !== null && options.prevScore !== undefined
@@ -331,11 +361,21 @@ function countFindings(
 function formatSummary(
 	summary: string | undefined,
 	ignoredCount: number,
+	discardedCount: number,
 ): string {
 	const base = summary ?? "Review did not produce a synthesis result.";
-	return ignoredCount > 0
-		? `${base}\n(DRYKISS dropped ${ignoredCount} finding(s) matching ignore patterns.)`
-		: base;
+	const notes: string[] = [];
+	if (ignoredCount > 0) {
+		notes.push(
+			`DRYKISS dropped ${ignoredCount} finding(s) matching ignore patterns.`,
+		);
+	}
+	if (discardedCount > 0) {
+		notes.push(
+			`Validator refuted ${discardedCount} finding(s); see discardedFindings for audit details.`,
+		);
+	}
+	return notes.length > 0 ? `${base}\n(${notes.join(" ")})` : base;
 }
 
 function collectErrors(
@@ -359,6 +399,19 @@ function collectErrors(
 
 function normalizePath(file: string): string {
 	return String(file).replaceAll(/\\/g, "/").replace(/^\.\//, "");
+}
+
+export function getFindingIdentity(finding: Finding): string {
+	return JSON.stringify([
+		normalizePath(finding.file),
+		finding.line ?? null,
+		finding.category,
+		finding.summary,
+		finding.detail,
+		finding.suggestion,
+		finding.lens ?? null,
+		finding.riskCode ?? null,
+	]);
 }
 
 function isSafeRelativePath(file: string): boolean {

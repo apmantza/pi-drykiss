@@ -7,6 +7,7 @@ import {
 	applySuppressions,
 	isSuppressionExpired,
 	getExpiredSuppressionIds,
+	getFindingIdentity,
 } from "./review-result.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { Finding } from "./types.js";
@@ -70,6 +71,18 @@ function job(overrides: Partial<ReviewJob> = {}): ReviewJob {
 		...overrides,
 	};
 }
+
+describe("getFindingIdentity", () => {
+	it("normalizes path separators while retaining finding context", () => {
+		const base = finding({ file: "src/a.ts", line: 3 });
+		expect(getFindingIdentity({ ...base, file: "src\\a.ts" })).toBe(
+			getFindingIdentity(base),
+		);
+		expect(getFindingIdentity({ ...base, line: 4 })).not.toBe(
+			getFindingIdentity(base),
+		);
+	});
+});
 
 describe("validateFindings", () => {
 	it("keeps valid in-scope findings", () => {
@@ -599,6 +612,27 @@ describe("buildReviewResult — mermaidGraph", () => {
 		const result = buildReviewResult(job());
 		expect(result.mermaidGraph).toBeUndefined();
 	});
+});
+
+describe("buildReviewResult — discarded validator findings", () => {
+	it("keeps refuted findings out of active risk and health scoring", () => {
+		const refuted = finding({ severity: "critical", lens: "security" });
+		const result = buildReviewResult(job(), {
+			findings: [refuted],
+			discardedFindings: [{ ...refuted, _validatorVerdict: "false-positive" }],
+			validatorCounts: { real: 0, falsePositive: 1, unverified: 0 },
+			validatorError: "validator unavailable",
+		});
+		expect(result.findings).toEqual([]);
+		expect(result.discardedFindings).toHaveLength(1);
+		expect(result.counts.total).toBe(0);
+		expect(result.counts.validatorFalsePositive).toBe(1);
+		expect(result.validatorError).toBe("validator unavailable");
+		expect(result.summary).toContain("Validator refuted 1 finding");
+		expect(result.codeRisk).toBe("clean");
+		expect(result.qualityGate.status).toBe("pass");
+	});
+
 });
 
 describe("buildReviewResult — rejections", () => {

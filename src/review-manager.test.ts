@@ -58,8 +58,14 @@ vi.mock("./config.js", () => ({
 	loadConfig: vi.fn().mockResolvedValue({ autoroute: false }),
 }));
 
+vi.mock("./validator.js", () => ({
+	runValidator: vi.fn(),
+	selectFindingsForValidation: vi.fn((findings: unknown[]) => findings),
+}));
+
 // Import after mocks are set up
 const { ReviewManager } = await import("./review-manager.js");
+const { runValidator } = await import("./validator.js");
 
 function makeMinimalCtx() {
 	const models = [
@@ -220,6 +226,100 @@ describe("ReviewManager", () => {
 		expect(onProgress).toHaveBeenCalled();
 		expect(result.target?.label).toBe("local changes");
 		expect(result.counts.total).toBe(0);
+	});
+
+	it("validates by default and excludes refuted findings from the outcome", async () => {
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		const candidate = {
+			file: "test.ts",
+			line: 1,
+			severity: "high" as const,
+			category: "Security",
+			summary: "False alarm",
+			detail: "The reported execution path is unreachable.",
+			suggestion: "No change needed.",
+		};
+		vi.mocked(runLensSubagent).mockImplementation(
+			async (...args: unknown[]) => {
+				const lens = args[5] as string;
+				return {
+					lens,
+					text:
+						lens === "synthesis"
+							? JSON.stringify({
+									summary: "One finding.",
+									findings: [candidate],
+								})
+							: "[]",
+					modelName: "mock-model",
+					durationMs: 1,
+					session: { dispose: vi.fn() },
+				} as any;
+			},
+		);
+		vi.mocked(runValidator).mockResolvedValue({
+			findings: [{ ...candidate, _validatorVerdict: "false-positive" }],
+			droppedFalsePositives: 1,
+			confirmedReal: 0,
+			unverified: 0,
+		});
+
+		const result = await manager.runReview(
+			makeMinimalCtx(),
+			makeMinimalPi(),
+			"/home/test",
+			[{ path: "test.ts", status: "modified", language: "TypeScript" }],
+			new Map([["test.ts", "diff"]]),
+			undefined,
+			undefined,
+			{ lenses: ["security"] },
+		);
+
+		expect(runValidator).toHaveBeenCalledOnce();
+		expect(result.findings).toEqual([]);
+		expect(result.discardedFindings).toHaveLength(1);
+		expect(result.counts.validatorFalsePositive).toBe(1);
+		expect(result.codeRisk).toBe("clean");
+	});
+
+	it("skips validation when explicitly disabled", async () => {
+		const { runLensSubagent } = await import("./subagent-runner.js");
+		const candidate = {
+			file: "test.ts",
+			line: 1,
+			severity: "high" as const,
+			category: "Security",
+			summary: "Active finding",
+			detail: "A real execution path exists.",
+			suggestion: "Fix it.",
+		};
+		vi.mocked(runLensSubagent).mockImplementation(
+			async (...args: unknown[]) => ({
+				lens: args[5],
+				text:
+					args[5] === "synthesis"
+						? JSON.stringify({ summary: "One finding.", findings: [candidate] })
+						: "[]",
+				modelName: "mock-model",
+				durationMs: 1,
+				session: { dispose: vi.fn() },
+			}) as any,
+		);
+
+		const result = await manager.runReview(
+			makeMinimalCtx(),
+			makeMinimalPi(),
+			"/home/test",
+			[{ path: "test.ts", status: "modified", language: "TypeScript" }],
+			new Map([["test.ts", "diff"]]),
+			undefined,
+			undefined,
+			{ lenses: ["security"], validate: false },
+		);
+
+		expect(runValidator).not.toHaveBeenCalled();
+		expect(result.findings).toHaveLength(1);
+		expect(result.counts.validatorFalsePositive).toBeUndefined();
 	});
 
 	it("waitForReview resolves after a job completes", async () => {
