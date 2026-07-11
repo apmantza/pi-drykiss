@@ -96,12 +96,25 @@ export async function runScout(
 		maxFiles,
 	});
 
+	console.log(`${LOG_PREFIX} Scout running on ${allFiles.length} file(s)...`);
 	try {
-		const response = await callLLM(ctx, systemPrompt, userPrompt, {
-			signal: options.signal,
-			maxTokens: 4000,
-		});
-		return parseScoutResult(response.text, allFiles);
+		const response = await callLLM(
+			ctx,
+			systemPrompt,
+			userPrompt,
+			{
+				signal: options.signal,
+				maxTokens: 4000,
+			},
+			"scout",
+		);
+		const result = parseScoutResult(response.text, allFiles);
+		if (result) {
+			console.log(
+				`${LOG_PREFIX} Scout selected ${result.files.length} file(s); excluded ${result.excludedPatterns.length} pattern(s).`,
+			);
+		}
+		return result;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		console.warn(
