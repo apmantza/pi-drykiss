@@ -11,7 +11,6 @@ import {
 	createFallbackSynthesis,
 	parseSynthesis,
 } from "./types.js";
-import { parseFindingsJson } from "./parse-findings.js";
 import {
 	buildReviewPrompts,
 	buildBucketedSynthesisPrompt,
@@ -19,11 +18,14 @@ import {
 } from "./prompt-builder.js";
 import {
 	saveReview,
-	saveSessionLog,
 	appendHistory,
 	loadHistory,
 } from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
+import {
+	runLens as runLensTask,
+	type LensExecutionTask,
+} from "./lens-runner.js";
 import { findModelByHint } from "./llm.js";
 import { isModelError, selectModelOnError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
@@ -141,28 +143,6 @@ function formatDiffsForValidator(diffs: Map<string, string>): string {
 		}
 	}
 	return `# Diff Under Review\n\n${blocks.join("\n\n")}`;
-}
-
-function applySuccessfulLensOutput(
-	state: LensState,
-	text: string,
-	lens: ReviewLens,
-): void {
-	state.status = "done";
-	const rawOutput = text || "[]";
-	const { findings, parseError } = parseFindingsJson(rawOutput, lens);
-	if (parseError) {
-		console.warn(
-			`${LOG_PREFIX} ${parseError} Raw output preserved for inspection.`,
-		);
-		state.status = "error";
-		state.errorMessage = parseError;
-		state.rawOutput = rawOutput;
-		state.findingsCount = 0;
-		return;
-	}
-	state.rawOutput = JSON.stringify(findings, null, 2);
-	state.findingsCount = findings.length;
 }
 
 export class ReviewManager {
@@ -415,187 +395,56 @@ export class ReviewManager {
 		ctx: ExtensionContext,
 		pi: ExtensionAPI,
 		cwd: string,
-		task: {
-			jobId: string;
-			lens: ReviewLens;
-			model: Model<Api>;
-			systemPrompt: string;
-			userPrompt: string;
-			signal: AbortSignal;
-			onStreamUpdate: () => void;
-		},
-	) {
-		const job = this.jobs.get(task.jobId);
-		if (!job) return;
-
-		const state = job.states.get(task.lens)!;
-		state.status = "running";
-		state.startedAt = Date.now();
-		try {
-			this.onUpdate?.(job);
-		} catch {
-			/* don't let callback errors crash the loop */
-		}
-
-		const { runLensSubagent } = await import("./subagent-runner.js");
-		const result = await runLensSubagent(
-			ctx,
-			cwd,
-			task.model,
-			task.systemPrompt,
-			task.userPrompt,
-			task.lens,
-			task.signal,
-			() => {
-				// Update streaming text for live progress display
-				state.streamingText = "streaming...";
-				task.onStreamUpdate();
+		task: LensExecutionTask,
+	): Promise<void> {
+		await runLensTask(ctx, pi, cwd, task, {
+			getJob: (jobId) => this.jobs.get(jobId),
+			onUpdate: this.onUpdate,
+			retryOnModelError: this.retryOnModelError.bind(this),
+			onAllLensesDone: (runCtx, runCwd, job) =>
+				this.handleAllLensesDone(runCtx, runCwd, job),
+			drain: (runCtx, runPi, runCwd) => {
+				this.drain(runCtx, runPi, runCwd).catch((err) => {
+					console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
+				});
 			},
-		);
+		});
+	}
 
-		state.durationMs = result.durationMs;
-		state.session = result.session;
-		try {
-			state.logPath = await saveSessionLog(job.id, task.lens, result.session);
-		} catch (err) {
-			console.warn(
-				"%s Failed to save session log for %s: %s",
-				LOG_PREFIX,
-				task.lens,
-				err instanceof Error ? err.message : String(err),
-			);
+	private async handleAllLensesDone(
+		ctx: ExtensionContext,
+		cwd: string,
+		job: ReviewJob,
+	): Promise<void> {
+		if (this.synthesisLocks.has(job.id)) return;
+		this.synthesisLocks.add(job.id);
+		if (job.synthesisStatus !== "idle") {
+			this.synthesisLocks.delete(job.id);
+			return;
 		}
-		if (result.errorMessage) {
-			// Check if this is a model error (quota/auth) that should trigger model selection
-			const isModelErr = isModelError(result.errorMessage);
-			if (isModelErr) {
-				// Auto-route to a free model if the user has configured it;
-				// otherwise show the standard picker popup. Exclude the model
-				// that just failed so autorouting can't loop on it. When the
-				// error is server-gated, the retry path skips free models and
-				// falls back to the default config model (paid tier).
-				const retryResult = await this.retryOnModelError(
-					ctx,
-					task.model,
-					state.session,
-					task.lens,
-					async (m) =>
-						runLensSubagent(
-							ctx,
-							cwd,
-							m,
-							task.systemPrompt,
-							task.userPrompt,
-							task.lens,
-							task.signal,
-							() => {
-								state.streamingText = "streaming...";
-								task.onStreamUpdate();
-							},
-						),
-					{ error: result.errorMessage, lens: task.lens },
-				);
-				if (retryResult) {
-					state.session = retryResult.session;
-					// Update provider/modelName with the model that
-					// actually produced this review. Without this the
-					// widget/notification would keep advertising the
-					// original (failed) model — misleading when
-					// autorouting or per-lens fallback swapped models.
-					// retryResult.modelName and retryResult.provider are
-					// set by runLensSubagent from the model arg of the
-					// retry call.
-					state.modelName = retryResult.modelName;
-					if (retryResult.provider) {
-						state.provider = retryResult.provider;
-					}
-					try {
-						state.logPath = await saveSessionLog(
-							job.id,
-							task.lens,
-							retryResult.session,
-						);
-					} catch (err) {
-						console.warn(
-							"%s Failed to save session log for %s: %s",
-							LOG_PREFIX,
-							task.lens,
-							err instanceof Error ? err.message : String(err),
-						);
-					}
-					if (retryResult.errorMessage) {
-						state.status = "error";
-						state.errorMessage = retryResult.errorMessage;
-						state.rawOutput = `ERROR: ${retryResult.errorMessage}`;
-					} else {
-						applySuccessfulLensOutput(state, retryResult.text, task.lens);
-					}
-				} else {
-					state.status = "error";
-					state.errorMessage = result.errorMessage;
-					state.rawOutput = `ERROR: ${result.errorMessage}`;
-					state.session = undefined;
-				}
-			} else {
-				// Not a model error or no UI - just record the error
-				state.status = "error";
-				state.errorMessage = result.errorMessage;
-				state.rawOutput = `ERROR: ${result.errorMessage}`;
-			}
-		} else {
-			applySuccessfulLensOutput(state, result.text, task.lens);
-		}
-
+		job.synthesisStatus = "running";
+		job.synthesisStartedAt = Date.now();
 		try {
 			this.onUpdate?.(job);
 		} catch {
 			/* don't let callback errors crash the loop */
 		}
-
-		// Check if all lenses for this job are done
-		const allDone = job.lenses.every((l) => {
-			const s = job.states.get(l)!;
-			return s.status === "done" || s.status === "error";
-		});
-
-		// Atomic check-and-set: use a lock set to prevent concurrent synthesis runs
-		if (allDone && !this.synthesisLocks.has(job.id)) {
-			this.synthesisLocks.add(job.id);
-			if (job.synthesisStatus !== "idle") {
-				this.synthesisLocks.delete(job.id);
-				return;
-			}
-			job.synthesisStatus = "running";
-			job.synthesisStartedAt = Date.now();
+		try {
+			await this.runSynthesis(ctx, cwd, job);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			job.synthesisStatus = "error";
+			job.synthesisResult = createFallbackSynthesis(`Synthesis crashed: ${msg}`);
+			job.overallStatus = "error";
+			job.completedAt = Date.now();
 			try {
-				this.onUpdate?.(job);
+				this.onComplete?.(job);
 			} catch {
-				/* don't let callback errors crash the loop */
+				/* ignore */
 			}
-			try {
-				await this.runSynthesis(ctx, cwd, job);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				job.synthesisStatus = "error";
-				job.synthesisResult = createFallbackSynthesis(
-					`Synthesis crashed: ${msg}`,
-				);
-				job.overallStatus = "error";
-				job.completedAt = Date.now();
-				try {
-					this.onComplete?.(job);
-				} catch {
-					/* ignore */
-				}
-			} finally {
-				this.synthesisLocks.delete(job.id);
-			}
+		} finally {
+			this.synthesisLocks.delete(job.id);
 		}
-
-		// Keep draining - catch errors to prevent unhandled rejections
-		this.drain(ctx, pi, cwd).catch((err) => {
-			console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
-		});
 	}
 
 	private async runSynthesis(

@@ -21,10 +21,7 @@ import {
 	composeSynthesisPrompt,
 	type ComposeOptions,
 } from "./prompt-composer.js";
-import {
-	modeToPosture,
-	loadModeContextBlock,
-} from "./mode-context.js";
+import { modeToPosture, loadModeContextBlock } from "./mode-context.js";
 import {
 	loadProjectReviewPolicy,
 	selectPathInstructions,
