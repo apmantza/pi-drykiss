@@ -256,6 +256,13 @@ export async function executeDrykissAutoreviewTool(
 		);
 	}
 
+	if (effectiveConfig.scout?.enabled && scope.mode === "full") {
+		safeOnUpdate(
+			onUpdate,
+			`DRYKISS scout: mapping project and selecting files for review...`,
+		);
+	}
+
 	safeOnUpdate(
 		onUpdate,
 		`DRYKISS autoreview progress: [${"░".repeat(10)}] 0/${lenses.length} lens(es) complete · starting ${cappedScope.label} (${cappedScope.files.length} file(s))${capNote}`,
