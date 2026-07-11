@@ -632,7 +632,6 @@ describe("buildReviewResult — discarded validator findings", () => {
 		expect(result.codeRisk).toBe("clean");
 		expect(result.qualityGate.status).toBe("pass");
 	});
-
 });
 
 describe("buildReviewResult — rejections", () => {

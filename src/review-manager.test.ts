@@ -294,16 +294,20 @@ describe("ReviewManager", () => {
 			suggestion: "Fix it.",
 		};
 		vi.mocked(runLensSubagent).mockImplementation(
-			async (...args: unknown[]) => ({
-				lens: args[5],
-				text:
-					args[5] === "synthesis"
-						? JSON.stringify({ summary: "One finding.", findings: [candidate] })
-						: "[]",
-				modelName: "mock-model",
-				durationMs: 1,
-				session: { dispose: vi.fn() },
-			}) as any,
+			async (...args: unknown[]) =>
+				({
+					lens: args[5],
+					text:
+						args[5] === "synthesis"
+							? JSON.stringify({
+									summary: "One finding.",
+									findings: [candidate],
+								})
+							: "[]",
+					modelName: "mock-model",
+					durationMs: 1,
+					session: { dispose: vi.fn() },
+				}) as any,
 		);
 
 		const result = await manager.runReview(

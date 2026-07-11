@@ -22,14 +22,14 @@ Several inspiration items are already partly or fully implemented and should be 
 
 - All lens prompt files already have lens-specific **What NOT to Flag** guidance.
 - `review-result.ts` already performs deterministic shape/scope validation.
-- `validator.ts` already provides an opt-in adversarial LLM validator.
+- `validator.ts` provides a default-on, fail-open adversarial LLM validator; `validate: false` is an explicit opt-out.
 - `review-guidelines.md` and `REVIEW_GUIDELINES.md` already provide review-only policy.
 - `ignorePatterns`, risk targeting, suppressions, and rejection downranking already reduce noise.
 - Findings already support P0-P3 priority and validator metadata.
 - Deep review is explicit and separate from the default flat fan-out.
 - Lens outputs are bucketed before synthesis.
 
-The main gaps are inconsistent final-result semantics, no central review plan, limited path-specific policy, no finding budget, no session-intent context, and no utility benchmark.
+The remaining gaps are a central review plan, session-intent context, shared context hashing, and role-aware model routing. Deterministic finalization, path policy, finding budgets, selective validation, and the benchmark harness now exist.
 
 ## Design constraints
 

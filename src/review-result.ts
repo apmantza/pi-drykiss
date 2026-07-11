@@ -248,7 +248,9 @@ export function buildReviewResult(
 		...(options.discardedFindings && options.discardedFindings.length > 0
 			? { discardedFindings: [...options.discardedFindings] }
 			: {}),
-		...(options.validatorError ? { validatorError: options.validatorError } : {}),
+		...(options.validatorError
+			? { validatorError: options.validatorError }
+			: {}),
 		summary: formatSummary(
 			synthesis?.summary,
 			ignored.dropped,

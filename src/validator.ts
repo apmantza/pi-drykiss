@@ -172,7 +172,6 @@ export function selectFindingsForValidation(
 	});
 }
 
-
 /**
  * Run the validator stage over the synthesized findings. On any error
  * (model failure, unparseable output, etc.) the result is "fail open":

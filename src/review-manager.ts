@@ -850,17 +850,17 @@ export class ReviewManager {
 					if (annotated?._validatorVerdict === "false-positive") return [];
 					return annotated
 						? [
-							{
-								...finding,
-								_validatorVerdict: annotated._validatorVerdict,
-								...(annotated._validatorJustification
-									? {
-										_validatorJustification:
-											annotated._validatorJustification,
-									}
-									: {}),
-							},
-						]
+								{
+									...finding,
+									_validatorVerdict: annotated._validatorVerdict,
+									...(annotated._validatorJustification
+										? {
+												_validatorJustification:
+													annotated._validatorJustification,
+											}
+										: {}),
+								},
+							]
 						: [finding];
 				},
 			);

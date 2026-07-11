@@ -239,7 +239,6 @@ describe("selectFindingsForValidation", () => {
 	});
 });
 
-
 describe("runValidator — fail-open behavior", () => {
 	function ctx(): {
 		ui: { notify: (msg: string, level: string) => void };
