@@ -127,15 +127,19 @@ export async function resolveReviewScope(
 	}
 
 	const reviewOptions = toReviewOptions(mode, request);
+	const scoutMetadata: Record<string, unknown> = {};
 	let discoveredFiles: ChangedFile[];
 	if (mode === "full" && options.scout?.enabled) {
 		if (!ctx) {
+			scoutMetadata.status = "no-context";
 			console.warn(
 				`${LOG_PREFIX} Scout requested but no ExtensionContext available; falling back to full file list.`,
 			);
 			discoveredFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
 		} else {
+			scoutMetadata.status = "running";
 			const allFiles = await getAllSourceFiles(cwd, options.ignorePatterns);
+			scoutMetadata.totalFiles = allFiles.length;
 			const scoutResult = await runScout(ctx, {
 				cwd,
 				allFiles,
@@ -144,9 +148,17 @@ export async function resolveReviewScope(
 				ignorePatterns: options.ignorePatterns,
 				signal: options.signal,
 			});
-			discoveredFiles = scoutResult
-				? applyScoutResult(allFiles, scoutResult)
-				: allFiles;
+			if (scoutResult) {
+				scoutMetadata.status = "success";
+				scoutMetadata.selectedFiles = scoutResult.files.length;
+				scoutMetadata.excludedPatterns = scoutResult.excludedPatterns;
+				scoutMetadata.summary = scoutResult.summary;
+				discoveredFiles = applyScoutResult(allFiles, scoutResult);
+			} else {
+				scoutMetadata.status = "fallback";
+				scoutMetadata.reason = "Scout returned undefined (LLM/parse failure)";
+				discoveredFiles = allFiles;
+			}
 		}
 	} else {
 		discoveredFiles =
@@ -192,7 +204,7 @@ export async function resolveReviewScope(
 			...(contentCollection?.errors ?? []),
 		],
 		options: reviewOptions,
-		metadata: {},
+		metadata: scoutMetadata,
 	};
 }
 

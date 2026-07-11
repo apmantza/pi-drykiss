@@ -227,6 +227,7 @@ export async function executeDrykissAutoreviewTool(
 		cappedScope.files.length < scope.files.length
 			? ` · capped to ${cappedScope.files.length}/${scope.files.length} file(s) by autoreview.maxFiles`
 			: "";
+	const scoutNote = buildScoutNote(scope);
 
 	// Deep mode: Bugbot-style pipeline for a single lens. Skips the
 	// standard multi-lens flow and synthesis entirely; returns the
@@ -302,6 +303,7 @@ export async function executeDrykissAutoreviewTool(
 		: "";
 	const text =
 		progressLine +
+		(scoutNote ? `${scoutNote}\n` : "") +
 		(formatMode === "compact"
 			? formatReviewResultCompact(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
@@ -326,6 +328,19 @@ export async function executeDrykissAutoreviewTool(
  * - Otherwise falls back to `lenses`.
  * - Default: all lenses.
  */
+function buildScoutNote(scope: ReviewScope): string {
+	if (!scope.metadata || scope.mode !== "full") return "";
+	const status = scope.metadata.status;
+	if (status === "success") {
+		const selected = scope.metadata.selectedFiles;
+		const total = scope.metadata.totalFiles;
+		return ` · scout selected ${selected}/${total} file(s)`;
+	}
+	if (status === "fallback") return " · scout failed; using full file list";
+	if (status === "no-context") return " · scout unavailable (no context)";
+	return "";
+}
+
 function resolveLenses(
 	single: "all" | Exclude<ReviewLens, "all"> | undefined,
 	multi: "all" | Exclude<ReviewLens, "all">[] | undefined,
