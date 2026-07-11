@@ -13,7 +13,7 @@
  * this file.
  */
 
-export interface RiskCodeDefinition {
+interface RiskCodeDefinition {
 	/** Short identifier (e.g. "R1", "K1"). */
 	readonly code: string;
 	/** Human-readable name. */
@@ -205,16 +205,7 @@ export const RISK_CODES = {
 	},
 } as const satisfies Record<string, RiskCodeDefinition>;
 
-/** Array form for iteration / UI display (preserves declaration order). */
-export const RISK_CODE_LIST: readonly RiskCodeDefinition[] =
-	Object.values(RISK_CODES);
-
 /** A Set of valid risk codes for O(1) membership checks. */
 export const VALID_RISK_CODES: ReadonlySet<string> = new Set(
 	Object.keys(RISK_CODES),
 );
-
-/** All valid risk codes as a sorted array (alphabetical). */
-export const VALID_RISK_CODES_SORTED: readonly string[] = Object.keys(
-	RISK_CODES,
-).sort((a, b) => a.localeCompare(b));

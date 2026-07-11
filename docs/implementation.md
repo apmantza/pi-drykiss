@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD013 -->
+
 # Autoreview Implementation Proposal
 
 This document turns the ideas in `autoreview-inspiration.md` into an incremental plan for `pi-drykiss`. The goal is not to implement every surveyed feature. The goal is to improve trust, signal, and cost control without changing the core architecture: independent parallel lenses followed by synthesis.
@@ -45,7 +47,7 @@ The remaining gaps are a central review plan, session-intent context, shared con
 
 ## Milestone 1 — Deterministic finalization and honest result semantics
 
-### Problem
+### Problem — deterministic result semantics
 
 `buildReviewResult()` currently assigns a health score of zero when a lens fails or a synthesized finding fails structural validation. This combines two separate facts:
 
@@ -54,7 +56,7 @@ The remaining gaps are a central review plan, session-intent context, shared con
 
 The final ignore filter in `review-command.ts` also rebuilds only part of the result, so counts, cleanliness, score, and verdict can diverge after filtering.
 
-### Proposal
+### Proposal — deterministic finalizer
 
 Add `src/review-finalizer.ts` and make it the only place that constructs the externally visible result. It should apply, in order:
 
@@ -116,11 +118,11 @@ Synthesis remains responsible for semantic deduplication, ranking, and summary t
 
 ## Milestone 2 — Unified review policy and path-specific routing
 
-### Problem
+### Problem — path-specific policy
 
 The project supports global scope ignores and one review-guidelines file, but cannot express “review this path with these checks” separately from “exclude this path.”
 
-### Proposal
+### Proposal — unified policy
 
 Add `src/review-policy.ts` with a normalized policy model:
 
@@ -183,14 +185,14 @@ Precedence should be deterministic:
 
 Only inject instructions matching files in the current scope. Delimit them as repository-provided review policy, not system instructions.
 
-### Files
+### Files — policy modules
 
 - New: `src/review-policy.ts`, `src/review-policy.test.ts`
 - Update: `src/config.ts`, `src/review-scope.ts`, `src/prompt-builder.ts`
 - Add shared prompt framing in `src/prompts/_shared/`
 - Update config and prompt-composition tests
 
-### Acceptance criteria
+### Acceptance criteria — policy
 
 - Filter precedence is unit-tested for explicit files, force-includes, and ordinary excludes.
 - Instructions for one glob never leak into unrelated paths.
@@ -208,7 +210,7 @@ Add a deterministic budget after synthesis. Do not rely only on prompts to honor
 Recommended defaults:
 
 | Review class | Active finding cap | Nit cap |
-|---|---:|---:|
+| --- | ---: | ---: |
 | quick/trivial | 3 | 0 |
 | standard/lite | 8 | 2 |
 | standard/full | 15 | 3 |
@@ -236,7 +238,7 @@ Run structural validation before the LLM validator. A validator-confirmed false 
 
 Rename misleading counters such as `droppedFalsePositives` if the finding is merely annotated rather than dropped.
 
-### Files
+### Files — budget and validation
 
 - New: `src/finding-budget.ts`, tests
 - Update: `src/validator.ts`, `src/review-finalizer.ts`, `src/types.ts`
