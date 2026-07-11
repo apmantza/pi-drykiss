@@ -1,5 +1,8 @@
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { ExtensionContext, AgentSession } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionContext,
+	AgentSession,
+} from "@earendil-works/pi-coding-agent";
 import {
 	buildBucketedSynthesisPrompt,
 	buildSynthesisPrompt,
@@ -22,7 +25,9 @@ export interface SynthesisRunnerOptions {
 	readonly onComplete: (job: ReviewJob) => void;
 }
 
-function lensReviewsFor(job: ReviewJob): Array<{ lens: string; rawOutput: string }> {
+function lensReviewsFor(
+	job: ReviewJob,
+): Array<{ lens: string; rawOutput: string }> {
 	return job.lenses.map((lens) => ({
 		lens,
 		rawOutput: job.states.get(lens)?.rawOutput ?? "ERROR: missing lens state",
@@ -45,7 +50,10 @@ async function buildPrompt(
 	}
 }
 
-function replaceSynthesisSession(job: ReviewJob, session: AgentSession | undefined): void {
+function replaceSynthesisSession(
+	job: ReviewJob,
+	session: AgentSession | undefined,
+): void {
 	if (!session) return;
 	if (job.synthesisSession && job.synthesisSession !== session) {
 		try {
@@ -115,7 +123,9 @@ export async function runSynthesis(
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		job.synthesisStatus = "error";
-		job.synthesisResult = createFallbackSynthesis(`Synthesis failed: ${message}`);
+		job.synthesisResult = createFallbackSynthesis(
+			`Synthesis failed: ${message}`,
+		);
 	}
 
 	job.overallStatus =
