@@ -389,7 +389,7 @@ export class ReviewManager {
 		await runLensTask(ctx, pi, cwd, task, {
 			getJob: (jobId) => this.jobs.get(jobId),
 			onUpdate: this.onUpdate,
-			retryOnModelError: this.retryOnModelError.bind(this),
+			retryOnModelError: this.retryOnModelError,
 			onAllLensesDone: (runCtx, runCwd, job) =>
 				this.handleAllLensesDone(runCtx, runCwd, job),
 			drain: (runCtx, runPi, runCwd) => {
@@ -444,7 +444,7 @@ export class ReviewManager {
 		job: ReviewJob,
 	): Promise<void> {
 		await runSynthesisTask(ctx, cwd, job, {
-			retryOnModelError: this.retryOnModelError.bind(this),
+			retryOnModelError: this.retryOnModelError,
 			onComplete: (completedJob) => this.onComplete?.(completedJob),
 		});
 	}
@@ -567,20 +567,19 @@ export class ReviewManager {
 				(finding) => {
 					const annotated = annotatedByKey.get(getFindingIdentity(finding));
 					if (annotated?._validatorVerdict === "false-positive") return [];
-					return annotated
-						? [
-								{
-									...finding,
-									_validatorVerdict: annotated._validatorVerdict,
-									...(annotated._validatorJustification
-										? {
-												_validatorJustification:
-													annotated._validatorJustification,
-											}
-										: {}),
-								},
-							]
-						: [finding];
+					if (!annotated) return [finding];
+					return [
+						{
+							...finding,
+							_validatorVerdict: annotated._validatorVerdict,
+							...(annotated._validatorJustification
+								? {
+										_validatorJustification:
+											annotated._validatorJustification,
+									}
+								: {}),
+						},
+					];
 				},
 			);
 			result = buildReviewResult(job, {

@@ -174,7 +174,7 @@ export function selectFindingsForValidation(
 
 /**
  * Run the validator stage over the synthesized findings. On any error
- * (model failure, unparseable output, etc.) the result is "fail open":
+ * (model failure, unparsable output, etc.) the result is "fail open":
  * every finding is tagged "unverified" and surfaced unchanged, so a
  * flaky validator never silently drops a real finding.
  */
