@@ -34,9 +34,9 @@ describe("review-bench fixtures", () => {
 			await mkdir(join(directory, "broken"));
 			await writeFile(join(directory, "broken", "manifest.json"), "{", "utf8");
 
-			await expect(loadReviewBenchFixture(join(directory, "broken"))).rejects.toThrow(
-				"Could not parse",
-			);
+			await expect(
+				loadReviewBenchFixture(join(directory, "broken")),
+			).rejects.toThrow("Could not parse");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -188,9 +188,9 @@ describe("scoreReviewBenchRun", () => {
 	});
 
 	it("rejects malformed recorded runs", () => {
-		expect(() =>
-			parseReviewBenchRun({ fixtureId: "", findings: [] }),
-		).toThrow("fixtureId must be a non-empty string");
+		expect(() => parseReviewBenchRun({ fixtureId: "", findings: [] })).toThrow(
+			"fixtureId must be a non-empty string",
+		);
 		expect(() =>
 			parseReviewBenchRun({
 				fixtureId: "command-injection",

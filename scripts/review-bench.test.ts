@@ -13,8 +13,8 @@ describe("review-bench CLI", () => {
 	it("rejects malformed command-line arguments", () => {
 		expect(() => parseCliArgs(["--results"])).toThrow("Invalid argument");
 		expect(() => parseCliArgs(["results", "runs.json"])).toThrow(
-		"Invalid argument",
-	);
+			"Invalid argument",
+		);
 	});
 
 	it("scores a recorded artifact and writes a versioned result", async () => {

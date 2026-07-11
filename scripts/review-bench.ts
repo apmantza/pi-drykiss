@@ -76,7 +76,9 @@ export function parseCliArgs(argv: readonly string[]): Record<string, string> {
 	return args;
 }
 
-async function loadRecordedRuns(path: string): Promise<readonly ReviewBenchRun[]> {
+async function loadRecordedRuns(
+	path: string,
+): Promise<readonly ReviewBenchRun[]> {
 	let value: unknown;
 	try {
 		value = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -109,7 +111,9 @@ async function main(): Promise<void> {
 const invokedPath = process.argv[1];
 if (invokedPath && resolve(invokedPath) === fileURLToPath(import.meta.url)) {
 	void main().catch((err: unknown) => {
-		process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(
+			`${err instanceof Error ? err.message : String(err)}\n`,
+		);
 		process.exitCode = 1;
 	});
 }
