@@ -15,7 +15,8 @@ src/
   llm.ts              # LLM call helpers (callLens, callSynthesizer, withRetry)
   prompt-loader.ts    # Pure file-reading: reads .md files from user dir (with bundled fallback)
   prompt-composer.ts  # Composes a lens system prompt from shared fragments + per-lens body
-  prompt-builder.ts   # Thin orchestrator: ties loader + composer together; user-prompt context; seed lifecycle
+  prompt-seed.ts      # Seeds bundled Markdown prompts into the user customization directory
+  prompt-builder.ts   # Thin orchestrator: ties loader + composer together; builds review context
   mode-context.ts     # Resolves review posture (proposed vs audit) and loads mode-context-{proposed,audit}.md
   prompts/            # The bundled default prompt text — the source of truth (see prompt-architecture.md)
     _shared/          # iron-law, json-output, json-output-synthesis, grounding-rules, grounding-rules-synthesis, active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes

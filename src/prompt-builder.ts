@@ -5,19 +5,17 @@
  * This module:
  *   - Re-exports the loader/composer entry points (`loadLensSystemPrompt`, `loadSynthesisSystemPrompt`)
  *   - Builds the user-prompt context (file diffs, project index)
- *   - Provides the bundled-prompt seeder (`ensureDefaultPrompts`, `resetPrompts`)
+ *   - Re-exports the bundled-prompt seeder from `prompt-seed.ts`
  *   - Builds the auto-inject KISS/DRY checklist (this is TUI text, not an LLM prompt — exempt from the `.md` rule)
  *
- * Total: ~530 lines. The previous version was 790 lines because it embedded ~600 lines of prompt text.
+ * Total: ~380 lines. Prompt seeding and file-system concerns live in `prompt-seed.ts`.
  */
 
-import { readFile, mkdir, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChangedFile, Finding, ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
-import { bundledPromptsDir, userPromptsDir } from "./prompt-loader.js";
-import { getNodeErrorCode, LOG_PREFIX } from "./constants.js";
+import { userPromptsDir } from "./prompt-loader.js";
 import {
 	composeLensPrompt,
 	composeSynthesisPrompt,
@@ -26,7 +24,6 @@ import {
 import {
 	modeToPosture,
 	loadModeContextBlock,
-	MODE_CONTEXT_FRAGMENT_NAMES,
 } from "./mode-context.js";
 import {
 	loadProjectReviewPolicy,
@@ -34,11 +31,10 @@ import {
 } from "./review-policy.js";
 import type { ReviewPathInstruction } from "./config.js";
 
-// Helper functions that go through the module namespace so vi.mock can
-// intercept the calls. (Destructured imports are not always live-bound
-// across the vitest + jiti boundary, so we wrap with thin delegators.)
+// Keep this indirection so vi.mock can intercept the loader in tests.
 const _userPromptsDir = (): string => userPromptsDir();
-const _bundledPromptsDir = (): string => bundledPromptsDir();
+
+export { ensureDefaultPrompts, resetPrompts } from "./prompt-seed.js";
 
 /** Compose a lens system prompt. Delegates to the composer (P0.5). */
 export async function loadLensSystemPrompt(
@@ -82,170 +78,6 @@ export async function loadSynthesisSystemPromptWithConfig(
 /** Returns the path to a lens or synthesis prompt file in the user dir. */
 export function getPromptPath(lens: ReviewLens | "synthesis"): string {
 	return join(_userPromptsDir(), `${lens}.md`);
-}
-
-// ── Bundled-defaults manifest ──────────────────────────────────────────
-
-/** All per-lens prompt filenames shipped in the bundle. */
-const BUNDLED_LENS_FILES = [
-	"simplicity.md",
-	"deduplication.md",
-	"clarity.md",
-	"resilience.md",
-	"architecture.md",
-	"tests.md",
-	"security.md",
-	"docs.md",
-	"synthesis.md",
-] as const;
-
-/** All shared-fragment filenames shipped in the bundle. */
-const BUNDLED_SHARED_FILES = [
-	"iron-law.md",
-	"json-output.md",
-	"json-output-synthesis.md",
-	"grounding-rules.md",
-	"grounding-rules-synthesis.md",
-	"active-constraints.md",
-	...Object.values(MODE_CONTEXT_FRAGMENT_NAMES).map((name) => `${name}.md`),
-] as const;
-
-/** Sentinel filename. Present = seeded at version X.Y.Z. */
-const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "6"; // bump to force re-seed (v6: split synthesis calibration into its own shared file)
-
-function sentinelPath(dir: string): string {
-	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);
-}
-
-async function isSeeded(dir: string): Promise<boolean> {
-	try {
-		await readFile(sentinelPath(dir), "utf8");
-		return true;
-	} catch (err) {
-		if (getNodeErrorCode(err) === "ENOENT") {
-			return false;
-		}
-		throw err;
-	}
-}
-
-async function writeSentinel(dir: string): Promise<void> {
-	await writeFile(
-		sentinelPath(dir),
-		`DRYKISS prompt seed v${CURRENT_SEED_VERSION}\n`,
-		"utf8",
-	);
-}
-
-async function removeOldSentinels(dir: string): Promise<void> {
-	try {
-		const entries = await readdir(dir);
-		await Promise.all(
-			entries.flatMap((name) => {
-				if (
-					!name.startsWith(SENTINEL_PREFIX) ||
-					name === `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`
-				) {
-					return [];
-				}
-				return [
-					writeFile(join(dir, name), "", "utf8")
-						.then(() => undefined)
-						.catch((err) => {
-							console.warn(
-								`${LOG_PREFIX} Failed to clear old sentinel ${name}: ${err instanceof Error ? err.message : String(err)}`,
-							);
-							return undefined;
-						}),
-				];
-			}),
-		);
-	} catch (err) {
-		if (getNodeErrorCode(err) !== "ENOENT") {
-			console.warn(
-				`${LOG_PREFIX} Failed to list old sentinels: ${err instanceof Error ? err.message : String(err)}`,
-			);
-		}
-	}
-}
-
-async function copyBundledFile(src: string, dest: string): Promise<void> {
-	const content = await readFile(src, "utf8");
-	await writeFile(dest, content, "utf8");
-}
-
-/** Copy all bundled lens prompts and shared fragments into the user dir. */
-async function copyBundledPrompts(
-	bundledDir: string,
-	userDir: string,
-): Promise<void> {
-	await mkdir(userDir, { recursive: true });
-	await mkdir(join(userDir, "_shared"), { recursive: true });
-
-	await Promise.all(
-		BUNDLED_LENS_FILES.map(async (filename) => {
-			const src = join(bundledDir, filename);
-			const dest = join(userDir, filename);
-			try {
-				await copyBundledFile(src, dest);
-			} catch (err) {
-				throw new Error(
-					`Failed to seed prompt ${filename}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-			return undefined;
-		}),
-	);
-
-	await Promise.all(
-		BUNDLED_SHARED_FILES.map(async (filename) => {
-			const src = join(bundledDir, "_shared", filename);
-			const dest = join(userDir, "_shared", filename);
-			try {
-				await copyBundledFile(src, dest);
-			} catch (err) {
-				throw new Error(
-					`Failed to seed shared fragment ${filename}: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-			return undefined;
-		}),
-	);
-}
-
-/**
- * Seed the user's prompt dir with all bundled `.md` files on first run.
- * Sentinel-gated: subsequent calls are no-ops.
- */
-export async function ensureDefaultPrompts(_cwd: string): Promise<void> {
-	try {
-		const userDir = _userPromptsDir();
-		await mkdir(userDir, { recursive: true });
-
-		if (await isSeeded(userDir)) {
-			return; // already seeded at this version
-		}
-
-		const bundledDir = _bundledPromptsDir();
-		await copyBundledPrompts(bundledDir, userDir);
-
-		// Clean up old-version sentinels and write the new one
-		await removeOldSentinels(userDir);
-		await writeSentinel(userDir);
-	} catch (err) {
-		throw err;
-	}
-}
-
-/**
- * Force re-seed: overwrite every bundled file in the user dir and refresh the sentinel.
- */
-export async function resetPrompts(): Promise<void> {
-	const userDir = _userPromptsDir();
-	const bundledDir = _bundledPromptsDir();
-	await copyBundledPrompts(bundledDir, userDir);
-	await writeSentinel(userDir);
 }
 
 // ── Context building ────────────────────────────────────────────────────
