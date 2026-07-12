@@ -40,6 +40,7 @@ import {
 } from "./review-result.js";
 import { loadRejections } from "./rejections.js";
 import { runValidator, selectFindingsForValidation } from "./validator.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 const CONCURRENCY = 3;
 const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
@@ -242,6 +243,13 @@ export class ReviewManager {
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
 		const lenses: ReviewLens[] = options.lenses ?? [...LENS_NAMES];
+		logAutoreviewEvent("review.job_start", {
+			jobId: id,
+			cwd,
+			files: files.length,
+			lenses,
+			mode: options.mode,
+		});
 
 		// Resolve models
 		const { resolveAllModels } = await import("./subagent-runner.js");
@@ -255,6 +263,15 @@ export class ReviewManager {
 			modelMap = await resolveAllModels(ctx, lenses);
 		}
 
+		logAutoreviewEvent("review.models_resolved", {
+			jobId: id,
+			models: [...modelMap.entries()].map(([lens, model]) => ({
+				lens,
+				model: model.name,
+				provider: model.provider,
+			})),
+		});
+
 		// Build prompts
 		const allPrompts = await buildReviewPrompts(cwd, files, diffs, "all", {
 			contents,
@@ -266,6 +283,14 @@ export class ReviewManager {
 			scopeLabel: options.scopeLabel,
 		});
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
+		logAutoreviewEvent("review.prompts_ready", {
+			jobId: id,
+			prompts: allPrompts.map((prompt) => ({
+				lens: prompt.lens,
+				systemChars: prompt.systemPrompt.length,
+				userChars: prompt.userPrompt.length,
+			})),
+		});
 
 		// Initialize job
 		const states = new Map<ReviewLens, LensState>();
@@ -291,6 +316,11 @@ export class ReviewManager {
 			startedAt: Date.now(),
 		};
 		this.jobs.set(id, job);
+		logAutoreviewEvent("review.job_created", {
+			jobId: id,
+			files: job.files.length,
+			lenses: job.lenses,
+		});
 
 		// Create abort controller for this job
 		const abortController = new AbortController();
@@ -331,6 +361,7 @@ export class ReviewManager {
 			this.drain(ctx, pi, cwd).catch(this.logDrainFailure);
 			return id;
 		} catch (err) {
+			logAutoreviewError("review.job_setup_error", err, { jobId: id });
 			// If anything fails after adding the job, clean up so no stale
 			// job is left with lens states stuck at "queued".
 			this.jobs.delete(id);
@@ -495,6 +526,12 @@ export class ReviewManager {
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
+		logAutoreviewEvent("review.run_start", {
+			cwd,
+			files: files.length,
+			lenses: options.lenses,
+			validate: options.validate !== false,
+		});
 		const jobId = await this.startReview(
 			ctx,
 			pi,
@@ -546,6 +583,10 @@ export class ReviewManager {
 			options.validate === false
 				? []
 				: selectFindingsForValidation(result.findings);
+		logAutoreviewEvent("review.validation_candidates", {
+			jobId,
+			candidates: candidates.length,
+		});
 		if (candidates.length > 0) {
 			const diffBlock = formatDiffsForValidator(diffs);
 			const validation = await runValidator(ctx, candidates, diffBlock, {
@@ -594,6 +635,13 @@ export class ReviewManager {
 			});
 		}
 		// Fire-and-forget persist history
+		logAutoreviewEvent("review.result_built", {
+			jobId,
+			findings: result.findings.length,
+			healthScore: result.healthScore,
+			verdict: result.verdict,
+			validatorError: result.validatorError,
+		});
 		appendHistory({
 			date: new Date().toISOString(),
 			mode: options.target?.label ?? "unknown",

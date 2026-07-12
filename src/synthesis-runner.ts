@@ -18,6 +18,7 @@ import { isModelError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { RetryLensOnModelError } from "./lens-runner.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 interface SynthesisRunnerOptions {
 	readonly retryOnModelError: RetryLensOnModelError;
@@ -40,6 +41,9 @@ async function buildPrompt(
 	try {
 		return await buildBucketedSynthesisPrompt(lensReviews);
 	} catch (err) {
+		logAutoreviewError("synthesis.bucket_prompt_error", err, {
+			lensReviews: lensReviews.length,
+		});
 		console.warn(
 			"%s Bucketed synthesis prompt failed, falling back to raw:",
 			LOG_PREFIX,
@@ -78,11 +82,35 @@ export async function runSynthesis(
 	job: ReviewJob,
 	options: SynthesisRunnerOptions,
 ): Promise<void> {
+	logAutoreviewEvent("synthesis.start", {
+		jobId: job.id,
+		lenses: job.lenses,
+	});
 	const lensReviews = lensReviewsFor(job);
 	const { systemPrompt, userPrompt } = await buildPrompt(cwd, lensReviews);
-	const model = await resolveModel(ctx, "synthesis");
+	logAutoreviewEvent("synthesis.prompt_ready", {
+		jobId: job.id,
+		systemChars: systemPrompt.length,
+		userChars: userPrompt.length,
+	});
+	let model;
+	try {
+		model = await resolveModel(ctx, "synthesis");
+	} catch (err) {
+		logAutoreviewError("synthesis.model_error", err, { jobId: job.id });
+		throw err;
+	}
+	logAutoreviewEvent("synthesis.model_resolved", {
+		jobId: job.id,
+		model: model.name,
+		provider: model.provider,
+	});
 
 	try {
+		logAutoreviewEvent("synthesis.model_call_start", {
+			jobId: job.id,
+			model: model.name,
+		});
 		const result = await runLensSubagent(
 			ctx,
 			cwd,
@@ -92,9 +120,20 @@ export async function runSynthesis(
 			"synthesis",
 		);
 		replaceSynthesisSession(job, result.session);
+		logAutoreviewEvent("synthesis.model_complete", {
+			jobId: job.id,
+			model: result.modelName,
+			provider: result.provider,
+			responseChars: result.text.length,
+			error: result.errorMessage,
+		});
 
 		let finalResult = result;
 		if (result.errorMessage && isModelError(result.errorMessage)) {
+			logAutoreviewEvent("synthesis.retry_start", {
+				jobId: job.id,
+				error: result.errorMessage,
+			});
 			const retryResult = await options.retryOnModelError(
 				ctx,
 				model,
@@ -112,6 +151,13 @@ export async function runSynthesis(
 				{ error: result.errorMessage, lens: "synthesis" },
 			);
 			if (retryResult) {
+				logAutoreviewEvent("synthesis.retry_complete", {
+					jobId: job.id,
+					model: retryResult.modelName,
+					provider: retryResult.provider,
+					responseChars: retryResult.text.length,
+					error: retryResult.errorMessage,
+				});
 				replaceSynthesisSession(job, retryResult.session);
 				finalResult = retryResult;
 			}
@@ -119,8 +165,16 @@ export async function runSynthesis(
 
 		job.synthesisResult = synthesisResultFrom(finalResult);
 		job.synthesisStatus = finalResult.errorMessage ? "error" : "done";
+		logAutoreviewEvent("synthesis.parsed", {
+			jobId: job.id,
+			status: job.synthesisStatus,
+			findings: job.synthesisResult.findings.length,
+			verdict: job.synthesisResult.verdict,
+			healthScore: job.synthesisResult.healthScore,
+		});
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
+		logAutoreviewError("synthesis.error", err, { jobId: job.id });
 		job.synthesisStatus = "error";
 		job.synthesisResult = createFallbackSynthesis(
 			`Synthesis failed: ${message}`,
@@ -137,10 +191,20 @@ export async function runSynthesis(
 	if (job.synthesisResult) {
 		try {
 			job.reviewPath = await saveReview(job.files, job.synthesisResult);
-		} catch {
+			logAutoreviewEvent("synthesis.persisted", {
+				jobId: job.id,
+				reviewPath: job.reviewPath,
+			});
+		} catch (err) {
+			logAutoreviewError("synthesis.persist_error", err, { jobId: job.id });
 			/* Non-fatal: review result is still valid without persistence */
 		}
 	}
 
+	logAutoreviewEvent("synthesis.complete", {
+		jobId: job.id,
+		status: job.synthesisStatus,
+		overallStatus: job.overallStatus,
+	});
 	options.onComplete(job);
 }

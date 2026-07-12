@@ -23,6 +23,7 @@
 import { extractBalancedJsonArray } from "./json-extract.js";
 import { callLLM } from "./llm.js";
 import { loadPromptBody } from "./prompt-loader.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Finding } from "./types.js";
 import { LOG_PREFIX } from "./constants.js";
@@ -184,6 +185,11 @@ export async function runValidator(
 	diff: string,
 	options?: { signal?: AbortSignal; lens?: string },
 ): Promise<ValidatorResult> {
+	logAutoreviewEvent("validator.start", {
+		findings: findings.length,
+		diffChars: diff.length,
+		lens: options?.lens,
+	});
 	if (findings.length === 0) {
 		return {
 			findings: [],
@@ -196,6 +202,9 @@ export async function runValidator(
 	try {
 		systemPrompt = await loadValidatorSystemPrompt();
 	} catch (err) {
+		logAutoreviewError("validator.prompt_error", err, {
+			findings: findings.length,
+		});
 		// Missing prompt file shouldn't be possible in a built extension,
 		// but if it is, fail open.
 		console.warn("%s Validator prompt not found, skipping:", LOG_PREFIX, err);
@@ -229,9 +238,17 @@ export async function runValidator(
 			options?.lens ?? "validator",
 		);
 		text = result.text;
+		logAutoreviewEvent("validator.model_complete", {
+			model: result.model.name,
+			provider: result.model.provider,
+			responseChars: text.length,
+		});
 	} catch (err) {
 		// Fail open: surface findings unverified rather than dropping them.
 		const msg = err instanceof Error ? err.message : String(err);
+		logAutoreviewError("validator.model_error", err, {
+			findings: findings.length,
+		});
 		console.warn(
 			"%s Validator call failed, marking unverified: %s",
 			LOG_PREFIX,
@@ -251,6 +268,10 @@ export async function runValidator(
 
 	const verdicts = parseValidatorOutput(text);
 	if (verdicts.size === 0) {
+		logAutoreviewEvent("validator.parse_fallback", {
+			findings: findings.length,
+			reason: "no parseable verdicts",
+		});
 		// No parseable output — fail open with unverified.
 		console.warn(
 			`${LOG_PREFIX} Validator returned no parseable verdicts; marking unverified.`,
@@ -276,6 +297,12 @@ export async function runValidator(
 		else if (f._validatorVerdict === "real") confirmedReal += 1;
 		else unverified += 1;
 	}
+	logAutoreviewEvent("validator.complete", {
+		findings: annotated.length,
+		droppedFalsePositives,
+		confirmedReal,
+		unverified,
+	});
 	return {
 		findings: annotated,
 		droppedFalsePositives,

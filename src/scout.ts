@@ -11,6 +11,7 @@ import {
 } from "./git-diff.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import type { ChangedFile } from "./types.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 export interface ScoutFile {
 	readonly path: string;
@@ -83,6 +84,11 @@ export async function runScout(
 	options: ScoutOptions,
 ): Promise<ScoutResult | undefined> {
 	const cwd = options.cwd;
+	logAutoreviewEvent("scout.start", {
+		cwd,
+		configuredMaxFiles: options.maxFiles,
+		docPatterns: options.docs?.length ?? 0,
+	});
 	let modelName = "unknown";
 	let totalFiles: number | undefined;
 
@@ -95,6 +101,7 @@ export async function runScout(
 			options.allFiles ??
 			(await getAllSourceFiles(cwd, options.ignorePatterns));
 		totalFiles = allFiles.length;
+		logAutoreviewEvent("scout.files_discovered", { totalFiles });
 		options.onStatus?.({ phase: "started", totalFiles });
 
 		if (allFiles.length === 0) {
@@ -110,12 +117,20 @@ export async function runScout(
 			loadScoutDocs(cwd, docGlobs),
 			getProjectIndex(cwd, 200, undefined, options.ignorePatterns),
 		]);
+		logAutoreviewEvent("scout.context_ready", {
+			docs: docs.size,
+			projectIndex: projectIndex.length,
+		});
 		const systemPrompt = await composeScoutPrompt();
 		const userPrompt = buildScoutUserPrompt({
 			cwd,
 			docs,
 			allFiles,
 			projectIndex,
+			maxFiles,
+		});
+		logAutoreviewEvent("scout.model_call_start", {
+			promptChars: userPrompt.length,
 			maxFiles,
 		});
 		const response = await callLLM(
@@ -129,8 +144,16 @@ export async function runScout(
 			"scout",
 		);
 		modelName = response.model.name;
+		logAutoreviewEvent("scout.model_call_complete", {
+			model: modelName,
+			responseChars: response.text.length,
+		});
 		const result = parseScoutResult(response.text, allFiles);
 		if (!result) {
+			logAutoreviewEvent("scout.parse_fallback", {
+				model: modelName,
+				reason: "Invalid or empty scout response",
+			});
 			options.onStatus?.({
 				phase: "fallback",
 				totalFiles,
@@ -139,6 +162,11 @@ export async function runScout(
 			});
 			return undefined;
 		}
+		logAutoreviewEvent("scout.success", {
+			model: modelName,
+			selectedFiles: result.files.length,
+			totalFiles,
+		});
 		options.onStatus?.({
 			phase: "success",
 			totalFiles,
@@ -148,6 +176,10 @@ export async function runScout(
 		return result;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
+		logAutoreviewError("scout.error", err, {
+			model: modelName,
+			totalFiles,
+		});
 		options.onStatus?.({
 			phase: "fallback",
 			...(totalFiles !== undefined ? { totalFiles } : {}),

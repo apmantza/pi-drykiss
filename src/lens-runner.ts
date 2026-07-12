@@ -12,6 +12,7 @@ import { runLensSubagent } from "./subagent-runner.js";
 import { LOG_PREFIX } from "./constants.js";
 import { isModelError } from "./model-selector.js";
 import type { ReviewJob, LensState } from "./review-manager.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 export interface LensExecutionTask {
 	readonly jobId: string;
@@ -114,6 +115,12 @@ export async function runLens(
 	if (!state) return;
 	state.status = "running";
 	state.startedAt = Date.now();
+	logAutoreviewEvent("lens.start", {
+		jobId: task.jobId,
+		lens: task.lens,
+		model: task.model.name,
+		provider: task.model.provider,
+	});
 	notify(options.onUpdate, job);
 
 	const streamUpdate = () => {
@@ -135,9 +142,23 @@ export async function runLens(
 	const result = await run(task.model);
 	state.durationMs = result.durationMs;
 	state.session = result.session;
+	logAutoreviewEvent("lens.model_complete", {
+		jobId: task.jobId,
+		lens: task.lens,
+		model: result.modelName,
+		provider: result.provider,
+		durationMs: result.durationMs,
+		responseChars: result.text.length,
+		error: result.errorMessage,
+	});
 	await saveLog(job, state, task.lens, result.session);
 
 	if (result.errorMessage && isModelError(result.errorMessage)) {
+		logAutoreviewEvent("lens.retry_start", {
+			jobId: task.jobId,
+			lens: task.lens,
+			error: result.errorMessage,
+		});
 		const retryResult = await options.retryOnModelError(
 			ctx,
 			task.model,
@@ -147,6 +168,13 @@ export async function runLens(
 			{ error: result.errorMessage, lens: task.lens },
 		);
 		if (retryResult) {
+			logAutoreviewEvent("lens.retry_complete", {
+				jobId: task.jobId,
+				lens: task.lens,
+				model: retryResult.modelName,
+				provider: retryResult.provider,
+				error: retryResult.errorMessage,
+			});
 			state.session = retryResult.session;
 			state.modelName = retryResult.modelName;
 			if (retryResult.provider) state.provider = retryResult.provider;
@@ -161,17 +189,38 @@ export async function runLens(
 			state.session = undefined;
 		}
 	} else if (result.errorMessage) {
+		logAutoreviewError("lens.error", result.errorMessage, {
+			jobId: task.jobId,
+			lens: task.lens,
+		});
 		setLensError(state, result.errorMessage);
 	} else {
 		applySuccessfulOutput(state, result.text, task.lens);
 	}
 
+	logAutoreviewEvent("lens.complete", {
+		jobId: task.jobId,
+		lens: task.lens,
+		status: state.status,
+		findings: state.findingsCount,
+		durationMs: state.durationMs,
+		error: state.errorMessage,
+	});
 	notify(options.onUpdate, job);
 	const allDone = job.lenses.every((lens) => {
 		const lensState = job.states.get(lens);
 		return lensState?.status === "done" || lensState?.status === "error";
 	});
-	if (allDone) await options.onAllLensesDone(ctx, cwd, job);
+	if (allDone) {
+		logAutoreviewEvent("lenses.complete", {
+			jobId: task.jobId,
+			lenses: job.lenses,
+			errors: job.lenses.filter(
+				(lens) => job.states.get(lens)?.status === "error",
+			).length,
+		});
+		await options.onAllLensesDone(ctx, cwd, job);
+	}
 	options.drain(ctx, pi, cwd);
 }
 

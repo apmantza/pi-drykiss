@@ -16,6 +16,7 @@ import {
 	type ScoutStatus,
 } from "./scout.js";
 import { assertSafeGitRef } from "./constants.js";
+import { logAutoreviewEvent } from "./logger.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import {
 	fetchPrDiff,
@@ -108,6 +109,12 @@ export async function resolveReviewScope(
 ): Promise<ReviewScope> {
 	const contextMode = options.contextMode ?? "full";
 	const mode = inferMode(request);
+	logAutoreviewEvent("scope.start", {
+		cwd,
+		mode,
+		contextMode,
+		scoutEnabled: options.scout?.enabled === true,
+	});
 
 	if (mode === "pr") {
 		const scope = await resolvePrScope(
@@ -157,6 +164,7 @@ export async function resolveReviewScope(
 				signal: options.signal,
 				onStatus: (status) => {
 					Object.assign(scoutMetadata, status);
+					logAutoreviewEvent("scout.status", { ...status });
 					options.onScoutStatus?.(status);
 				},
 			});
@@ -196,7 +204,7 @@ export async function resolveReviewScope(
 				)
 			: undefined;
 
-	return {
+	const scope = {
 		mode,
 		label: scopeLabel(mode, reviewOptions.ref),
 		files,
@@ -210,6 +218,15 @@ export async function resolveReviewScope(
 		options: reviewOptions,
 		metadata: scoutMetadata,
 	};
+	logAutoreviewEvent("scope.complete", {
+		mode: scope.mode,
+		files: scope.files.length,
+		preparationErrors: scope.preparationErrors.length,
+		scoutEnabled: scope.metadata.enabled === true,
+		scoutStatus: scope.metadata.status,
+		scoutReason: scope.metadata.reason,
+	});
+	return scope;
 }
 
 function filterResolvedScope(

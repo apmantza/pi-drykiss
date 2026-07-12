@@ -22,6 +22,7 @@ import type { ReviewResult } from "./review-result.js";
 import { formatReviewResultCompact } from "./compact-format.js";
 import { formatReviewResultForTool } from "./review-output.js";
 import { LOG_PREFIX } from "./constants.js";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 const MAX_FILES = 40;
 
@@ -182,18 +183,41 @@ export async function executeDrykissAutoreviewTool(
 	content: Array<{ type: "text"; text: string }>;
 	details: { result: ReviewResult; progress?: string };
 }> {
-	await ensureDefaultPrompts(ctx.cwd);
+	logAutoreviewEvent("autoreview.start", {
+		cwd: ctx.cwd,
+		mode: params.mode ?? "auto",
+		lens: params.lens ?? "all",
+		lenses: params.lenses,
+		deep: params.deep,
+	});
+	try {
+		await ensureDefaultPrompts(ctx.cwd);
+	} catch (err) {
+		logAutoreviewError("autoreview.prompt_seed_error", err, { cwd: ctx.cwd });
+		throw err;
+	}
 	const { config: effectiveConfig, warnings } = await loadEffectiveConfig(
 		ctx.cwd,
 	);
 	for (const warning of warnings) {
 		console.warn(`${LOG_PREFIX} ${warning}`);
 	}
+	logAutoreviewEvent("autoreview.config_loaded", {
+		cwd: ctx.cwd,
+		scoutEnabled: effectiveConfig.scout?.enabled === true,
+		contextMode: params.contextMode ?? effectiveConfig.contextMode ?? "full",
+		warnings: warnings.length,
+	});
 	const suppressions = effectiveConfig.suppressions ?? [];
 	const contextMode =
 		params.contextMode ?? effectiveConfig.contextMode ?? "full";
 	const lenses = resolveLenses(params.lens, params.lenses);
 	const fileProgress = makeAutoreviewFileProgress(onUpdate);
+	logAutoreviewEvent("autoreview.scope_start", {
+		cwd: ctx.cwd,
+		mode: params.mode ?? "auto",
+		scoutEnabled: effectiveConfig.scout?.enabled === true,
+	});
 	const scope = await resolveReviewScope(
 		pi,
 		ctx.cwd,
@@ -216,6 +240,13 @@ export async function executeDrykissAutoreviewTool(
 		},
 		ctx,
 	);
+	logAutoreviewEvent("autoreview.scope_complete", {
+		mode: scope.mode,
+		files: scope.files.length,
+		scoutEnabled: scope.metadata.enabled === true,
+		scoutStatus: scope.metadata.status,
+		scoutReason: scope.metadata.reason,
+	});
 
 	const maxFiles =
 		params.maxFiles ?? effectiveConfig.autoreview?.maxFiles ?? MAX_FILES;
@@ -233,6 +264,10 @@ export async function executeDrykissAutoreviewTool(
 	// standard multi-lens flow and synthesis entirely; returns the
 	// deep findings directly so the agent can act on them.
 	if (params.deep) {
+		logAutoreviewEvent("autoreview.deep_start", {
+			lens: params.deep,
+			files: cappedScope.files.length,
+		});
 		onUpdate?.({
 			content: [
 				{
@@ -270,6 +305,11 @@ export async function executeDrykissAutoreviewTool(
 
 	// Model selection and result recording live in the flat executor so this
 	// command remains focused on scope and output orchestration.
+	logAutoreviewEvent("autoreview.flat_start", {
+		files: cappedScope.files.length,
+		lenses,
+		validate: params.validate !== false,
+	});
 	const finalResult = await executeFlatReview({
 		ctx,
 		pi,
@@ -295,6 +335,12 @@ export async function executeDrykissAutoreviewTool(
 	const progressLine = finalProgress
 		? `${formatReviewProgress(finalProgress)}\n`
 		: "";
+	logAutoreviewEvent("autoreview.complete", {
+		jobId: finalResult.jobId,
+		findings: finalResult.counts.total,
+		verdict: finalResult.verdict,
+		healthScore: finalResult.healthScore,
+	});
 	const text =
 		progressLine +
 		(scoutNote ? `${scoutNote}\n` : "") +

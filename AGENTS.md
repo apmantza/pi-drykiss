@@ -24,6 +24,7 @@ src/
   prompt-builder.ts   # Thin orchestrator: ties loader + composer together; builds review context
   mode-context.ts     # Resolves review posture (proposed vs audit) and loads mode-context-{proposed,audit}.md
   scout.ts            # Pre-flight scout stage: maps the project, reads docs, selects important files for full-codebase reviews
+  logger.ts           # Fail-safe JSONL lifecycle logging to ~/.pi/drykiss/autoreview.log
   prompts/            # The bundled default prompt text — the source of truth (see prompt-architecture.md)
     _shared/          # iron-law, json-output, json-output-synthesis, json-output-scout, grounding-rules, grounding-rules-synthesis, active-constraints, mode-context-{proposed,audit}, validator, pass-system, focuses, risk-codes
     simplicity.md, deduplication.md, clarity.md, resilience.md, architecture.md, tests.md, security.md, docs.md, synthesis.md, scout.md
