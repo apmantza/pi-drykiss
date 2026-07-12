@@ -24,6 +24,7 @@
 
 import { loadPromptBody } from "./prompt-loader.js";
 import type { ReviewLens } from "./types.js";
+import { logAutoreviewEvent } from "./logger.js";
 
 export type LensName = Exclude<ReviewLens, "all"> | "synthesis";
 
@@ -70,8 +71,13 @@ export async function composeLensPrompt(
 		);
 	}
 	sections.push(jsonOutput, grounding);
-
-	return sections.filter(Boolean).join("\n\n");
+	const composed = sections.filter(Boolean).join("\n\n");
+	logAutoreviewEvent("prompt.composed", {
+		kind: "lens",
+		name: lens,
+		chars: composed.length,
+	});
+	return composed;
 }
 
 /**
@@ -107,6 +113,11 @@ export async function composeSynthesisPrompt(
 		);
 	}
 	sections.push(jsonOutput, grounding, synthesisGrounding);
-
-	return sections.filter(Boolean).join("\n\n");
+	const composed = sections.filter(Boolean).join("\n\n");
+	logAutoreviewEvent("prompt.composed", {
+		kind: "synthesis",
+		name: "synthesis",
+		chars: composed.length,
+	});
+	return composed;
 }

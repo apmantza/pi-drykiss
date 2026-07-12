@@ -18,6 +18,7 @@ import { join, isAbsolute } from "node:path";
 import { getGlobalBaseDir } from "./constants.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 export interface PromptSource {
 	/** Where to read prompts from. */
@@ -116,6 +117,7 @@ export async function loadPromptBody(
 	const key = cacheKey(name, kind);
 	const cached = promptCache.get(key);
 	if (cached !== undefined) {
+		logAutoreviewEvent("prompt.cache_hit", { name, kind });
 		return cached;
 	}
 
@@ -132,6 +134,12 @@ export async function loadPromptBody(
 				? loadPromptFile({ dir }, name)
 				: loadSharedFragment({ dir }, name));
 			promptCache.set(key, result);
+			logAutoreviewEvent("prompt.loaded", {
+				name,
+				kind,
+				source: dir,
+				chars: result.length,
+			});
 			return result;
 		} catch (err) {
 			if (
@@ -139,8 +147,14 @@ export async function loadPromptBody(
 				(err as NodeJS.ErrnoException).code === "ENOENT"
 			) {
 				lastErr = err;
+				logAutoreviewEvent("prompt.missing", { name, kind, source: dir });
 				continue;
 			}
+			logAutoreviewError("prompt.load_error", err, {
+				name,
+				kind,
+				source: dir,
+			});
 			throw err;
 		}
 	}
