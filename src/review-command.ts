@@ -147,10 +147,12 @@ async function runStandaloneScout(
 	maxFiles: number,
 	ignorePatterns: readonly string[] | undefined,
 	signal: AbortSignal | undefined,
-	onUpdate: ((result: {
-		content: Array<{ type: "text"; text: string }>;
-		details?: unknown;
-	}) => void) | undefined,
+	onUpdate:
+		| ((result: {
+				content: Array<{ type: "text"; text: string }>;
+				details?: unknown;
+		  }) => void)
+		| undefined,
 	correlationId: string,
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
@@ -369,7 +371,7 @@ export async function executeDrykissAutoreviewTool(
 		mode: scope.mode,
 		files: scope.files.length,
 		scoutEnabled: scope.metadata.enabled === true,
-		scoutStatus: scope.metadata.status,
+		scoutStatus: scope.metadata.phase ?? scope.metadata.status,
 		scoutReason: scope.metadata.reason,
 	});
 
@@ -495,7 +497,7 @@ export async function executeDrykissAutoreviewTool(
 function buildScoutNote(scope: ReviewScope): string {
 	if (!scope.metadata || scope.mode !== "full") return "";
 	if (scope.metadata.enabled !== true) return " · scout disabled";
-	const status = scope.metadata.status;
+	const status = scope.metadata.phase ?? scope.metadata.status;
 	if (status === undefined) return " · scout not invoked";
 	if (status === "success") {
 		const selected = scope.metadata.selectedFiles;

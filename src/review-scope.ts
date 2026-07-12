@@ -146,7 +146,7 @@ export async function resolveReviewScope(
 	let discoveredFiles: ChangedFile[];
 	if (mode === "full" && options.scout?.enabled) {
 		if (!ctx) {
-			scoutMetadata.status = "fallback";
+			scoutMetadata.phase = "fallback";
 			scoutMetadata.reason = "No ExtensionContext available";
 			options.onScoutStatus?.({
 				phase: "fallback",
@@ -228,7 +228,7 @@ export async function resolveReviewScope(
 		files: scope.files.length,
 		preparationErrors: scope.preparationErrors.length,
 		scoutEnabled: scope.metadata.enabled === true,
-		scoutStatus: scope.metadata.status,
+		scoutStatus: scope.metadata.phase ?? scope.metadata.status,
 		scoutReason: scope.metadata.reason,
 	});
 	return scope;
