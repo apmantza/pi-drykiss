@@ -13,12 +13,31 @@ import {
 import type { ChangedFile } from "./types.js";
 
 vi.mock("./llm.js", () => ({
-	callLLM: vi.fn(),
+	resolveModelSmart: vi.fn(),
+}));
+vi.mock("./subagent-runner.js", () => ({
+	runLensSubagent: vi.fn(),
 }));
 
-import { callLLM } from "./llm.js";
+import { resolveModelSmart } from "./llm.js";
+import { runLensSubagent } from "./subagent-runner.js";
 
-const mockedCallLLM = vi.mocked(callLLM);
+const mockedResolveModelSmart = vi.mocked(resolveModelSmart);
+const mockedRunLensSubagent = vi.mocked(runLensSubagent);
+const mockedCallLLM = {
+	mockReset: () => mockedRunLensSubagent.mockReset(),
+	mockResolvedValue: (response: { text: string; model?: unknown }) =>
+		mockedRunLensSubagent.mockResolvedValue({
+			lens: "scout",
+			text: response.text,
+			modelName: "test",
+			provider: "test",
+			durationMs: 1,
+			session: undefined,
+		}),
+	mockRejectedValue: (error: Error) =>
+		mockedRunLensSubagent.mockRejectedValue(error),
+};
 
 describe("runScout", () => {
 	let tmpDir: string;
@@ -34,6 +53,11 @@ describe("runScout", () => {
 			} as any,
 		} as ExtensionContext;
 		mockedCallLLM.mockReset();
+		mockedResolveModelSmart.mockResolvedValue({
+			id: "test",
+			name: "test",
+			provider: "test",
+		} as any);
 	});
 
 	afterEach(() => {

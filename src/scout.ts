@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { callLLM } from "./llm.js";
+import { resolveModelSmart } from "./llm.js";
+import { runLensSubagent } from "./subagent-runner.js";
 import { loadPromptBody } from "./prompt-loader.js";
 import { lenientJsonParse, isPlainObject } from "./json-utils.js";
 import {
@@ -144,82 +145,93 @@ export async function runScout(
 			promptChars: userPrompt.length,
 			maxFiles,
 		});
-		const response = await callLLM(
+		const model = await resolveModelSmart(ctx, options.modelHint, "scout");
+		if (!model) throw new Error("No model available for scout.");
+		const response = await runLensSubagent(
 			ctx,
+			cwd,
+			model,
 			systemPrompt,
 			userPrompt,
-			{
-				modelHint: options.modelHint,
-				signal: options.signal,
-				maxTokens: 4000,
-			},
 			"scout",
+			options.signal,
 		);
-		modelName = response.model.name;
-		logAutoreviewEvent("scout.model_call_complete", {
-			...correlation,
-			model: modelName,
-			responseChars: response.text.length,
-		});
-		if (!response.text.trim()) {
-			logAutoreviewEvent("scout.empty_response", {
-				...correlation,
-				model: modelName,
-				totalFiles,
-			});
-			options.onStatus?.({
-				phase: "fallback",
-				totalFiles,
-				modelName,
-				reason: "Empty model response",
-			});
-			return undefined;
-		}
-		let result: ScoutResult | undefined;
 		try {
-			result = parseScoutResult(response.text, allFiles);
-		} catch (err) {
-			const reason = err instanceof Error ? err.message : String(err);
-			logAutoreviewEvent("scout.parse_fallback", {
+			modelName = response.modelName;
+			logAutoreviewEvent("scout.model_call_complete", {
 				...correlation,
 				model: modelName,
-				reason: reason.slice(0, 240),
+				responseChars: response.text.length,
+				durationMs: response.durationMs,
+				error: response.errorMessage,
 			});
-			options.onStatus?.({
-				phase: "fallback",
-				totalFiles,
-				modelName,
-				reason: `Invalid scout response: ${reason.slice(0, 200)}`,
-			});
-			return undefined;
-		}
-		if (!result) {
-			logAutoreviewEvent("scout.parse_fallback", {
+			if (response.errorMessage) throw new Error(response.errorMessage);
+			if (!response.text.trim()) {
+				logAutoreviewEvent("scout.empty_response", {
+					...correlation,
+					model: modelName,
+					totalFiles,
+				});
+				options.onStatus?.({
+					phase: "fallback",
+					totalFiles,
+					modelName,
+					reason: "Empty model response",
+				});
+				return undefined;
+			}
+			let result: ScoutResult | undefined;
+			try {
+				result = parseScoutResult(response.text, allFiles);
+			} catch (err) {
+				const reason = err instanceof Error ? err.message : String(err);
+				logAutoreviewEvent("scout.parse_fallback", {
+					...correlation,
+					model: modelName,
+					reason: reason.slice(0, 240),
+				});
+				options.onStatus?.({
+					phase: "fallback",
+					totalFiles,
+					modelName,
+					reason: `Invalid scout response: ${reason.slice(0, 200)}`,
+				});
+				return undefined;
+			}
+			if (!result) {
+				logAutoreviewEvent("scout.parse_fallback", {
+					...correlation,
+					model: modelName,
+					reason: "Invalid or empty scout response",
+				});
+				options.onStatus?.({
+					phase: "fallback",
+					totalFiles,
+					modelName,
+					reason: "Invalid or empty scout response",
+				});
+				return undefined;
+			}
+			logAutoreviewEvent("scout.success", {
 				...correlation,
 				model: modelName,
-				reason: "Invalid or empty scout response",
+				selectedFiles: result.files.length,
+				totalFiles,
 			});
 			options.onStatus?.({
-				phase: "fallback",
+				phase: "success",
 				totalFiles,
+				selectedFiles: result.files.length,
 				modelName,
-				reason: "Invalid or empty scout response",
 			});
-			return undefined;
+			return result;
+		} finally {
+			try {
+				response.session?.dispose();
+			} catch {
+				// Scout sessions are best-effort cleanup only.
+			}
 		}
-		logAutoreviewEvent("scout.success", {
-			...correlation,
-			model: modelName,
-			selectedFiles: result.files.length,
-			totalFiles,
-		});
-		options.onStatus?.({
-			phase: "success",
-			totalFiles,
-			selectedFiles: result.files.length,
-			modelName,
-		});
-		return result;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		logAutoreviewError("scout.error", err, {
