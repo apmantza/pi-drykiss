@@ -90,6 +90,11 @@ async function saveLog(
 ): Promise<void> {
 	try {
 		state.logPath = await saveSessionLog(job.id, lens, session);
+		logAutoreviewEvent("lens.session_persisted", {
+			jobId: job.id,
+			lens,
+			logPath: state.logPath,
+		});
 	} catch (err) {
 		console.warn(
 			"%s Failed to save session log for %s: %s",
