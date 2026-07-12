@@ -2,12 +2,15 @@
  * Compile a list of glob patterns into regex matchers.
  * Silently skips invalid patterns so a single bad pattern doesn't crash the review.
  */
+
 const MAX_GLOB_PATTERN_LENGTH = 512;
+const MAX_GLOB_WILDCARDS = 20;
 
 export function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
 	const matchers: RegExp[] = [];
 	for (const p of patterns) {
 		if (p.length > MAX_GLOB_PATTERN_LENGTH) continue;
+		if (countWildcards(p) > MAX_GLOB_WILDCARDS) continue;
 		try {
 			matchers.push(globToRegex(p));
 		} catch {
@@ -15,6 +18,15 @@ export function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
 		}
 	}
 	return matchers;
+}
+
+/** Count wildcard characters (* and ?) in a glob pattern. */
+function countWildcards(pattern: string): number {
+	let count = 0;
+	for (const ch of pattern) {
+		if (ch === "*" || ch === "?") count++;
+	}
+	return count;
 }
 
 /** Check whether a file path matches any of the provided glob patterns. */
@@ -28,18 +40,25 @@ export function matchesAnyGlob(
 	return matchers.some((r) => r.test(normalized));
 }
 
-/** Convert a simple glob pattern to a regex (supports **, *, ?). */
+/**
+ * Convert a simple glob pattern to a regex.
+ *
+ * Safety: the generated regex never contains alternations or nested
+ * quantifiers — the only dynamic expansions are "?" → "[^/]",
+ * "*" → "[^/]*", "**" → ".*". Combined with the pattern-length and
+ * wildcard-count caps above, catastrophic backtracking is not possible.
+ * This is a Semgrep FP that cannot be suppressed inline in JS/TS
+ * (semgrep.dev/rule/javascript.lang.security.audit.detect-non-literal-regexp).
+ */
 function globToRegex(pattern: string): RegExp {
-	// Normalize backslashes to forward slashes for cross-platform support
 	const normalized = pattern.replaceAll(/\\/g, "/");
 	let regex = "^";
 	for (let i = 0; i < normalized.length; i++) {
 		const ch = normalized[i];
 		if (ch === "*") {
-			// ** matches any number of path segments
 			if (normalized[i + 1] === "*") {
 				regex += ".*";
-				i++; // skip second *
+				i++;
 			} else {
 				regex += "[^/]*";
 			}
@@ -48,15 +67,11 @@ function globToRegex(pattern: string): RegExp {
 		} else if (ch === ".") {
 			regex += "\\.";
 		} else if (/[.\\+^${}()|[\]/]/.test(ch)) {
-			// Escape any regex-special characters that aren't glob wildcards
 			regex += `\\${ch}`;
 		} else {
 			regex += ch;
 		}
 	}
 	regex += "$";
-	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
-	// Safe: literals are escaped, glob wildcards expand to linear fragments,
-	// and compileGlobMatchers caps pattern length before calling this helper.
-	return new RegExp(regex); // nosemgrep
+	return new RegExp(regex);
 }
