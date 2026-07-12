@@ -30,13 +30,14 @@ const BUNDLED_SHARED_FILES = [
 	"json-output-scout.md",
 	"grounding-rules.md",
 	"grounding-rules-synthesis.md",
+	"validator.md",
 	"active-constraints.md",
 	"mode-context-proposed.md",
 	"mode-context-audit.md",
 ] as const;
 
 const SENTINEL_PREFIX = ".drykiss-prompt-v";
-const CURRENT_SEED_VERSION = "6";
+const CURRENT_SEED_VERSION = "7";
 
 function sentinelPath(dir: string): string {
 	return join(dir, `${SENTINEL_PREFIX}${CURRENT_SEED_VERSION}`);

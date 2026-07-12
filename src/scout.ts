@@ -11,6 +11,7 @@ import {
 	type ProjectIndexEntry,
 } from "./git-diff.js";
 import { matchesAnyGlob } from "./glob-utils.js";
+import { assertPathInRoot } from "./path-utils.js";
 import type { ChangedFile } from "./types.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
@@ -332,7 +333,8 @@ export async function loadScoutDocs(
 		for (const candidate of candidates) {
 			if (docs.has(candidate)) continue;
 			try {
-				const text = await readFile(join(cwd, candidate), "utf8");
+				const safePath = assertPathInRoot(candidate, cwd);
+				const text = await readFile(safePath, "utf8");
 				const truncated =
 					text.length > DOC_BUDGET_PER_FILE
 						? text.slice(0, DOC_BUDGET_PER_FILE) +

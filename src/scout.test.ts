@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -253,5 +253,18 @@ describe("loadScoutDocs", () => {
 		const docs = await loadScoutDocs(dir, ["README.md", "AGENTS.md"]);
 
 		expect(docs.size).toBe(0);
+	});
+
+	it("does not read documentation outside the project root", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "scout-docs-root-"));
+		const name = `scout-outside-${Date.now()}.md`;
+		const outsidePath = join(dir, "..", name);
+		writeFileSync(outsidePath, "should not be read");
+		try {
+			const docs = await loadScoutDocs(dir, [`../${name}`]);
+			expect(docs.size).toBe(0);
+		} finally {
+			unlinkSync(outsidePath);
+		}
 	});
 });
