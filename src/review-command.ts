@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -12,6 +13,7 @@ import { runDeepAutoreview } from "./deep-review-command.js";
 import { executeFlatReview } from "./review-tool-executor.js";
 import type { ReviewLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
+import { runScout, type ScoutResult, type ScoutStatus } from "./scout.js";
 import {
 	resolveReviewScope,
 	type ReviewMode,
@@ -19,6 +21,7 @@ import {
 } from "./review-scope.js";
 import type { ReviewJob } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
+import { finalizeReviewOutcome } from "./review-finalizer.js";
 import { formatReviewResultCompact } from "./compact-format.js";
 import { formatReviewResultForTool } from "./review-output.js";
 import { LOG_PREFIX } from "./constants.js";
@@ -102,10 +105,17 @@ export const DrykissAutoreviewParams = Type.Object({
 		}),
 	),
 	lens: Type.Optional(
-		Type.Union([Type.Literal("all") as any, ...(LensNameParam as any).anyOf], {
-			description:
-				"Single lens to run, or 'all' for all lenses. Overrides `lenses` if both are set. Default: all.",
-		}),
+		Type.Union(
+			[
+				Type.Literal("all"),
+				Type.Literal("scout"),
+				...(LensNameParam as any).anyOf,
+			],
+			{
+				description:
+					"Single lens to run, or 'all' for all lenses. Use 'scout' for project mapping only. Overrides `lenses` if both are set. Default: all.",
+			},
+		),
 	),
 	lenses: Type.Optional(
 		Type.Union([
@@ -130,6 +140,99 @@ export const DrykissAutoreviewParams = Type.Object({
 	),
 });
 
+async function runStandaloneScout(
+	ctx: ExtensionContext,
+	config: import("./config.js").DrykissConfig["scout"],
+	maxFiles: number,
+	ignorePatterns: readonly string[] | undefined,
+	signal: AbortSignal | undefined,
+	onUpdate: ((result: {
+		content: Array<{ type: "text"; text: string }>;
+		details?: unknown;
+	}) => void) | undefined,
+	correlationId: string,
+): Promise<{
+	content: Array<{ type: "text"; text: string }>;
+	details: {
+		result: ReviewResult;
+		progress?: string;
+		scout: { result?: ScoutResult; status: ScoutStatus };
+	};
+}> {
+	let status: ScoutStatus = {
+		phase: "fallback",
+		reason: "Scout returned no result",
+	};
+	const result = await runScout(ctx, {
+		cwd: ctx.cwd,
+		maxFiles,
+		docs: config?.docs,
+		ignorePatterns,
+		correlationId,
+		signal,
+		onStatus: (nextStatus) => {
+			status = nextStatus;
+			safeOnUpdate(
+				onUpdate,
+				`Scout ${nextStatus.phase}${nextStatus.selectedFiles !== undefined ? `: ${nextStatus.selectedFiles} file(s) selected` : ""}`,
+			);
+		},
+	});
+	const errors =
+		status.phase === "fallback"
+			? [status.reason ?? "Scout returned no result"]
+			: [];
+	const outcome = finalizeReviewOutcome({
+		findings: [],
+		errors,
+		validationIssues: [],
+		healthScore: 100,
+	});
+	const selectedFiles = result?.files.map((file) => file.path) ?? [];
+	const summary = result?.summary ?? errors[0] ?? "Scout completed";
+	const reviewResult: ReviewResult = {
+		jobId: `scout-${correlationId}`,
+		...outcome,
+		status: errors.length > 0 ? "error" : "done",
+		target: {
+			mode: "full",
+			label: "scout",
+			metadata: { correlationId, scoutStatus: status },
+		},
+		files: selectedFiles,
+		counts: {
+			total: 0,
+			critical: 0,
+			high: 0,
+			medium: 0,
+			low: 0,
+			nit: 0,
+			suppressed: 0,
+			previouslyRejected: 0,
+		},
+		findings: [],
+		summary,
+		errors,
+		validationIssues: [],
+		healthScore: 100,
+		scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+	};
+	const payload = {
+		status: status.phase,
+		summary,
+		selectedFiles: result?.files ?? [],
+		excludedPatterns: result?.excludedPatterns ?? [],
+		notDone: result?.notDone ?? [],
+	};
+	return {
+		content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+		details: {
+			result: reviewResult,
+			scout: { ...(result ? { result } : {}), status },
+		},
+	};
+}
+
 export async function executeDrykissAutoreviewTool(
 	params: {
 		mode?: ReviewMode;
@@ -137,7 +240,7 @@ export async function executeDrykissAutoreviewTool(
 		base?: string;
 		commit?: string;
 		pr?: string;
-		lens?: "all" | Exclude<ReviewLens, "all">;
+		lens?: "all" | "scout" | Exclude<ReviewLens, "all">;
 		lenses?: "all" | Exclude<ReviewLens, "all">[];
 		/**
 		 * Internal-only: callers (deep-mode pipeline, tests) may pass
@@ -183,7 +286,9 @@ export async function executeDrykissAutoreviewTool(
 	content: Array<{ type: "text"; text: string }>;
 	details: { result: ReviewResult; progress?: string };
 }> {
+	const correlationId = randomUUID();
 	logAutoreviewEvent("autoreview.start", {
+		correlationId,
 		cwd: ctx.cwd,
 		mode: params.mode ?? "auto",
 		lens: params.lens ?? "all",
@@ -203,17 +308,30 @@ export async function executeDrykissAutoreviewTool(
 		console.warn(`${LOG_PREFIX} ${warning}`);
 	}
 	logAutoreviewEvent("autoreview.config_loaded", {
+		correlationId,
 		cwd: ctx.cwd,
 		scoutEnabled: effectiveConfig.scout?.enabled === true,
 		contextMode: params.contextMode ?? effectiveConfig.contextMode ?? "full",
 		warnings: warnings.length,
 	});
+	if (params.lens === "scout") {
+		return runStandaloneScout(
+			ctx,
+			effectiveConfig.scout,
+			params.maxFiles ?? effectiveConfig.autoreview?.maxFiles ?? MAX_FILES,
+			effectiveConfig.ignorePatterns,
+			signal,
+			onUpdate,
+			correlationId,
+		);
+	}
 	const suppressions = effectiveConfig.suppressions ?? [];
 	const contextMode =
 		params.contextMode ?? effectiveConfig.contextMode ?? "full";
 	const lenses = resolveLenses(params.lens, params.lenses);
 	const fileProgress = makeAutoreviewFileProgress(onUpdate);
 	logAutoreviewEvent("autoreview.scope_start", {
+		correlationId,
 		cwd: ctx.cwd,
 		mode: params.mode ?? "auto",
 		scoutEnabled: effectiveConfig.scout?.enabled === true,
@@ -236,11 +354,13 @@ export async function executeDrykissAutoreviewTool(
 			pathFilters: effectiveConfig.review?.pathFilters,
 			onFileProgress: fileProgress,
 			scout: effectiveConfig.scout,
+			correlationId,
 			signal,
 		},
 		ctx,
 	);
 	logAutoreviewEvent("autoreview.scope_complete", {
+		correlationId,
 		mode: scope.mode,
 		files: scope.files.length,
 		scoutEnabled: scope.metadata.enabled === true,
@@ -291,7 +411,6 @@ export async function executeDrykissAutoreviewTool(
 			signal,
 		);
 	}
-
 
 	safeOnUpdate(
 		onUpdate,

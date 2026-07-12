@@ -38,7 +38,7 @@ export interface ValidatorVerdict {
 }
 
 /** Outcome of the validator stage. Always includes every input finding. */
-export interface ValidatorResult {
+interface ValidatorResult {
 	/** Findings annotated with `_validatorVerdict` + optional justification. */
 	readonly findings: Finding[];
 	/** Number of findings the validator marked "false-positive". */
@@ -183,9 +183,17 @@ export async function runValidator(
 	ctx: ExtensionContext,
 	findings: readonly Finding[],
 	diff: string,
-	options?: { signal?: AbortSignal; lens?: string },
+	options?: {
+		signal?: AbortSignal;
+		lens?: string;
+		correlationId?: string;
+	},
 ): Promise<ValidatorResult> {
+	const correlation = options?.correlationId
+		? { correlationId: options.correlationId }
+		: {};
 	logAutoreviewEvent("validator.start", {
+		...correlation,
 		findings: findings.length,
 		diffChars: diff.length,
 		lens: options?.lens,
@@ -203,6 +211,7 @@ export async function runValidator(
 		systemPrompt = await loadValidatorSystemPrompt();
 	} catch (err) {
 		logAutoreviewError("validator.prompt_error", err, {
+			...correlation,
 			findings: findings.length,
 		});
 		// Missing prompt file shouldn't be possible in a built extension,
@@ -224,29 +233,47 @@ export async function runValidator(
 
 	let text: string;
 	try {
-		const result = await callLLM(
-			ctx,
-			systemPrompt,
-			userPrompt,
-			{
-				temperature: 0,
-				// Validator doesn't need a huge response — one short verdict
-				// per finding, ~50 tokens each.
-				maxTokens: Math.max(1000, findings.length * 80),
-				signal: options?.signal,
-			},
-			options?.lens ?? "validator",
-		);
-		text = result.text;
-		logAutoreviewEvent("validator.model_complete", {
-			model: result.model.name,
-			provider: result.model.provider,
-			responseChars: text.length,
-		});
+		const llmOptions = {
+			temperature: 0,
+			// Validator doesn't need a huge response — one short verdict
+			// per finding, ~50 tokens each.
+			maxTokens: Math.max(1000, findings.length * 80),
+			signal: options?.signal,
+		};
+		let response: Awaited<ReturnType<typeof callLLM>> | undefined;
+		for (let attempt = 1; attempt <= 2; attempt += 1) {
+			response = await callLLM(
+				ctx,
+				systemPrompt,
+				userPrompt,
+				llmOptions,
+				options?.lens ?? "validator",
+			);
+			logAutoreviewEvent("validator.model_complete", {
+				...correlation,
+				model: response.model.name,
+				provider: response.model.provider,
+				responseChars: response.text.length,
+				attempt,
+			});
+			if (response.text.trim()) break;
+			if (attempt < 2) {
+				logAutoreviewEvent("validator.retry_start", {
+					...correlation,
+					findings: findings.length,
+					reason: "empty response",
+				});
+			}
+		}
+		if (!response?.text.trim()) {
+			throw new Error("validator returned an empty response");
+		}
+		text = response.text;
 	} catch (err) {
 		// Fail open: surface findings unverified rather than dropping them.
 		const msg = err instanceof Error ? err.message : String(err);
 		logAutoreviewError("validator.model_error", err, {
+			...correlation,
 			findings: findings.length,
 		});
 		console.warn(
@@ -269,6 +296,7 @@ export async function runValidator(
 	const verdicts = parseValidatorOutput(text);
 	if (verdicts.size === 0) {
 		logAutoreviewEvent("validator.parse_fallback", {
+			...correlation,
 			findings: findings.length,
 			reason: "no parseable verdicts",
 		});
@@ -298,6 +326,7 @@ export async function runValidator(
 		else unverified += 1;
 	}
 	logAutoreviewEvent("validator.complete", {
+		...correlation,
 		findings: annotated.length,
 		droppedFalsePositives,
 		confirmedReal,

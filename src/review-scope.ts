@@ -10,11 +10,7 @@ import {
 	type FileContent,
 	type ProjectIndexEntry,
 } from "./git-diff.js";
-import {
-	applyScoutResult,
-	runScout,
-	type ScoutStatus,
-} from "./scout.js";
+import { applyScoutResult, runScout, type ScoutStatus } from "./scout.js";
 import { assertSafeGitRef } from "./constants.js";
 import { logAutoreviewEvent } from "./logger.js";
 import { matchesAnyGlob } from "./glob-utils.js";
@@ -37,7 +33,7 @@ export type ReviewMode =
 	| "full"
 	| "files";
 
-export interface ReviewScopeRequest {
+interface ReviewScopeRequest {
 	readonly mode?: ReviewMode;
 	readonly files?: readonly string[];
 	readonly ref?: string;
@@ -48,7 +44,7 @@ export interface ReviewScopeRequest {
 	readonly pr?: string | PrInfo;
 }
 
-export interface ResolveReviewScopeOptions {
+interface ResolveReviewScopeOptions {
 	readonly contextMode?: "diff" | "full";
 	readonly needsProjectIndex?: boolean;
 	/** Glob patterns for files to exclude from the review scope. */
@@ -74,6 +70,8 @@ export interface ResolveReviewScopeOptions {
 		readonly maxFiles?: number;
 		readonly docs?: readonly string[];
 	};
+	/** Correlates scout lifecycle events with the enclosing autoreview. */
+	readonly correlationId?: string;
 	/** Receives the scout outcome for progress and final-result reporting. */
 	readonly onScoutStatus?: (status: ScoutStatus) => void;
 	/**
@@ -161,16 +159,20 @@ export async function resolveReviewScope(
 				maxFiles: options.scout.maxFiles,
 				docs: options.scout.docs,
 				ignorePatterns: options.ignorePatterns,
+				correlationId: options.correlationId,
 				signal: options.signal,
 				onStatus: (status) => {
 					Object.assign(scoutMetadata, status);
-					logAutoreviewEvent("scout.status", { ...status });
+					logAutoreviewEvent("scout.status", {
+						correlationId: options.correlationId,
+						...status,
+					});
 					options.onScoutStatus?.(status);
 				},
 			});
 			discoveredFiles = scoutResult
-			? applyScoutResult(allFiles, scoutResult)
-			: allFiles;
+				? applyScoutResult(allFiles, scoutResult)
+				: allFiles;
 		}
 	} else {
 		discoveredFiles =

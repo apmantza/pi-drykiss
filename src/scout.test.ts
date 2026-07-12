@@ -8,6 +8,7 @@ import {
 	applyScoutResult,
 	loadScoutDocs,
 	type ScoutResult,
+	type ScoutStatus,
 } from "./scout.js";
 import type { ChangedFile } from "./types.js";
 
@@ -78,13 +79,21 @@ describe("runScout", () => {
 			model: { id: "test", name: "test", provider: "test" } as any,
 		});
 
+		const statuses: ScoutStatus[] = [];
 		const result = await runScout(ctx, {
 			cwd: tmpDir,
 			allFiles,
 			maxFiles: 10,
+			onStatus: (status) => statuses.push(status),
 		});
 
 		expect(result).toBeUndefined();
+		expect(statuses.at(-1)).toEqual(
+			expect.objectContaining({
+				phase: "fallback",
+				reason: expect.stringContaining("Invalid scout response:"),
+			}),
+		);
 	});
 
 	it("falls back to undefined when LLM call throws", async () => {

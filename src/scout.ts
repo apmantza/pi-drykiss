@@ -34,7 +34,7 @@ export interface ScoutStatus {
 	readonly reason?: string;
 }
 
-export interface ScoutOptions {
+interface ScoutOptions {
 	readonly cwd: string;
 	/**
 	 * Full file list. If omitted, the scout discovers files itself via
@@ -43,6 +43,8 @@ export interface ScoutOptions {
 	 */
 	readonly allFiles?: readonly ChangedFile[];
 	readonly maxFiles?: number;
+	/** Correlates scout lifecycle events with the enclosing autoreview. */
+	readonly correlationId?: string;
 	readonly onStatus?: (status: ScoutStatus) => void;
 	/**
 	 * Glob patterns for docs the scout should read. Relative to the
@@ -84,7 +86,11 @@ export async function runScout(
 	options: ScoutOptions,
 ): Promise<ScoutResult | undefined> {
 	const cwd = options.cwd;
+	const correlation = options.correlationId
+		? { correlationId: options.correlationId }
+		: {};
 	logAutoreviewEvent("scout.start", {
+		...correlation,
 		cwd,
 		configuredMaxFiles: options.maxFiles,
 		docPatterns: options.docs?.length ?? 0,
@@ -99,7 +105,10 @@ export async function runScout(
 			options.allFiles ??
 			(await getAllSourceFiles(cwd, options.ignorePatterns));
 		totalFiles = allFiles.length;
-		logAutoreviewEvent("scout.files_discovered", { totalFiles });
+		logAutoreviewEvent("scout.files_discovered", {
+			...correlation,
+			totalFiles,
+		});
 		options.onStatus?.({ phase: "started", totalFiles });
 
 		if (allFiles.length === 0) {
@@ -116,6 +125,7 @@ export async function runScout(
 			getProjectIndex(cwd, 200, undefined, options.ignorePatterns),
 		]);
 		logAutoreviewEvent("scout.context_ready", {
+			...correlation,
 			docs: docs.size,
 			projectIndex: projectIndex.length,
 		});
@@ -128,6 +138,7 @@ export async function runScout(
 			maxFiles,
 		});
 		logAutoreviewEvent("scout.model_call_start", {
+			...correlation,
 			promptChars: userPrompt.length,
 			maxFiles,
 		});
@@ -143,11 +154,13 @@ export async function runScout(
 		);
 		modelName = response.model.name;
 		logAutoreviewEvent("scout.model_call_complete", {
+			...correlation,
 			model: modelName,
 			responseChars: response.text.length,
 		});
 		if (!response.text.trim()) {
 			logAutoreviewEvent("scout.empty_response", {
+				...correlation,
 				model: modelName,
 				totalFiles,
 			});
@@ -159,9 +172,27 @@ export async function runScout(
 			});
 			return undefined;
 		}
-		const result = parseScoutResult(response.text, allFiles);
+		let result: ScoutResult | undefined;
+		try {
+			result = parseScoutResult(response.text, allFiles);
+		} catch (err) {
+			const reason = err instanceof Error ? err.message : String(err);
+			logAutoreviewEvent("scout.parse_fallback", {
+				...correlation,
+				model: modelName,
+				reason: reason.slice(0, 240),
+			});
+			options.onStatus?.({
+				phase: "fallback",
+				totalFiles,
+				modelName,
+				reason: `Invalid scout response: ${reason.slice(0, 200)}`,
+			});
+			return undefined;
+		}
 		if (!result) {
 			logAutoreviewEvent("scout.parse_fallback", {
+				...correlation,
 				model: modelName,
 				reason: "Invalid or empty scout response",
 			});
@@ -174,6 +205,7 @@ export async function runScout(
 			return undefined;
 		}
 		logAutoreviewEvent("scout.success", {
+			...correlation,
 			model: modelName,
 			selectedFiles: result.files.length,
 			totalFiles,
@@ -188,6 +220,7 @@ export async function runScout(
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		logAutoreviewError("scout.error", err, {
+			...correlation,
 			model: modelName,
 			totalFiles,
 		});

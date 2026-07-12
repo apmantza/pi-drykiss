@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import * as promptLoader from "./prompt-loader.js";
+import * as llm from "./llm.js";
+
+vi.mock("./llm.js", () => ({
+	callLLM: vi.fn().mockRejectedValue(new Error("no model")),
+}));
 import {
 	applyValidatorVerdicts,
 	buildValidatorUserPrompt,
@@ -124,7 +129,7 @@ describe("parseValidatorOutput", () => {
 		expect(parseValidatorOutput('{"id": 0, "verdict": "real"}').size).toBe(0);
 	});
 
-	it("returns empty map for unparseable text", () => {
+	it("returns empty map for unparsable text", () => {
 		expect(parseValidatorOutput("not json").size).toBe(0);
 	});
 
@@ -279,6 +284,27 @@ describe("runValidator — fail-open behavior", () => {
 		expect(result.droppedFalsePositives).toBe(0);
 		expect(result.confirmedReal).toBe(0);
 		expect(result.errorMessage).toBeDefined();
+	});
+
+	it("retries once when the model returns an empty response", async () => {
+		const callLLM = vi.mocked(llm.callLLM);
+		callLLM.mockReset();
+		callLLM
+			.mockResolvedValueOnce({ text: "", model: {} as never })
+			.mockResolvedValueOnce({
+				text: JSON.stringify([{ id: 0, verdict: "real" }]),
+				model: {} as never,
+			});
+		try {
+			const result = await runValidator(ctx() as never, [finding()], "diff");
+			expect(callLLM).toHaveBeenCalledTimes(2);
+			expect(result.confirmedReal).toBe(1);
+			expect(result.findings[0]._validatorVerdict).toBe("real");
+			expect(result.errorMessage).toBeUndefined();
+		} finally {
+			callLLM.mockReset();
+			callLLM.mockRejectedValue(new Error("no model"));
+		}
 	});
 
 	it("fails open when the validator prompt fails to load: findings become 'unverified'", async () => {

@@ -591,6 +591,7 @@ export class ReviewManager {
 			const diffBlock = formatDiffsForValidator(diffs);
 			const validation = await runValidator(ctx, candidates, diffBlock, {
 				signal,
+				correlationId: jobId,
 			});
 			const annotatedByKey = new Map(
 				validation.findings.map((finding) => [
