@@ -1,10 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
 import * as promptLoader from "./prompt-loader.js";
 import * as llm from "./llm.js";
+import * as subagentRunner from "./subagent-runner.js";
 
 vi.mock("./llm.js", () => ({
-	callLLM: vi.fn().mockRejectedValue(new Error("no model")),
+	resolveModelSmart: vi.fn().mockResolvedValue({
+		id: "test",
+		name: "test",
+		provider: "test",
+	}),
 }));
+vi.mock("./subagent-runner.js", () => ({
+	runLensSubagent: vi.fn().mockRejectedValue(new Error("no model")),
+}));
+
+const mockedResolveModelSmart = vi.mocked(llm.resolveModelSmart);
+const mockedRunLensSubagent = vi.mocked(subagentRunner.runLensSubagent);
+const toSubagentResponse = (response: { text: string; model?: unknown }) => ({
+		lens: "validator" as const,
+		text: response.text,
+		modelName: "test",
+		provider: "test",
+		durationMs: 1,
+		session: undefined,
+});
+const callLLM = {
+		mockReset: () => mockedRunLensSubagent.mockReset(),
+		mockResolvedValue: (response: { text: string; model?: unknown }) =>
+				mockedRunLensSubagent.mockResolvedValue(toSubagentResponse(response)),
+		mockResolvedValueOnce: (response: { text: string; model?: unknown }) =>
+				mockedRunLensSubagent.mockResolvedValueOnce(toSubagentResponse(response)),
+		mockRejectedValue: (error: Error) =>
+				mockedRunLensSubagent.mockRejectedValue(error),
+};
 import {
 	applyValidatorVerdicts,
 	buildValidatorUserPrompt,
@@ -272,7 +300,7 @@ describe("runValidator — fail-open behavior", () => {
 	});
 
 	it("fails open when the LLM call errors: every finding becomes 'unverified'", async () => {
-		// No model available → callLLM will throw. The validator must
+		// No model available → the subagent call will throw. The validator must
 		// surface findings unchanged, marked unverified, never dropped.
 		const findings = [finding(), finding({ file: "b.ts" })];
 		const result = await runValidator(ctx() as never, findings, "diff");
@@ -287,23 +315,26 @@ describe("runValidator — fail-open behavior", () => {
 	});
 
 	it("retries once when the model returns an empty response", async () => {
-		const callLLM = vi.mocked(llm.callLLM);
 		callLLM.mockReset();
-		callLLM
-			.mockResolvedValueOnce({ text: "", model: {} as never })
-			.mockResolvedValueOnce({
-				text: JSON.stringify([{ id: 0, verdict: "real" }]),
-				model: {} as never,
-			});
+		callLLM.mockResolvedValueOnce({ text: "", model: {} as never });
+		callLLM.mockResolvedValueOnce({
+			text: JSON.stringify([{ id: 0, verdict: "real" }]),
+			model: {} as never,
+		});
 		try {
 			const result = await runValidator(ctx() as never, [finding()], "diff");
-			expect(callLLM).toHaveBeenCalledTimes(2);
+			expect(mockedRunLensSubagent).toHaveBeenCalledTimes(2);
 			expect(result.confirmedReal).toBe(1);
 			expect(result.findings[0]._validatorVerdict).toBe("real");
 			expect(result.errorMessage).toBeUndefined();
 		} finally {
 			callLLM.mockReset();
 			callLLM.mockRejectedValue(new Error("no model"));
+			mockedResolveModelSmart.mockResolvedValue({
+				id: "test",
+				name: "test",
+				provider: "test",
+			} as never);
 		}
 	});
 

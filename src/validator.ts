@@ -21,7 +21,8 @@
  */
 
 import { extractBalancedJsonArray } from "./json-extract.js";
-import { callLLM } from "./llm.js";
+import { resolveModelSmart } from "./llm.js";
+import { runLensSubagent } from "./subagent-runner.js";
 import { loadPromptBody } from "./prompt-loader.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -186,6 +187,7 @@ export async function runValidator(
 	options?: {
 		signal?: AbortSignal;
 		lens?: string;
+		modelHint?: string;
 		correlationId?: string;
 	},
 ): Promise<ValidatorResult> {
@@ -233,36 +235,47 @@ export async function runValidator(
 
 	let text: string;
 	try {
-		const llmOptions = {
-			temperature: 0,
-			// Validator doesn't need a huge response — one short verdict
-			// per finding, ~50 tokens each.
-			maxTokens: Math.max(1000, findings.length * 80),
-			signal: options?.signal,
-		};
-		let response: Awaited<ReturnType<typeof callLLM>> | undefined;
+		const model = await resolveModelSmart(
+			ctx,
+			options?.modelHint,
+			options?.lens ?? "validator",
+		);
+		if (!model) throw new Error("No model available for validator.");
+		let response: Awaited<ReturnType<typeof runLensSubagent>> | undefined;
 		for (let attempt = 1; attempt <= 2; attempt += 1) {
-			response = await callLLM(
+			response = await runLensSubagent(
 				ctx,
+				ctx.cwd,
+				model,
 				systemPrompt,
 				userPrompt,
-				llmOptions,
 				options?.lens ?? "validator",
+				options?.signal,
 			);
-			logAutoreviewEvent("validator.model_complete", {
-				...correlation,
-				model: response.model.name,
-				provider: response.model.provider,
-				responseChars: response.text.length,
-				attempt,
-			});
-			if (response.text.trim()) break;
-			if (attempt < 2) {
-				logAutoreviewEvent("validator.retry_start", {
+			try {
+				logAutoreviewEvent("validator.model_complete", {
 					...correlation,
-					findings: findings.length,
-					reason: "empty response",
+					model: response.modelName,
+					provider: response.provider,
+					responseChars: response.text.length,
+					durationMs: response.durationMs,
+					attempt,
 				});
+				if (response.errorMessage) throw new Error(response.errorMessage);
+				if (response.text.trim()) break;
+				if (attempt < 2) {
+					logAutoreviewEvent("validator.retry_start", {
+						...correlation,
+						findings: findings.length,
+						reason: "empty response",
+					});
+				}
+			} finally {
+				try {
+					response.session?.dispose();
+				} catch {
+					// Validator session cleanup is best effort.
+				}
 			}
 		}
 		if (!response?.text.trim()) {

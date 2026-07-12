@@ -174,6 +174,7 @@ export interface DrykissConfig {
 		tests?: string;
 		security?: string;
 		synthesis?: string;
+		validator?: string;
 		scout?: string;
 	};
 	/** Whether to prompt for model selection on first use */

@@ -492,6 +492,7 @@ export class ReviewManager {
 		projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined,
 		options: {
 			model?: string;
+			validatorModelHint?: string;
 			lenses?: ReviewLens[];
 			target?: ReviewResultTarget;
 			onProgress?: (job: ReviewJob) => void;
@@ -591,6 +592,7 @@ export class ReviewManager {
 			const diffBlock = formatDiffsForValidator(diffs);
 			const validation = await runValidator(ctx, candidates, diffBlock, {
 				signal,
+				modelHint: options.validatorModelHint,
 				correlationId: jobId,
 			});
 			const annotatedByKey = new Map(
