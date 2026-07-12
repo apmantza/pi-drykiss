@@ -16,6 +16,8 @@ import { findModelByHint } from "./model-utils.js";
 export { findModelByHint };
 
 export interface LLMOptions {
+	/** Optional model hint resolved before per-lens/global config. */
+	readonly modelHint?: string;
 	readonly temperature?: number;
 	readonly maxTokens?: number;
 	readonly signal?: AbortSignal;
@@ -94,7 +96,7 @@ export async function callLLM(
 	options?: LLMOptions,
 	lens?: string,
 ): Promise<{ text: string; model: Model<Api> }> {
-	let model = await resolveModelSmart(ctx, undefined, lens);
+	let model = await resolveModelSmart(ctx, options?.modelHint, lens);
 	if (!model) {
 		throw new Error("No model available. Configure an API key with /login.");
 	}

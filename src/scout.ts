@@ -43,6 +43,8 @@ interface ScoutOptions {
 	 */
 	readonly allFiles?: readonly ChangedFile[];
 	readonly maxFiles?: number;
+	/** Effective project model hint for the scout LLM call. */
+	readonly modelHint?: string;
 	/** Correlates scout lifecycle events with the enclosing autoreview. */
 	readonly correlationId?: string;
 	readonly onStatus?: (status: ScoutStatus) => void;
@@ -147,6 +149,7 @@ export async function runScout(
 			systemPrompt,
 			userPrompt,
 			{
+				modelHint: options.modelHint,
 				signal: options.signal,
 				maxTokens: 4000,
 			},

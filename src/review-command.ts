@@ -143,6 +143,7 @@ export const DrykissAutoreviewParams = Type.Object({
 async function runStandaloneScout(
 	ctx: ExtensionContext,
 	config: import("./config.js").DrykissConfig["scout"],
+	modelHint: string | undefined,
 	maxFiles: number,
 	ignorePatterns: readonly string[] | undefined,
 	signal: AbortSignal | undefined,
@@ -166,6 +167,7 @@ async function runStandaloneScout(
 	const result = await runScout(ctx, {
 		cwd: ctx.cwd,
 		maxFiles,
+		modelHint,
 		docs: config?.docs,
 		ignorePatterns,
 		correlationId,
@@ -318,6 +320,7 @@ export async function executeDrykissAutoreviewTool(
 		return runStandaloneScout(
 			ctx,
 			effectiveConfig.scout,
+			effectiveConfig.lensModels?.scout ?? effectiveConfig.defaultModel,
 			params.maxFiles ?? effectiveConfig.autoreview?.maxFiles ?? MAX_FILES,
 			effectiveConfig.ignorePatterns,
 			signal,
@@ -354,6 +357,8 @@ export async function executeDrykissAutoreviewTool(
 			pathFilters: effectiveConfig.review?.pathFilters,
 			onFileProgress: fileProgress,
 			scout: effectiveConfig.scout,
+			scoutModelHint:
+				effectiveConfig.lensModels?.scout ?? effectiveConfig.defaultModel,
 			correlationId,
 			signal,
 		},

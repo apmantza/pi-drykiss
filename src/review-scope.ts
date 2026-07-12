@@ -70,6 +70,8 @@ interface ResolveReviewScopeOptions {
 		readonly maxFiles?: number;
 		readonly docs?: readonly string[];
 	};
+	/** Effective project model hint for the scout LLM call. */
+	readonly scoutModelHint?: string;
 	/** Correlates scout lifecycle events with the enclosing autoreview. */
 	readonly correlationId?: string;
 	/** Receives the scout outcome for progress and final-result reporting. */
@@ -159,6 +161,7 @@ export async function resolveReviewScope(
 				maxFiles: options.scout.maxFiles,
 				docs: options.scout.docs,
 				ignorePatterns: options.ignorePatterns,
+				modelHint: options.scoutModelHint,
 				correlationId: options.correlationId,
 				signal: options.signal,
 				onStatus: (status) => {
