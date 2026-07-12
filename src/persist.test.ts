@@ -73,6 +73,36 @@ describe("saveReview", () => {
 		expect(written.criticalCount).toBe(1);
 		expect(written.findings).toHaveLength(1);
 	});
+
+	it("redacts secret-like strings before persisting", async () => {
+		const secret = "sk-" + "a".repeat(24);
+		await saveReview(["src/app.ts"], {
+			findings: [
+				{
+					file: "src/app.ts",
+					line: 1,
+					severity: "high",
+					category: "Credential leak",
+					summary: `Found ${secret}`,
+					detail: `Detail ${secret}`,
+					suggestion: "Rotate it",
+				},
+			],
+			summary: `Review mentions ${secret}`,
+			verdict: "Request changes",
+			criticalCount: 0,
+			highCount: 1,
+			mediumCount: 0,
+			lowCount: 0,
+			nitCount: 0,
+			healthScore: 70,
+			scoreBreakdown: { critical: 0, warning: 1, suggestion: 0 },
+		});
+
+		const written = String(vi.mocked(writeFile).mock.calls[0][1]);
+		expect(written).not.toContain(secret);
+		expect(written).toContain("[REDACTED]");
+	});
 });
 
 describe("listReviews", () => {

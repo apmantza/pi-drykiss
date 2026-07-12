@@ -2,6 +2,7 @@ import { mkdir, writeFile, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Finding, SynthesisResult } from "./types.js";
+import { redactSecrets } from "./secret-redaction.js";
 import { getGlobalBaseDir, LOG_PREFIX } from "./constants.js";
 
 function getGlobalReviewsDir(): string {
@@ -10,6 +11,21 @@ function getGlobalReviewsDir(): string {
 
 function getGlobalSessionsDir(): string {
 	return join(getGlobalBaseDir(), "sessions");
+}
+
+/** Redact secret-like strings before review data is persisted to disk. */
+function redactPersistedValue(value: unknown): unknown {
+	if (typeof value === "string") return redactSecrets(value).text;
+	if (Array.isArray(value)) return value.map(redactPersistedValue);
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, nested]) => [
+				key,
+				redactPersistedValue(nested),
+			]),
+		);
+	}
+	return value;
 }
 
 export interface PersistedReview {
@@ -38,12 +54,13 @@ export async function saveReview(
 		(f: any) => f._suppressed === true,
 	).length;
 
+	const safeSynthesis = redactPersistedValue(synthesis) as SynthesisResult;
 	const review: PersistedReview = {
 		timestamp,
 		files,
-		findings: synthesis.findings,
-		summary: synthesis.summary,
-		criticalCount: synthesis.criticalCount,
+		findings: safeSynthesis.findings,
+		summary: safeSynthesis.summary,
+		criticalCount: safeSynthesis.criticalCount,
 		highCount: synthesis.highCount,
 		mediumCount: synthesis.mediumCount,
 		lowCount: synthesis.lowCount,

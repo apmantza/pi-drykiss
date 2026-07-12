@@ -488,6 +488,7 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 		const literals = lensSchema.anyOf.map((s: any) => s.const);
 		expect(literals).toContain("all");
 		expect(literals).toContain("security");
+		expect(literals).toContain("docs");
 		expect(literals).toContain("simplicity");
 	});
 });

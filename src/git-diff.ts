@@ -12,6 +12,9 @@ import type { ChangedFile, ReviewOptions } from "./types.js";
 import { LOG_PREFIX, getNodeErrorCode, assertSafeGitRef } from "./constants.js";
 import { matchesAnyGlob } from "./glob-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
+import { redactSecrets } from "./secret-redaction.js";
+export { redactSecrets } from "./secret-redaction.js";
+export type { RedactResult } from "./secret-redaction.js";
 
 export const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	M: "modified",
@@ -82,77 +85,6 @@ export function parseDiffOutput(stdout: string): ChangedFile[] {
 		files.push({ path: filePath, status, language: detectLanguage(filePath) });
 	}
 	return files;
-}
-
-// ── Secret redaction ──────────────────────────────────────────────────────
-// Defense-in-depth on top of the prompt rule "never reproduce secret values".
-// The shared grounding rules already tell lenses not to echo credentials,
-// but we also redact high-signal credential shapes from the diff/file text
-// before it ever reaches the reviewer LLM. This matches the openclaw
-// autoreview skill's "fail closed / redact before engine invocation when
-// patch text looks secret-like" rule: secrets never leave the local process
-// in cleartext, even if a lens forgets the instruction.
-
-interface SecretPattern {
-	re: RegExp;
-	type: string;
-}
-
-const SECRET_PATTERNS: SecretPattern[] = [
-	{
-		// Private key blocks (base64-encoded content between BEGIN/END markers).
-		// Uses a specific character class instead of [\s\S]*? to avoid
-		// O(n²) backtracking on non-matching input — base64 characters
-		// plus newlines are the only valid content between the markers.
-		re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n]*\r?\n-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
-		type: "private key",
-	},
-	{ re: /\bAKIA[0-9A-Z]{16}\b/g, type: "AWS access key id" },
-	{ re: /\bghp_[A-Za-z0-9]{36}\b/g, type: "GitHub token" },
-	{ re: /\bgithub_pat_[A-Za-z0-9_]{82}\b/g, type: "GitHub fine-grained token" },
-	{ re: /\bgh[ousr]_[A-Za-z0-9]{36}\b/g, type: "GitHub token" },
-	{ re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, type: "Slack token" },
-	{
-		re: /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/g,
-		type: "Stripe secret key",
-	},
-	{ re: /\bAIza[0-9A-Za-z_-]{35}\b/g, type: "Google API key" },
-	{
-		re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-		type: "JWT",
-	},
-	{
-		// Assignment-style: key = "value" where the value looks secret.
-		re: /(api[_-]?key|apikey|secret|token|password|passwd|pwd|client[_-]?secret|access[_-]?token|auth[_-]?token|private[_-]?key)\s*[:=]\s*["'][A-Za-z0-9/+_=-]{16,}["']/gi,
-		type: "credential assignment",
-	},
-];
-
-export interface RedactResult {
-	readonly text: string;
-	readonly redacted: number;
-	readonly types: readonly string[];
-}
-
-/**
- * Scan text for high-signal credential shapes and replace each match with
- * the literal `[REDACTED]`. Returns the redacted text plus a count and the
- * distinct credential types that were redacted (never the values). The
- * patterns are deliberately conservative to avoid false positives on
- * ordinary code.
- */
-export function redactSecrets(input: string): RedactResult {
-	let text = input;
-	let redacted = 0;
-	const types = new Set<string>();
-	for (const { re, type } of SECRET_PATTERNS) {
-		text = text.replace(re, () => {
-			redacted++;
-			types.add(type);
-			return "[REDACTED]";
-		});
-	}
-	return { text, redacted, types: [...types] };
 }
 
 export async function getAllSourceFiles(

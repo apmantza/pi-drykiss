@@ -718,6 +718,16 @@ describe("redactSecrets", () => {
 		expect(out.types).toContain("GitHub token");
 	});
 
+	it("redacts OpenAI and Anthropic API keys", () => {
+		const openAi = "sk-" + "a".repeat(24);
+		const anthropic = "sk-ant-" + "b".repeat(24);
+		const out = redactSecrets(`${openAi} ${anthropic}`);
+		expect(out.text).toBe("[REDACTED] [REDACTED]");
+		expect(out.redacted).toBe(2);
+		expect(out.types).toContain("OpenAI API key");
+		expect(out.types).toContain("Anthropic API key");
+	});
+
 	it("redacts private key blocks spanning multiple lines", () => {
 		const block =
 			"-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";

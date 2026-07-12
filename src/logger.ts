@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { redactSecrets } from "./secret-redaction.js";
 
 /** Append-only diagnostic log for autoreview lifecycle events. */
 export const AUTOREVIEW_LOG_PATH = join(
@@ -24,7 +25,10 @@ function safeDetails(
 			typeof value === "boolean" ||
 			value === null
 		) {
-			result[key] = typeof value === "string" ? value.slice(0, 500) : value;
+			result[key] =
+				typeof value === "string"
+					? redactSecrets(value).text.slice(0, 500)
+					: value;
 		} else if (Array.isArray(value)) {
 			result[key] = value.slice(0, 20);
 		}
