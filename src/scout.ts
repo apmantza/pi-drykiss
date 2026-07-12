@@ -94,9 +94,7 @@ export async function runScout(
 
 	try {
 		const maxFiles = Math.max(1, options.maxFiles ?? DEFAULT_MAX_FILES);
-		const docGlobs = options.docs?.length
-			? options.docs
-			: DEFAULT_DOC_GLOBS;
+		const docGlobs = options.docs?.length ? options.docs : DEFAULT_DOC_GLOBS;
 		const allFiles =
 			options.allFiles ??
 			(await getAllSourceFiles(cwd, options.ignorePatterns));
@@ -148,6 +146,19 @@ export async function runScout(
 			model: modelName,
 			responseChars: response.text.length,
 		});
+		if (!response.text.trim()) {
+			logAutoreviewEvent("scout.empty_response", {
+				model: modelName,
+				totalFiles,
+			});
+			options.onStatus?.({
+				phase: "fallback",
+				totalFiles,
+				modelName,
+				reason: "Empty model response",
+			});
+			return undefined;
+		}
 		const result = parseScoutResult(response.text, allFiles);
 		if (!result) {
 			logAutoreviewEvent("scout.parse_fallback", {
@@ -310,6 +321,7 @@ function parseScoutResult(
 	raw: string,
 	allFiles: readonly ChangedFile[],
 ): ScoutResult | undefined {
+	if (!raw.trim()) return undefined;
 	const parsed = lenientJsonParse<unknown>(raw);
 	if (!isPlainObject(parsed)) return undefined;
 
