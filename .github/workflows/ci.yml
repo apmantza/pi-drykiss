@@ -63,7 +63,7 @@ jobs:
         run: npx vitest run --coverage
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@e0971b3e1efbd40733d077e64177a06f4e69d7b5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

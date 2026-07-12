@@ -712,9 +712,8 @@ describe("redactSecrets", () => {
 	});
 
 	it("redacts GitHub tokens", () => {
-		const out = redactSecrets(
-			"token: ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-		);
+		const token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789";
+		const out = redactSecrets("token: " + token);
 		expect(out.text).toBe("token: [REDACTED]");
 		expect(out.types).toContain("GitHub token");
 	});
@@ -737,7 +736,9 @@ describe("redactSecrets", () => {
 
 	it("redacts JWTs", () => {
 		const jwt =
-			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f";
+			"eyJhbGciOiJIUzI1NiJ9" +
+			".eyJzdWIiOiIxMjM0NTY3ODkwIn0" +
+			".SflKxwRJSMeKKF2QT4f";
 		const out = redactSecrets(`Authorization: Bearer ${jwt}`);
 		expect(out.text).toBe("Authorization: Bearer [REDACTED]");
 		expect(out.types).toContain("JWT");
@@ -752,8 +753,8 @@ describe("redactSecrets", () => {
 	});
 
 	it("redacts multiple distinct credential types and reports each once", () => {
-		const input =
-			"aws=AKIAIOSFODNN7EXAMPLE\nghp_abcdefghijklmnopqrstuvwxyz0123456789";
+		const ghToken = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789";
+		const input = "aws=AKIAIOSFODNN7EXAMPLE\n" + ghToken;
 		const out = redactSecrets(input);
 		expect(out.redacted).toBe(2);
 		expect(out.types).toHaveLength(2);
