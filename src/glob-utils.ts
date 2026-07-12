@@ -73,5 +73,6 @@ function globToRegex(pattern: string): RegExp {
 		}
 	}
 	regex += "$";
+	// nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp
 	return new RegExp(regex);
 }

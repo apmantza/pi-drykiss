@@ -52,8 +52,7 @@ export async function executeFlatReview(
 		scope.projectIndex,
 		{
 			model,
-			validatorModelHint:
-				config.lensModels?.validator ?? config.defaultModel,
+			validatorModelHint: config.lensModels?.validator ?? config.defaultModel,
 			lenses: [...lenses],
 			target: {
 				mode: scope.mode,

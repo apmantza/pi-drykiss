@@ -17,21 +17,21 @@ vi.mock("./subagent-runner.js", () => ({
 const mockedResolveModelSmart = vi.mocked(llm.resolveModelSmart);
 const mockedRunLensSubagent = vi.mocked(subagentRunner.runLensSubagent);
 const toSubagentResponse = (response: { text: string; model?: unknown }) => ({
-		lens: "validator" as const,
-		text: response.text,
-		modelName: "test",
-		provider: "test",
-		durationMs: 1,
-		session: undefined,
+	lens: "validator" as const,
+	text: response.text,
+	modelName: "test",
+	provider: "test",
+	durationMs: 1,
+	session: undefined,
 });
 const callLLM = {
-		mockReset: () => mockedRunLensSubagent.mockReset(),
-		mockResolvedValue: (response: { text: string; model?: unknown }) =>
-				mockedRunLensSubagent.mockResolvedValue(toSubagentResponse(response)),
-		mockResolvedValueOnce: (response: { text: string; model?: unknown }) =>
-				mockedRunLensSubagent.mockResolvedValueOnce(toSubagentResponse(response)),
-		mockRejectedValue: (error: Error) =>
-				mockedRunLensSubagent.mockRejectedValue(error),
+	mockReset: () => mockedRunLensSubagent.mockReset(),
+	mockResolvedValue: (response: { text: string; model?: unknown }) =>
+		mockedRunLensSubagent.mockResolvedValue(toSubagentResponse(response)),
+	mockResolvedValueOnce: (response: { text: string; model?: unknown }) =>
+		mockedRunLensSubagent.mockResolvedValueOnce(toSubagentResponse(response)),
+	mockRejectedValue: (error: Error) =>
+		mockedRunLensSubagent.mockRejectedValue(error),
 };
 import {
 	applyValidatorVerdicts,
