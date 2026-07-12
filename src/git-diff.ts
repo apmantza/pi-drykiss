@@ -104,7 +104,7 @@ const SECRET_PATTERNS: SecretPattern[] = [
 		// Uses a specific character class instead of [\s\S]*? to avoid
 		// O(n²) backtracking on non-matching input — base64 characters
 		// plus newlines are the only valid content between the markers.
-		re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----\n[A-Za-z0-9+/=\n]*\n-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
+		re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n]*\r?\n-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
 		type: "private key",
 	},
 	{ re: /\bAKIA[0-9A-Z]{16}\b/g, type: "AWS access key id" },

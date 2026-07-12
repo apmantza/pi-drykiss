@@ -133,6 +133,20 @@ describe("parseDeepVerdicts", () => {
 		expect(verdicts.size).toBe(1);
 	});
 
+	it("returns empty map and warns for malformed JSON", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			expect(parseDeepVerdicts("[{bad}]")).toEqual(new Map());
+			expect(warn).toHaveBeenCalledWith(
+			"%s Failed to parse deep-review validator output: %s",
+			"[DRYKISS]",
+			expect.any(String),
+		);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("returns empty map for non-array JSON", () => {
 		expect(parseDeepVerdicts('{"a": 1}')).toEqual(new Map());
 	});

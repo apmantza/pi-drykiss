@@ -316,7 +316,12 @@ export function parseDeepVerdicts(text: string): Map<number, DeepVerdict> {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(json);
-	} catch {
+	} catch (err) {
+		console.warn(
+			"%s Failed to parse deep-review validator output: %s",
+			LOG_PREFIX,
+			toErrorMessage(err),
+		);
 		return new Map();
 	}
 	if (!Array.isArray(parsed)) return new Map();

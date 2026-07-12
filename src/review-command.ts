@@ -324,7 +324,9 @@ export async function executeDrykissAutoreviewTool(
  */
 function buildScoutNote(scope: ReviewScope): string {
 	if (!scope.metadata || scope.mode !== "full") return "";
+	if (scope.metadata.enabled !== true) return " · scout disabled";
 	const status = scope.metadata.status;
+	if (status === undefined) return " · scout not invoked";
 	if (status === "success") {
 		const selected = scope.metadata.selectedFiles;
 		const total = scope.metadata.totalFiles;

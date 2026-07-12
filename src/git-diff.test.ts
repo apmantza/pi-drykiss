@@ -727,6 +727,14 @@ describe("redactSecrets", () => {
 		expect(out.types).toContain("private key");
 	});
 
+	it("redacts private key blocks with CRLF line endings", () => {
+		const block =
+			"-----BEGIN RSA PRIVATE KEY-----\r\nMIIEogIBAAKCAQEA\r\n-----END RSA PRIVATE KEY-----";
+		const out = redactSecrets(block);
+		expect(out.text).toBe("[REDACTED]");
+		expect(out.types).toContain("private key");
+	});
+
 	it("redacts JWTs", () => {
 		const jwt =
 			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4f";

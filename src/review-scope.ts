@@ -133,7 +133,9 @@ export async function resolveReviewScope(
 	}
 
 	const reviewOptions = toReviewOptions(mode, request);
-	const scoutMetadata: Record<string, unknown> = {};
+	const scoutMetadata: Record<string, unknown> = {
+		enabled: mode === "full" && options.scout?.enabled === true,
+	};
 	let discoveredFiles: ChangedFile[];
 	if (mode === "full" && options.scout?.enabled) {
 		if (!ctx) {
