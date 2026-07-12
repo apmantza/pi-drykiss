@@ -83,37 +83,41 @@ export async function runScout(
 	options: ScoutOptions,
 ): Promise<ScoutResult | undefined> {
 	const cwd = options.cwd;
-	const maxFiles = Math.max(1, options.maxFiles ?? DEFAULT_MAX_FILES);
-	const docGlobs = options.docs?.length ? options.docs : DEFAULT_DOC_GLOBS;
-
-	const [docs, projectIndex] = await Promise.all([
-		loadScoutDocs(cwd, docGlobs),
-		getProjectIndex(cwd, 200, undefined, options.ignorePatterns),
-	]);
-	const allFiles =
-		options.allFiles ?? (await getAllSourceFiles(cwd, options.ignorePatterns));
-
-	if (allFiles.length === 0) {
-		options.onStatus?.({
-			phase: "fallback",
-			totalFiles: 0,
-			reason: "No source files found",
-		});
-		return undefined;
-	}
-
-	const systemPrompt = await composeScoutPrompt();
-	const userPrompt = buildScoutUserPrompt({
-		cwd,
-		docs,
-		allFiles,
-		projectIndex,
-		maxFiles,
-	});
-
-	options.onStatus?.({ phase: "started", totalFiles: allFiles.length });
 	let modelName = "unknown";
+	let totalFiles: number | undefined;
+
 	try {
+		const maxFiles = Math.max(1, options.maxFiles ?? DEFAULT_MAX_FILES);
+		const docGlobs = options.docs?.length
+			? options.docs
+			: DEFAULT_DOC_GLOBS;
+		const allFiles =
+			options.allFiles ??
+			(await getAllSourceFiles(cwd, options.ignorePatterns));
+		totalFiles = allFiles.length;
+		options.onStatus?.({ phase: "started", totalFiles });
+
+		if (allFiles.length === 0) {
+			options.onStatus?.({
+				phase: "fallback",
+				totalFiles: 0,
+				reason: "No source files found",
+			});
+			return undefined;
+		}
+
+		const [docs, projectIndex] = await Promise.all([
+			loadScoutDocs(cwd, docGlobs),
+			getProjectIndex(cwd, 200, undefined, options.ignorePatterns),
+		]);
+		const systemPrompt = await composeScoutPrompt();
+		const userPrompt = buildScoutUserPrompt({
+			cwd,
+			docs,
+			allFiles,
+			projectIndex,
+			maxFiles,
+		});
 		const response = await callLLM(
 			ctx,
 			systemPrompt,
@@ -126,27 +130,27 @@ export async function runScout(
 		);
 		modelName = response.model.name;
 		const result = parseScoutResult(response.text, allFiles);
-		if (result) {
+		if (!result) {
 			options.onStatus?.({
-				phase: "success",
-				totalFiles: allFiles.length,
-				selectedFiles: result.files.length,
+				phase: "fallback",
+				totalFiles,
 				modelName,
+				reason: "Invalid or empty scout response",
 			});
-			return result;
+			return undefined;
 		}
 		options.onStatus?.({
-			phase: "fallback",
-			totalFiles: allFiles.length,
+			phase: "success",
+			totalFiles,
+			selectedFiles: result.files.length,
 			modelName,
-			reason: "Invalid or empty scout response",
 		});
-		return undefined;
+		return result;
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		options.onStatus?.({
 			phase: "fallback",
-			totalFiles: allFiles.length,
+			...(totalFiles !== undefined ? { totalFiles } : {}),
 			modelName,
 			reason: msg.slice(0, 240),
 		});
