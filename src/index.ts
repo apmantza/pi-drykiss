@@ -52,8 +52,7 @@ export default function (pi: ExtensionAPI): void {
 			.listJobs()
 			.find(
 				(job) =>
-					job.overallStatus === "running" ||
-					job.overallStatus === "queued",
+					job.overallStatus === "running" || job.overallStatus === "queued",
 			);
 		ui.setWorkingMessage(
 			activeJob ? formatReviewWorkingMessage(activeJob) : undefined,
