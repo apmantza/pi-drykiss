@@ -25,6 +25,7 @@ import { resolveModelSmart } from "./llm.js";
 import { runLensSubagent } from "./subagent-runner.js";
 import { loadPromptBody } from "./prompt-loader.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import { parseVerdictRecord } from "./verdict-utils.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Finding } from "./types.js";
 import { LOG_PREFIX } from "./constants.js";
@@ -95,32 +96,11 @@ export function parseValidatorOutput(
 	const verdicts = new Map<number, ValidatorVerdict>();
 	for (const entry of parsed) {
 		if (typeof entry !== "object" || entry === null) continue;
-		const record = entry as Record<string, unknown>;
-		if (typeof record.id !== "number" || !Number.isInteger(record.id)) continue;
-		let verdict: "real" | "false-positive" | null;
-		if (record.verdict === "real") {
-			verdict = "real";
-		} else if (record.verdict === "false-positive") {
-			verdict = "false-positive";
-		} else {
-			verdict = null;
-		}
-		if (!verdict) continue;
-		const confidence =
-			typeof record.confidence === "number" &&
-			Number.isFinite(record.confidence)
-				? Math.min(1, Math.max(0, record.confidence))
-				: 0.5;
-		const justification =
-			typeof record.justification === "string"
-				? record.justification.trim() || undefined
-				: undefined;
-		verdicts.set(record.id, {
-			id: record.id,
-			verdict,
-			confidence,
-			justification,
-		});
+		const verdict = parseVerdictRecord(
+			entry as Record<string, unknown>,
+			"skip",
+		);
+		if (verdict) verdicts.set(verdict.id, verdict);
 	}
 	return verdicts;
 }

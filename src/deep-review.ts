@@ -36,6 +36,7 @@
 import { toErrorMessage } from "./error-utils.js";
 import { parseBalancedJsonArray } from "./json-extract.js";
 import { loadPromptBody } from "./prompt-loader.js";
+import { parseVerdictRecord } from "./verdict-utils.js";
 import {
 	jaccard,
 	tokenize,
@@ -316,24 +317,11 @@ export function parseDeepVerdicts(text: string): Map<number, DeepVerdict> {
 	const verdicts = new Map<number, DeepVerdict>();
 	for (const entry of parsed) {
 		if (typeof entry !== "object" || entry === null) continue;
-		const record = entry as Record<string, unknown>;
-		if (typeof record.id !== "number" || !Number.isInteger(record.id)) continue;
-		const verdict = record.verdict === "real" ? "real" : "false-positive";
-		const confidence =
-			typeof record.confidence === "number" &&
-			Number.isFinite(record.confidence)
-				? Math.min(1, Math.max(0, record.confidence))
-				: 0.5;
-		const justification =
-			typeof record.justification === "string"
-				? record.justification.trim() || undefined
-				: undefined;
-		verdicts.set(record.id, {
-			id: record.id,
-			verdict,
-			confidence,
-			justification,
-		});
+		const verdict = parseVerdictRecord(
+			entry as Record<string, unknown>,
+			"false-positive",
+		);
+		if (verdict) verdicts.set(verdict.id, verdict);
 	}
 	return verdicts;
 }

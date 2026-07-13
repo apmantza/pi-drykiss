@@ -301,7 +301,7 @@ export async function loadRejections(
 			}
 		} catch {
 			console.warn(
-				`${LOG_PREFIX} Skipped unparseable rejection line: ${raw
+				`${LOG_PREFIX} Skipped unparsable rejection line: ${raw
 					.slice(0, 80)
 					.replace(/[\r\n\x00\x1b]/g, "·")}`,
 			);
