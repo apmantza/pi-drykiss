@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	ReviewProgressWidget,
 	collectModelPairs,
+	formatReviewWorkingMessage,
 	pickVerdict,
 	formatFinding,
 } from "./review-widget.js";
@@ -67,9 +68,8 @@ function buildRunningJob(elapsedMs: number): ReviewJob {
 }
 
 function renderElapsedLine(elapsedMs: number): string {
-	const lines = renderLines(buildRunningJob(elapsedMs));
-	// Running widget is now a single heading line with the elapsed.
-	const heading = lines[0] ?? "";
+	const job = buildRunningJob(elapsedMs);
+	const heading = formatReviewWorkingMessage(job);
 	const match = heading.match(/running\s*(.+)$/);
 	return match ? match[1].trim() : "";
 }
@@ -98,8 +98,7 @@ describe("formatElapsed (via widget render)", () => {
 
 	it("shows the heading line for running jobs", () => {
 		const lines = renderLines(buildRunningJob(1000));
-		expect(lines[0]).toContain("DRYKISS Review");
-		expect(lines[0]).toContain("running");
+		expect(lines[0]).toContain("KISS running");
 	});
 
 	it("shows a single progress line for running jobs (no per-lens lines)", () => {

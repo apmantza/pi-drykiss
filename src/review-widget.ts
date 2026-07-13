@@ -239,6 +239,39 @@ type Theme = {
 	bold(text: string): string;
 };
 
+/** Format the aggregate review state for Pi's single built-in working row. */
+export function formatReviewWorkingMessage(job: ReviewJob): string {
+	let activeCount = 0;
+	let completedOrErrorCount = 0;
+	for (const lens of job.lenses) {
+		const state = job.states.get(lens);
+		if (state?.status === "running") activeCount++;
+		else if (state?.status === "done" || state?.status === "error") {
+			completedOrErrorCount++;
+		}
+	}
+	const totalLenses = job.lenses.length;
+	const barWidth = 10;
+	const filled =
+		totalLenses === 0
+			? 0
+			: Math.min(
+					barWidth,
+					Math.round((completedOrErrorCount / totalLenses) * barWidth),
+				);
+	const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+	const elapsed =
+		job.overallStatus === "running" && job.startedAt
+			? ` · running ${formatElapsed(Date.now() - job.startedAt)}`
+			: "";
+	return (
+		`DRYKISS Review · ${job.files.length} file(s) · ` +
+		`[${bar}] ${completedOrErrorCount}/${totalLenses} complete` +
+		(activeCount > 0 ? ` · ${activeCount} active` : "") +
+		elapsed
+	);
+}
+
 export class ReviewProgressWidget {
 	private uiCtx: any;
 	private readonly widgetKey = "drykiss-review";
@@ -296,45 +329,30 @@ export class ReviewProgressWidget {
 				continue;
 			}
 
-			// Running / queued: single progress line with spinner.
-			const icon =
-				job.overallStatus === "running"
-					? theme.fg("accent", frame)
-					: theme.fg("dim", "○");
-			const heading = theme.fg("accent", theme.bold("DRYKISS Review"));
-			const fileCount = theme.fg("dim", `${job.files.length} file(s)`);
-
-			let activeCount = 0;
-			let completedOrErrorCount = 0;
-			for (const lens of job.lenses) {
-				const s = job.states.get(lens)!;
-				if (s.status === "running") activeCount++;
-				else if (s.status === "done" || s.status === "error")
-					completedOrErrorCount++;
-			}
-			const totalLenses = job.lenses.length;
-			const elapsed =
-				job.overallStatus === "running" && job.startedAt
-					? ` · running ${formatElapsed(Date.now() - job.startedAt)}`
-					: "";
-			// Visual progress bar: 10 segments, filled proportionally to
-			// completed lenses. Constant width so the line never jumps.
-			const barWidth = 10;
-			const filled =
-				totalLenses === 0
-					? 0
-					: Math.min(
-							barWidth,
-							Math.round((completedOrErrorCount / totalLenses) * barWidth),
-						);
-			const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
-			const progress = theme.fg(
-				"dim",
-				`[${bar}] ${completedOrErrorCount}/${totalLenses} complete` +
-					(activeCount > 0 ? ` · ${activeCount} active` : ""),
-			);
+			// The aggregate review progress is shown in Pi's built-in working
+			// row. Keep this widget row focused on the currently running lens.
+			const running = job.lenses
+				.map((lens) => {
+					const state = job.states.get(lens);
+					return state?.status === "running"
+						? (LENS_DISPLAY_NAMES[lens] ?? lens)
+						: undefined;
+				})
+				.filter((name): name is string => name !== undefined);
+			const queued = job.lenses
+				.map((lens) => {
+					const state = job.states.get(lens);
+					return state?.status === "queued"
+						? (LENS_DISPLAY_NAMES[lens] ?? lens)
+						: undefined;
+				})
+				.filter((name): name is string => name !== undefined);
+			const labels = running.length > 0 ? running : queued.slice(0, 1);
+			const status = running.length > 0 ? "running" : "starting";
 			lines.push(
-				truncate(`${icon} ${heading} · ${fileCount} · ${progress}${elapsed}`),
+				truncate(
+					`${theme.fg("accent", frame)} ${labels.join(", ") || "Review"} ${status}`,
+				),
 			);
 		}
 
