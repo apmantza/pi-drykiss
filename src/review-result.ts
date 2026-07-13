@@ -1,4 +1,7 @@
-import type { ReviewJob } from "./review-manager.js";
+import type {
+	ReviewJobState,
+	ReviewValidationIssue,
+} from "./review-lifecycle-types.js";
 import type { Finding, Severity, SynthesisResult } from "./types.js";
 import { computeHealthScore } from "./types.js";
 import type { SeverityOverrideRule } from "./config.js";
@@ -51,17 +54,11 @@ export interface ReviewResultCounts {
 	readonly validatorUnverified?: number;
 }
 
-export interface ReviewValidationIssue {
-	readonly findingIndex: number;
-	readonly reason: string;
-	readonly finding?: unknown;
-}
-
 export interface ReviewResult {
 	readonly jobId: string;
 	readonly clean: boolean;
 	/** Legacy execution status retained for persisted-review compatibility. */
-	readonly status: ReviewJob["overallStatus"];
+	readonly status: ReviewJobState["overallStatus"];
 	/** Completion quality, separate from risk in the reviewed code. */
 	readonly reviewStatus: ReviewStatus;
 	/** Risk derived from active, normalized findings. */
@@ -159,7 +156,7 @@ export interface BuildReviewResultOptions {
 const SEVERITY_SET = SEVERITY_VALUES;
 
 export function buildReviewResult(
-	job: ReviewJob,
+	job: ReviewJobState,
 	options: BuildReviewResultOptions = {},
 ): ReviewResult {
 	const synthesis = job.synthesisResult;
@@ -381,7 +378,7 @@ function formatSummary(
 }
 
 function collectErrors(
-	job: ReviewJob,
+	job: ReviewJobState,
 	preparationErrors: readonly string[] = [],
 ): string[] {
 	const errors = [...preparationErrors];

@@ -1,5 +1,5 @@
 import type { Finding, SynthesisResult } from "./types.js";
-import type { ReviewValidationIssue } from "./review-result.js";
+import type { ReviewValidationIssue } from "./review-lifecycle-types.js";
 
 const SECURITY_LENS = "security";
 

@@ -7,40 +7,25 @@ import type {
 import type { ReviewLens } from "./types.js";
 import { parseFindingsJson } from "./parse-findings.js";
 import { saveSessionLog } from "./persist.js";
-import type { SubagentResult } from "./subagent-runner.js";
 import { runLensSubagent } from "./subagent-runner.js";
 import { LOG_PREFIX } from "./constants.js";
 import { isModelError } from "./model-selector.js";
-import type { ReviewJob, LensState } from "./review-manager.js";
+import type {
+	LensExecutionTask,
+	LensState,
+	RetryLensOnModelError,
+	ReviewJobState,
+} from "./review-lifecycle-types.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
-export interface LensExecutionTask {
-	readonly jobId: string;
-	readonly lens: ReviewLens;
-	readonly model: Model<Api>;
-	readonly systemPrompt: string;
-	readonly userPrompt: string;
-	readonly signal: AbortSignal;
-	readonly onStreamUpdate: () => void;
-}
-
-export type RetryLensOnModelError = (
-	ctx: ExtensionContext,
-	failedModel: Model<Api>,
-	failedSession: AgentSession | undefined,
-	taskLabel: string,
-	run: (model: Model<Api>) => Promise<SubagentResult>,
-	options?: { error?: unknown; lens?: string },
-) => Promise<SubagentResult | null>;
-
 interface LensRunnerOptions {
-	readonly getJob: (jobId: string) => ReviewJob | undefined;
-	readonly onUpdate?: (job: ReviewJob) => void;
+	readonly getJob: (jobId: string) => ReviewJobState | undefined;
+	readonly onUpdate?: (job: ReviewJobState) => void;
 	readonly retryOnModelError: RetryLensOnModelError;
 	readonly onAllLensesDone: (
 		ctx: ExtensionContext,
 		cwd: string,
-		job: ReviewJob,
+		job: ReviewJobState,
 	) => Promise<void>;
 	readonly drain: (
 		ctx: ExtensionContext,
@@ -72,8 +57,8 @@ function applySuccessfulOutput(
 }
 
 function notify(
-	onUpdate: ((job: ReviewJob) => void) | undefined,
-	job: ReviewJob,
+	onUpdate: ((job: ReviewJobState) => void) | undefined,
+	job: ReviewJobState,
 ): void {
 	try {
 		onUpdate?.(job);
@@ -83,7 +68,7 @@ function notify(
 }
 
 async function saveLog(
-	job: ReviewJob,
+	job: ReviewJobState,
 	state: LensState,
 	lens: ReviewLens,
 	session: AgentSession | undefined,

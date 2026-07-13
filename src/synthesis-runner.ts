@@ -12,21 +12,23 @@ import {
 	parseSynthesis,
 	type SynthesisResult,
 } from "./types.js";
-import type { SubagentResult } from "./subagent-runner.js";
+import type {
+	ReviewJobState,
+	RetryLensOnModelError,
+	SubagentResult,
+} from "./review-lifecycle-types.js";
 import { resolveModel, runLensSubagent } from "./subagent-runner.js";
 import { isModelError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
-import type { ReviewJob } from "./review-manager.js";
-import type { RetryLensOnModelError } from "./lens-runner.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
 interface SynthesisRunnerOptions {
 	readonly retryOnModelError: RetryLensOnModelError;
-	readonly onComplete: (job: ReviewJob) => void;
+	readonly onComplete: (job: ReviewJobState) => void;
 }
 
 function lensReviewsFor(
-	job: ReviewJob,
+	job: ReviewJobState,
 ): Array<{ lens: string; rawOutput: string }> {
 	return job.lenses.map((lens) => ({
 		lens,
@@ -54,7 +56,7 @@ async function buildPrompt(
 }
 
 function replaceSynthesisSession(
-	job: ReviewJob,
+	job: ReviewJobState,
 	session: AgentSession | undefined,
 ): void {
 	if (!session) return;
@@ -79,7 +81,7 @@ function synthesisResultFrom(result: SubagentResult): SynthesisResult {
 export async function runSynthesis(
 	ctx: ExtensionContext,
 	cwd: string,
-	job: ReviewJob,
+	job: ReviewJobState,
 	options: SynthesisRunnerOptions,
 ): Promise<void> {
 	logAutoreviewEvent("synthesis.start", {

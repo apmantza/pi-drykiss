@@ -5,15 +5,22 @@ import type {
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { ReviewLens, ChangedFile, SynthesisResult } from "./types.js";
+import type { ReviewLens, ChangedFile } from "./types.js";
 import { LENS_NAMES, createFallbackSynthesis } from "./types.js";
 import { buildReviewPrompts } from "./prompt-builder.js";
 import { appendHistory, loadHistory } from "./persist.js";
 import type { SubagentResult } from "./subagent-runner.js";
-import {
-	runLens as runLensTask,
-	type LensExecutionTask,
-} from "./lens-runner.js";
+import { runLens as runLensTask } from "./lens-runner.js";
+import type {
+	LensExecutionTask,
+	LensState,
+	LensStatus,
+	ReviewJobState,
+} from "./review-lifecycle-types.js";
+export type {
+	LensState,
+	LensStatus,
+} from "./review-lifecycle-types.js";
 import { runSynthesis as runSynthesisTask } from "./synthesis-runner.js";
 import { findModelByHint } from "./llm.js";
 import { selectModelOnError } from "./model-selector.js";
@@ -45,50 +52,9 @@ import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 const CONCURRENCY = 3;
 const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
 
-export type LensStatus = "queued" | "running" | "done" | "error";
-
-export interface LensState {
-	status: LensStatus;
-	modelName: string;
-	/**
-	 * Provider id (e.g. "anthropic", "openai") for the model that ran this
-	 * lens. Optional for backward compat with persisted reviews that
-	 * pre-date the field; the widget falls back to the modelName alone
-	 * when it's missing.
-	 */
-	provider?: string;
-	durationMs: number;
-	errorMessage?: string;
-	findingsCount: number;
-	rawOutput: string;
-	/** Wall-clock timestamp when the lens transitioned to 'running'. Used by the widget to render a live elapsed timer. */
-	startedAt?: number;
-	/** Absolute path to the exported session transcript, set when the lens finishes. */
-	logPath?: string;
-	/** Live session object — kept alive for conversation viewing. */
-	session?: AgentSession;
-	/** Streaming text from the subagent (updated in real-time for live progress). */
-	streamingText?: string;
-}
-
-export interface ReviewJob {
-	id: string;
-	files: string[];
-	lenses: ReviewLens[];
-	states: Map<ReviewLens, LensState>;
-	synthesisStatus: "idle" | "running" | "done" | "error";
-	synthesisResult?: SynthesisResult;
-	/** Wall-clock timestamp when synthesis transitioned to 'running'. */
-	synthesisStartedAt?: number;
-	/** Session for the synthesis subagent, disposed on job cleanup. */
-	synthesisSession?: AgentSession;
-	/** Absolute path to the persisted synthesized review JSON, when saved. */
-	reviewPath?: string;
+export interface ReviewJob extends ReviewJobState {
 	/** Post-processed result after validation, suppressions, ignores, and scoring. */
 	finalResult?: ReviewResult;
-	overallStatus: "queued" | "running" | "done" | "error";
-	startedAt: number;
-	completedAt?: number;
 }
 
 type OnReviewUpdate = (job: ReviewJob) => void;

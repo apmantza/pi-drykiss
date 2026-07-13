@@ -11,6 +11,7 @@ src/
   index.ts            # Extension entry point — registers the drykiss_autoreview tool + event handlers
   review-command.ts   # drykiss_autoreview tool handler + review orchestration (runDeepAutoreview)
   review-manager.ts   # Manages review jobs, parallel lens execution, synthesis
+  review-lifecycle-types.ts # Shared lifecycle state/task types for runners
   subagent-runner.ts  # Spawns lens reviews as Pi agent sessions
   lens-runner.ts      # Executes individual lens reviews, retries, and output normalization
   synthesis-runner.ts # Executes synthesis, retries, persistence, and completion notification
