@@ -5,7 +5,7 @@ import {
 	selectModelWithAutoroute,
 	selectModelOnError,
 } from "./model-selector.js";
-import { complete } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import type { Model, Api } from "@earendil-works/pi-ai";
 
 vi.mock("./config.js", () => ({
@@ -26,7 +26,7 @@ vi.mock("./model-selector.js", () => ({
 	isModelError: vi.fn().mockReturnValue(false),
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai/compat", () => ({
 	complete: vi.fn(),
 }));
 

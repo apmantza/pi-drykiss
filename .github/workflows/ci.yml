@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22"
-          cache: "npm"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -47,17 +47,19 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22"
-          cache: "npm"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install peer dependencies
+        # Required to load the extension during the Sonar coverage run.
+        # zizmor: ignore[adhoc-packages]
         run: |
           npm install --no-save \
-            @earendil-works/pi-ai \
-            @earendil-works/pi-coding-agent \
-            @earendil-works/pi-tui
+            @earendil-works/pi-ai@0.80.6 \
+            @earendil-works/pi-coding-agent@0.80.6 \
+            @earendil-works/pi-tui@0.80.6
 
       - name: Generate coverage report
         run: npx vitest run --coverage
@@ -85,7 +87,7 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
         with:
           node-version: "22"
-          cache: "npm"
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -156,6 +158,9 @@ jobs:
 
       - name: Install from tarball (simulates pi install npm:pi-drykiss)
         shell: bash
+        # Local tarball installation is intentional; no mutable package is
+        # fetched.
+        # zizmor: ignore[adhoc-packages]
         run: |
           TARBALL=$(ls pi-drykiss-*.tgz)
           npm install -g "$TARBALL"

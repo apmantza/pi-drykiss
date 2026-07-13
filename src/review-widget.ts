@@ -67,7 +67,7 @@ const FIXABILITY_LABEL: Record<NonNullable<Finding["fixability"]>, string> = {
  * and the post-serialization `Record<string, unknown>` shape that
  * the message renderer receives (where the field types are erased).
  */
-export interface ModelPairSource {
+interface ModelPairSource {
 	readonly provider?: unknown;
 	readonly modelName?: unknown;
 }
@@ -288,6 +288,138 @@ export function formatReviewWorkingMessage(job: ReviewJob): string {
 	);
 }
 
+function formatCompletedHeading(
+	job: ReviewJob,
+	theme: Theme,
+	truncate: (line: string) => string,
+): string {
+	const synthesis = job.synthesisResult;
+	const finalResult = job.finalResult;
+	const hasError = job.overallStatus === "error";
+	const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
+	const verdict = finalResult?.verdict ?? pickVerdict(synthesis?.verdict, hasError);
+	const healthScore = finalResult?.healthScore ?? synthesis?.healthScore;
+	const elapsed =
+		job.completedAt && job.startedAt
+			? formatElapsed(job.completedAt - job.startedAt)
+			: "";
+	const headingParts = [
+		`${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg("accent", `Verdict: ${verdict}`)}`,
+	];
+	if (finalResult?.target?.label) {
+		headingParts.push(theme.fg("dim", finalResult.target.label));
+	}
+	if (typeof healthScore === "number") {
+		const scoreColor =
+			healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
+		headingParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
+	}
+	if (elapsed) headingParts.push(elapsed);
+	return truncate(headingParts.join(` ${theme.fg("dim", "·")} `));
+}
+
+function formatCompletedLensLine(
+	job: ReviewJob,
+	lens: ReviewJob["lenses"][number],
+	theme: Theme,
+	truncate: (line: string) => string,
+): string | undefined {
+	const state = job.states.get(lens);
+	if (!state) return undefined;
+	const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
+	const lensIcon =
+		state.status === "done"
+			? theme.fg("success", "✓")
+			: state.status === "error"
+				? theme.fg("error", "✗")
+				: theme.fg("dim", "○");
+	const duration =
+		state.durationMs > 0 ? `${(state.durationMs / 1000).toFixed(1)}s` : "-";
+	const findings =
+		state.findingsCount > 0 ? `${state.findingsCount} findings` : "0 findings";
+	const errorTag =
+		state.status === "error" && state.errorMessage
+			? theme.fg("error", ` · ${state.errorMessage.slice(0, 30)}`)
+			: "";
+	const provider = state.provider?.trim() ?? "";
+	const modelName = state.modelName?.trim() ?? "";
+	const modelLabel = provider ? `${provider}/${modelName}` : modelName;
+	const model = modelLabel ? theme.fg("dim", `@ ${modelLabel}`) : "";
+	const link =
+		state.status === "done" || state.status === "error"
+			? renderLogLink(state.logPath, theme)
+			: "";
+	return truncate(
+		`  ${lensIcon} ${theme.bold(displayName)} · ${duration} · ${findings}${model ? ` · ${model}` : ""}${errorTag}${link}`,
+	);
+}
+
+function formatFindingBreakdown(
+	job: ReviewJob,
+	theme: Theme,
+	truncate: (line: string) => string,
+): string | undefined {
+	const synthesis = job.synthesisResult;
+	const counts = job.finalResult?.counts;
+	const totalFindings = counts
+		? (counts.total ?? 0)
+		: (synthesis?.criticalCount ?? 0) +
+			(synthesis?.highCount ?? 0) +
+			(synthesis?.mediumCount ?? 0) +
+			(synthesis?.lowCount ?? 0) +
+			(synthesis?.nitCount ?? 0);
+	const suppressed = counts?.suppressed ?? 0;
+	const previouslyRejected = counts?.previouslyRejected ?? 0;
+	const validatorFalsePositive = counts?.validatorFalsePositive ?? 0;
+	const validatorUnverified = counts?.validatorUnverified ?? 0;
+	const validatorReal = counts?.validatorReal ?? 0;
+	if (
+		totalFindings === 0 &&
+		suppressed === 0 &&
+		previouslyRejected === 0 &&
+		validatorFalsePositive === 0 &&
+		validatorUnverified === 0 &&
+		validatorReal === 0
+	) {
+		return undefined;
+	}
+
+	const parts: string[] = [`${totalFindings} findings`];
+	const critical = counts?.critical ?? synthesis?.criticalCount ?? 0;
+	const high = counts?.high ?? synthesis?.highCount ?? 0;
+	const medium = counts?.medium ?? synthesis?.mediumCount ?? 0;
+	const low = counts?.low ?? synthesis?.lowCount ?? 0;
+	const nit = counts?.nit ?? synthesis?.nitCount ?? 0;
+	if (critical > 0) parts.push(`${critical} critical`);
+	if (high > 0) parts.push(`${high} high`);
+	if (medium > 0) parts.push(`${medium} medium`);
+	if (low > 0) parts.push(`${low} low`);
+	if (nit > 0) parts.push(`${nit} nit`);
+	if (suppressed > 0) parts.push(`${suppressed} suppressed`);
+	if (previouslyRejected > 0)
+		parts.push(`${previouslyRejected} previously-rejected`);
+	if (validatorFalsePositive > 0)
+		parts.push(`${validatorFalsePositive} validator-refuted`);
+	if (validatorUnverified > 0)
+		parts.push(`${validatorUnverified} validator-unverified`);
+	if (validatorReal > 0) parts.push(`${validatorReal} validator-confirmed`);
+	return truncate(`  ${theme.fg("dim", parts.join(" · "))}`);
+}
+
+function formatReportLine(
+	job: ReviewJob,
+	theme: Theme,
+	truncate: (line: string) => string,
+): string | undefined {
+	const reportPath = job.finalResult?.reportPath ?? job.reviewPath;
+	if (!reportPath) return undefined;
+	const reportName = basename(reportPath);
+	const reportUrl = pathToFileLink(reportPath);
+	return truncate(
+		`  ${theme.fg("dim", "report:")} ${hyperlink(theme.fg("dim", reportName), reportUrl)}`,
+	);
+}
+
 export class ReviewProgressWidget {
 	private uiCtx: any;
 	private readonly widgetKey = "drykiss-review";
@@ -336,127 +468,18 @@ export class ReviewProgressWidget {
 		theme: Theme,
 		truncate: (line: string) => string,
 	): string[] {
-		const out: string[] = [];
-		const s = job.synthesisResult;
-		const finalResult = job.finalResult;
-		const hasError = job.overallStatus === "error";
+		const out: string[] = [formatCompletedHeading(job, theme, truncate)];
 
-		// Line 1: heading with verdict + score + elapsed. Prefer the
-		// final post-processed ReviewResult when available so the
-		// persisted widget cannot disagree with the tool result after
-		// validation, suppressions, ignore rules, or scoring changes.
-		const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-		const verdict = finalResult?.verdict ?? pickVerdict(s?.verdict, hasError);
-		const healthScore = finalResult?.healthScore ?? s?.healthScore;
-		const elapsed =
-			job.completedAt && job.startedAt
-				? formatElapsed(job.completedAt - job.startedAt)
-				: "";
-
-		const headingParts: string[] = [];
-		headingParts.push(
-			`${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg("accent", `Verdict: ${verdict}`)}`,
-		);
-		if (finalResult?.target?.label) {
-			headingParts.push(theme.fg("dim", finalResult.target.label));
-		}
-		if (typeof healthScore === "number") {
-			const scoreColor =
-				healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
-			headingParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
-		}
-		if (elapsed) headingParts.push(elapsed);
-		out.push(truncate(headingParts.join(` ${theme.fg("dim", "·")} `)));
-
-		// Lines 2+: one line per lens with status + duration + findings + model.
 		for (const lens of job.lenses) {
-			const st = job.states.get(lens);
-			if (!st) continue;
-			const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
-			const lensIcon =
-				st.status === "done"
-					? theme.fg("success", "✓")
-					: st.status === "error"
-						? theme.fg("error", "✗")
-						: theme.fg("dim", "○");
-			const dur =
-				st.durationMs > 0 ? `${(st.durationMs / 1000).toFixed(1)}s` : "-";
-			const findings =
-				st.findingsCount > 0 ? `${st.findingsCount} findings` : "0 findings";
-			const errorTag =
-				st.status === "error" && st.errorMessage
-					? theme.fg("error", ` · ${st.errorMessage.slice(0, 30)}`)
-					: "";
-			const prov = st.provider?.trim() ?? "";
-			const modelName = st.modelName?.trim() ?? "";
-			const modelLabel = prov ? `${prov}/${modelName}` : modelName;
-			const model = modelLabel ? theme.fg("dim", `@ ${modelLabel}`) : "";
-			const linkSegment =
-				st.status === "done" || st.status === "error"
-					? renderLogLink(st.logPath, theme)
-					: "";
-			out.push(
-				truncate(
-					`  ${lensIcon} ${theme.bold(displayName)} · ${dur} · ${findings}${model ? ` · ${model}` : ""}${errorTag}${linkSegment}`,
-				),
-			);
+			const line = formatCompletedLensLine(job, lens, theme, truncate);
+			if (line) out.push(line);
 		}
 
-		// Last line: findings split by severity. Use the synthesis
-		// severity counts (not the deduplicated findings array length)
-		// so the breakdown is visible even when the persisted findings
-		// list is empty but the lens reported counts.
-		const counts = finalResult?.counts;
-		const totalFindings = counts
-			? (counts.total ?? 0)
-			: (s?.criticalCount ?? 0) +
-				(s?.highCount ?? 0) +
-				(s?.mediumCount ?? 0) +
-				(s?.lowCount ?? 0) +
-				(s?.nitCount ?? 0);
-		const suppressed = counts?.suppressed ?? 0;
-		const previouslyRejected = counts?.previouslyRejected ?? 0;
-		const validatorFalsePositive = counts?.validatorFalsePositive ?? 0;
-		const validatorUnverified = counts?.validatorUnverified ?? 0;
-		const validatorReal = counts?.validatorReal ?? 0;
-		const hasSuppressed = suppressed > 0;
-		const hasRejected = previouslyRejected > 0;
-		const hasValidator =
-			validatorFalsePositive > 0 ||
-			validatorUnverified > 0 ||
-			validatorReal > 0;
-		if (totalFindings > 0 || hasSuppressed || hasRejected || hasValidator) {
-			const parts: string[] = [`${totalFindings} findings`];
-			const critical = counts?.critical ?? s?.criticalCount ?? 0;
-			const high = counts?.high ?? s?.highCount ?? 0;
-			const medium = counts?.medium ?? s?.mediumCount ?? 0;
-			const low = counts?.low ?? s?.lowCount ?? 0;
-			const nit = counts?.nit ?? s?.nitCount ?? 0;
-			if (critical > 0) parts.push(`${critical} critical`);
-			if (high > 0) parts.push(`${high} high`);
-			if (medium > 0) parts.push(`${medium} medium`);
-			if (low > 0) parts.push(`${low} low`);
-			if (nit > 0) parts.push(`${nit} nit`);
-			if (hasSuppressed) parts.push(`${suppressed} suppressed`);
-			if (hasRejected) parts.push(`${previouslyRejected} previously-rejected`);
-			if (validatorFalsePositive > 0)
-				parts.push(`${validatorFalsePositive} validator-refuted`);
-			if (validatorUnverified > 0)
-				parts.push(`${validatorUnverified} validator-unverified`);
-			if (validatorReal > 0) parts.push(`${validatorReal} validator-confirmed`);
-			out.push(truncate(`  ${theme.fg("dim", parts.join(" · "))}`));
-		}
+		const breakdown = formatFindingBreakdown(job, theme, truncate);
+		if (breakdown) out.push(breakdown);
 
-		const reportPath = finalResult?.reportPath ?? job.reviewPath;
-		if (reportPath) {
-			const reportName = basename(reportPath);
-			const reportUrl = pathToFileLink(reportPath);
-			out.push(
-				truncate(
-					`  ${theme.fg("dim", "report:")} ${hyperlink(theme.fg("dim", reportName), reportUrl)}`,
-				),
-			);
-		}
+		const report = formatReportLine(job, theme, truncate);
+		if (report) out.push(report);
 
 		return out;
 	}

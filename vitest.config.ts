@@ -21,6 +21,7 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@earendil-works/pi-coding-agent": peerMock,
+			"@earendil-works/pi-ai/compat": peerMock,
 			"@earendil-works/pi-ai": peerMock,
 			"@earendil-works/pi-tui": peerMock,
 		},
