@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
 import { runLensSubagent } from "./subagent-runner.js";
