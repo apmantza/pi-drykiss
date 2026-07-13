@@ -70,7 +70,9 @@ function buildRunningJob(elapsedMs: number): ReviewJob {
 function renderElapsedLine(elapsedMs: number): string {
 	const job = buildRunningJob(elapsedMs);
 	const heading = formatReviewWorkingMessage(job);
-	const match = heading.match(/running\s*(.+)$/);
+	// Extract the trailing elapsed-time segment:
+	// "Simplicity running · 0 file(s) · [░░░░░░░░░░] 0/1 complete · 12.3s"
+	const match = heading.match(/·\s*([\d.]+s|\d+m \d+s|\dh \d+m)$/);
 	return match ? match[1].trim() : "";
 }
 
@@ -96,16 +98,6 @@ describe("formatElapsed (via widget render)", () => {
 		expect(renderElapsedLine(0)).toBe("0.0s");
 	});
 
-	it("shows the heading line for running jobs", () => {
-		const lines = renderLines(buildRunningJob(1000));
-		expect(lines[0]).toContain("KISS running");
-	});
-
-	it("shows a single progress line for running jobs (no per-lens lines)", () => {
-		const lines = renderLines(buildRunningJob(1000));
-		// Should be exactly 1 line: the progress heading.
-		expect(lines).toHaveLength(1);
-	});
 });
 
 describe("renderWidget — completed summary", () => {
@@ -698,31 +690,6 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		};
 	}
 
-	function makeRunningJob(): ReviewJob {
-		const lens: ReviewLens = "simplicity";
-		return {
-			id: "running",
-			files: [],
-			lenses: [lens],
-			states: new Map([
-				[
-					lens,
-					buildLensState({
-						status: "running",
-						modelName: "Sonnet",
-						provider: "anthropic",
-						durationMs: 0,
-						findingsCount: 0,
-						startedAt: Date.now() - 500,
-					}),
-				],
-			]),
-			synthesisStatus: "idle",
-			overallStatus: "running",
-			startedAt: Date.now() - 500,
-		};
-	}
-
 	function attachAndCapture(widget: ReviewProgressWidget): {
 		captured?: () => string[];
 		setJobs: (jobs: ReviewJob[]) => void;
@@ -757,26 +724,6 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		const lines = ctx.captured!();
 		expect(lines.length).toBeGreaterThan(0);
 		expect(lines[0]).toContain("DRYKISS Review");
-		widget.dispose();
-	});
-
-	it("stops the 80ms render timer when only completed jobs remain", () => {
-		const widget = new ReviewProgressWidget();
-		const ctx = attachAndCapture(widget);
-		ctx.setJobs([makeRunningJob()]);
-		expect(widget["timer"]).toBeDefined();
-		ctx.setJobs([makeCompletedJob()]);
-		expect(widget["timer"]).toBeUndefined();
-		widget.dispose();
-	});
-
-	it("restarts the render timer when a new live job lands", () => {
-		const widget = new ReviewProgressWidget();
-		const ctx = attachAndCapture(widget);
-		ctx.setJobs([makeCompletedJob()]);
-		expect(widget["timer"]).toBeUndefined();
-		ctx.setJobs([makeRunningJob()]);
-		expect(widget["timer"]).toBeDefined();
 		widget.dispose();
 	});
 

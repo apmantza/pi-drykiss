@@ -6,8 +6,6 @@ import { pathToFileLink } from "./persist.js";
 import { stripAnsi } from "./content-utils.js";
 import type { Finding, Severity } from "./types.js";
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
 /**
  * Format a millisecond duration as a compact elapsed-time string. */
 function formatElapsed(ms: number): string {
@@ -239,14 +237,23 @@ type Theme = {
 	bold(text: string): string;
 };
 
-/** Format the aggregate review state for Pi's single built-in working row. */
+/** Format the aggregate review state for Pi's single built-in working row.
+ *
+ * Replaces the static "DRYKISS Review" label with the name(s) of the
+ * actively-running lens (or "Synthesis" / "Review starting" depending
+ * on the current phase) so the user sees what's happening at a glance
+ * without a separate widget row.
+ */
 export function formatReviewWorkingMessage(job: ReviewJob): string {
 	let activeCount = 0;
 	let completedOrErrorCount = 0;
+	const runningLenses: string[] = [];
 	for (const lens of job.lenses) {
 		const state = job.states.get(lens);
-		if (state?.status === "running") activeCount++;
-		else if (state?.status === "done" || state?.status === "error") {
+		if (state?.status === "running") {
+			activeCount++;
+			runningLenses.push(LENS_DISPLAY_NAMES[lens] ?? lens);
+		} else if (state?.status === "done" || state?.status === "error") {
 			completedOrErrorCount++;
 		}
 	}
@@ -262,12 +269,21 @@ export function formatReviewWorkingMessage(job: ReviewJob): string {
 	const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
 	const elapsed =
 		job.overallStatus === "running" && job.startedAt
-			? ` · running ${formatElapsed(Date.now() - job.startedAt)}`
+			? ` · ${formatElapsed(Date.now() - job.startedAt)}`
 			: "";
+
+	// Determine the phase label: running lens names, "Synthesis" when
+	// all lenses are done, or "Review starting" when nothing is running yet.
+	const phaseLabel =
+		runningLenses.length > 0
+			? `${runningLenses.join(", ")} running`
+			: completedOrErrorCount === totalLenses && totalLenses > 0
+				? "Synthesizing"
+				: "Review starting";
+
 	return (
-		`DRYKISS Review · ${job.files.length} file(s) · ` +
+		`${phaseLabel} · ${job.files.length} file(s) · ` +
 		`[${bar}] ${completedOrErrorCount}/${totalLenses} complete` +
-		(activeCount > 0 ? ` · ${activeCount} active` : "") +
 		elapsed
 	);
 }
@@ -277,14 +293,11 @@ export class ReviewProgressWidget {
 	private readonly widgetKey = "drykiss-review";
 	private widgetRegistered = false;
 	private tui: any;
-	private timer: ReturnType<typeof setInterval> | undefined;
-	private frame = 0;
 	private jobs: ReviewJob[] = [];
 
 	attach(uiCtx: any) {
 		if (!uiCtx?.setWidget) return;
 		this.uiCtx = uiCtx;
-		this.ensureTimer();
 		this.update();
 	}
 
@@ -293,67 +306,15 @@ export class ReviewProgressWidget {
 		this.update();
 	}
 
-	private ensureTimer() {
-		if (this.timer) return;
-		this.timer = setInterval(() => {
-			this.frame++;
-			this.update();
-		}, 80);
-	}
-
-	/**
-	 * Stop the render timer when no jobs need live updates. Completed
-	 * jobs render a static summary, so 12 ticks/second of `frame++` +
-	 * `update()` is pure CPU/battery waste. The next `setJobs()` (if
-	 * any) restarts the timer via `ensureTimer()`.
-	 */
-	private stopTimer() {
-		if (!this.timer) return;
-		clearInterval(this.timer);
-		this.timer = undefined;
-	}
-
 	private renderWidget(_tui: any, theme: Theme): string[] {
 		const w = _tui.terminal?.columns ?? 80;
 		const truncate = (line: string) => truncateToWidth(line, w);
-		const frame = SPINNER[this.frame % SPINNER.length];
 		const lines: string[] = [];
 
 		for (const job of this.jobs) {
-			const isLive =
-				job.overallStatus === "running" || job.overallStatus === "queued";
-			if (!isLive) {
-				if (job.overallStatus === "done" || job.overallStatus === "error") {
-					lines.push(...this.renderCompletedSummary(job, theme, truncate));
-				}
-				continue;
+			if (job.overallStatus === "done" || job.overallStatus === "error") {
+				lines.push(...this.renderCompletedSummary(job, theme, truncate));
 			}
-
-			// The aggregate review progress is shown in Pi's built-in working
-			// row. Keep this widget row focused on the currently running lens.
-			const running = job.lenses
-				.map((lens) => {
-					const state = job.states.get(lens);
-					return state?.status === "running"
-						? (LENS_DISPLAY_NAMES[lens] ?? lens)
-						: undefined;
-				})
-				.filter((name): name is string => name !== undefined);
-			const queued = job.lenses
-				.map((lens) => {
-					const state = job.states.get(lens);
-					return state?.status === "queued"
-						? (LENS_DISPLAY_NAMES[lens] ?? lens)
-						: undefined;
-				})
-				.filter((name): name is string => name !== undefined);
-			const labels = running.length > 0 ? running : queued.slice(0, 1);
-			const status = running.length > 0 ? "running" : "starting";
-			lines.push(
-				truncate(
-					`${theme.fg("accent", frame)} ${labels.join(", ") || "Review"} ${status}`,
-				),
-			);
 		}
 
 		return lines;
@@ -517,10 +478,11 @@ export class ReviewProgressWidget {
 		const hasLive = this.jobs.some(
 			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
 		);
-		if (hasLive) {
-			this.ensureTimer();
-		} else {
-			this.stopTimer();
+		// Widget is only used for completed-job summaries, which are static.
+		// Live lens info is shown in the working message row, so we don't
+		// need a 12 Hz tick — just request a render once when there's content.
+		if (!hasLive) {
+			this.tui?.requestRender?.();
 		}
 
 		if (!hasAnything) {
@@ -550,10 +512,6 @@ export class ReviewProgressWidget {
 	}
 
 	dispose() {
-		if (this.timer) {
-			clearInterval(this.timer);
-			this.timer = undefined;
-		}
 		if (this.uiCtx?.setWidget) {
 			this.uiCtx.setWidget(this.widgetKey, undefined);
 		}
