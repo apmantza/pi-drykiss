@@ -62,7 +62,7 @@ const LensNameParam = Type.Union(
 		Type.Literal("tests"),
 		Type.Literal("security"),
 		Type.Literal("docs"),
-],
+	],
 	{
 		description: "A single DRYKISS lens name",
 	},
