@@ -68,7 +68,7 @@ function calculatePopupWidth(items: SelectItem[], title: string): number {
 	return Math.min(contentWidth + boxPadding + safetyMargin, 80);
 }
 
-export async function selectModel(
+async function selectModel(
 	ctx: ExtensionContext,
 	title: string,
 	message: string,

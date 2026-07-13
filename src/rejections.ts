@@ -87,7 +87,7 @@ export const CO_LOCATED_JACCARD_THRESHOLD = 0.25;
 /** Min Jaccard similarity when at least one side has no anchored line. */
 export const UNANCHORED_JACCARD_THRESHOLD = 0.5;
 /** Min token length to keep after stopword filtering. */
-export const MIN_TOKEN_LENGTH = 2;
+const MIN_TOKEN_LENGTH = 2;
 
 const STOPWORDS = new Set([
 	"the",

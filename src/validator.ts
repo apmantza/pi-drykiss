@@ -20,7 +20,7 @@
  *     retained in a structured discarded-findings section for auditability.
  */
 
-import { extractBalancedJsonArray } from "./json-extract.js";
+import { parseBalancedJsonArray } from "./json-extract.js";
 import { resolveModelSmart } from "./llm.js";
 import { runLensSubagent } from "./subagent-runner.js";
 import { loadPromptBody } from "./prompt-loader.js";
@@ -90,15 +90,8 @@ export function buildValidatorUserPrompt(findings: readonly Finding[]): string {
 export function parseValidatorOutput(
 	text: string,
 ): Map<number, ValidatorVerdict> {
-	const json = extractBalancedJsonArray(text);
-	if (!json) return new Map();
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(json);
-	} catch {
-		return new Map();
-	}
-	if (!Array.isArray(parsed)) return new Map();
+	const parsed = parseBalancedJsonArray(text);
+	if (!parsed) return new Map();
 	const verdicts = new Map<number, ValidatorVerdict>();
 	for (const entry of parsed) {
 		if (typeof entry !== "object" || entry === null) continue;

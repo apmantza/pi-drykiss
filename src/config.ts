@@ -46,8 +46,7 @@ export interface Suppression {
 }
 
 /** A risk code as used in config: one of the codes from RISK_CODES. */
-export type RiskCode =
-	keyof typeof import("./prompts/risk-codes.js").RISK_CODES;
+type RiskCode = keyof typeof import("./prompts/risk-codes.js").RISK_CODES;
 
 /** A severity value, accepting all five DRYKISS levels. */
 export type SeverityOverride = "critical" | "high" | "medium" | "low" | "nit";
@@ -252,7 +251,7 @@ export interface DrykissConfig {
 	validate?: boolean;
 }
 
-export function getConfigPath(): string {
+function getConfigPath(): string {
 	return join(getGlobalBaseDir(), CONFIG_FILE);
 }
 

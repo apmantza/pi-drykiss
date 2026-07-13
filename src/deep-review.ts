@@ -34,7 +34,7 @@
  */
 
 import { toErrorMessage } from "./error-utils.js";
-import { extractBalancedJsonArray } from "./json-extract.js";
+import { parseBalancedJsonArray } from "./json-extract.js";
 import { loadPromptBody } from "./prompt-loader.js";
 import {
 	jaccard,
@@ -273,20 +273,14 @@ function coerceSeverity(value: unknown): DeepSeverity | null {
 /** Parse one pass's raw text into validated findings. Tolerant of
  *  fences / surrounding prose. */
 export function parseDeepFindings(text: string): DeepFinding[] {
-	const json = extractBalancedJsonArray(text);
-	if (!json) return [];
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(json);
-	} catch (err) {
+	const parsed = parseBalancedJsonArray(text, (error) => {
 		console.warn(
 			"%s Failed to parse deep-review pass output: %s",
 			LOG_PREFIX,
-			toErrorMessage(err),
+			toErrorMessage(error),
 		);
-		return [];
-	}
-	if (!Array.isArray(parsed)) return [];
+	});
+	if (!parsed) return [];
 	const out: DeepFinding[] = [];
 	for (const entry of parsed) {
 		if (typeof entry !== "object" || entry === null) continue;
@@ -311,20 +305,14 @@ export function parseDeepFindings(text: string): DeepFinding[] {
 
 /** Parse the validator's raw text into a Map<id, verdict>. */
 export function parseDeepVerdicts(text: string): Map<number, DeepVerdict> {
-	const json = extractBalancedJsonArray(text);
-	if (!json) return new Map();
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(json);
-	} catch (err) {
+	const parsed = parseBalancedJsonArray(text, (error) => {
 		console.warn(
 			"%s Failed to parse deep-review validator output: %s",
 			LOG_PREFIX,
-			toErrorMessage(err),
+			toErrorMessage(error),
 		);
-		return new Map();
-	}
-	if (!Array.isArray(parsed)) return new Map();
+	});
+	if (!parsed) return new Map();
 	const verdicts = new Map<number, DeepVerdict>();
 	for (const entry of parsed) {
 		if (typeof entry !== "object" || entry === null) continue;

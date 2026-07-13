@@ -51,3 +51,19 @@ export function extractBalancedJsonArray(text: string): string | null {
 	const haystack = fenced ? fenced[1] : text;
 	return extractBalancedJson(haystack, "[", "]");
 }
+
+/** Extract and parse the first balanced JSON array from model output. */
+export function parseBalancedJsonArray(
+	text: string,
+	onError?: (error: unknown) => void,
+): unknown[] | null {
+	const json = extractBalancedJsonArray(text);
+	if (!json) return null;
+	try {
+		const parsed: unknown = JSON.parse(json);
+		return Array.isArray(parsed) ? parsed : null;
+	} catch (error) {
+		onError?.(error);
+		return null;
+	}
+}

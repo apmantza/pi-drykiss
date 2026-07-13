@@ -15,7 +15,7 @@ import { findModelByHint } from "./model-utils.js";
 // have to import it back, completing a cycle).
 export { findModelByHint };
 
-export interface LLMOptions {
+interface LLMOptions {
 	/** Optional model hint resolved before per-lens/global config. */
 	readonly modelHint?: string;
 	readonly temperature?: number;

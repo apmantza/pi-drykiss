@@ -16,7 +16,7 @@ import { redactSecrets } from "./secret-redaction.js";
 export { redactSecrets } from "./secret-redaction.js";
 export type { RedactResult } from "./secret-redaction.js";
 
-export const STATUS_MAP: Record<string, ChangedFile["status"]> = {
+const STATUS_MAP: Record<string, ChangedFile["status"]> = {
 	M: "modified",
 	A: "added",
 	R: "renamed",
