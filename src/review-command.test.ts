@@ -175,6 +175,10 @@ describe("drykiss_autoreview tool", () => {
 
 		const background = response.details.background;
 		expect(background?.status).toBe("running");
+		expect(response.content[0].text).toContain("local · security");
+		expect(response.content[0].text).toContain(
+			"completion notification will follow",
+		);
 		expect(response.content[0].text).toContain(`job ${background?.id}`);
 		await vi.waitFor(() => expect(manager.runReview).toHaveBeenCalled());
 		const completed = getBackgroundReview(background!.id);
@@ -183,6 +187,7 @@ describe("drykiss_autoreview tool", () => {
 			expect.stringContaining("background review complete"),
 			"info",
 		);
+		expect(notify.mock.calls[0][0]).toContain("Verdict: Approve");
 	});
 
 	it("uses single `lens` param to select one lens", async () => {

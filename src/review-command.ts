@@ -249,16 +249,30 @@ async function runStandaloneScout(
 	};
 }
 
-function isLongReview(params: {
+type AutoreviewRequest = {
 	mode?: ReviewMode;
 	lens?: "all" | "scout" | Exclude<ReviewLens, "all">;
 	lenses?: "all" | Exclude<ReviewLens, "all">[];
-}): boolean {
+};
+
+function isLongReview(params: AutoreviewRequest): boolean {
 	const allLenses =
 		params.lens === "all" ||
 		params.lenses === "all" ||
 		(params.lens === undefined && params.lenses === undefined);
 	return params.mode === "full" && allLenses;
+}
+
+function formatBackgroundStart(
+	params: AutoreviewRequest & { pr?: string; base?: string; commit?: string },
+	jobId: string,
+): string {
+	const target =
+		params.pr ?? params.commit ?? params.base ?? params.mode ?? "smart scope";
+	const lenses = Array.isArray(params.lenses)
+		? params.lenses.join(", ")
+		: (params.lens ?? params.lenses ?? "all lenses");
+	return `DRYKISS background review started · ${target} · ${lenses} · completion notification will follow · job ${jobId}`;
 }
 
 export async function executeDrykissAutoreviewTool(
@@ -342,9 +356,10 @@ export async function executeDrykissAutoreviewTool(
 					typeof result.healthScore === "number"
 						? ` · score ${result.healthScore}/100`
 						: "";
+				const target = result.target?.label ? ` · ${result.target.label}` : "";
 				try {
 					ctx.ui.notify(
-						`DRYKISS background review ${result.status === "error" ? "failed" : "complete"} · ${result.verdict} · ${result.counts.total} findings${score} · job ${backgroundId}`,
+						`DRYKISS background review ${result.status === "error" ? "failed" : "complete"}${target} · Verdict: ${result.verdict} · ${result.counts.total} findings${score}`,
 						result.status === "error" ? "warning" : "info",
 					);
 				} catch {
@@ -366,7 +381,7 @@ export async function executeDrykissAutoreviewTool(
 			content: [
 				{
 					type: "text",
-					text: `DRYKISS background review started · job ${record.id}`,
+					text: formatBackgroundStart(params, record.id),
 				},
 			],
 			details: {
