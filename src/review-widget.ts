@@ -1,12 +1,13 @@
 import type { ReviewJob } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { stripAnsi } from "./content-utils.js";
+import { logAutoreviewError } from "./logger.js";
 import type { Finding, Severity } from "./types.js";
 
 /**
  * Format a millisecond duration as a compact elapsed-time string. */
 function formatElapsed(ms: number): string {
-	const safe = Math.max(0, ms);
+	const safe = Number.isFinite(ms) ? Math.max(0, ms) : 0;
 	const totalSec = Math.floor(safe / 1000);
 	if (totalSec < 60) {
 		return `${(safe / 1000).toFixed(1)}s`;
@@ -19,6 +20,11 @@ function formatElapsed(ms: number): string {
 	const hours = Math.floor(mins / 60);
 	const remMins = mins % 60;
 	return `${hours}h ${remMins.toString().padStart(2, "0")}m`;
+}
+
+/** Strip terminal controls from repository/model-supplied display text. */
+function sanitizeTerminalText(text: string): string {
+	return stripAnsi(text).replace(/[\u0000-\u001f\u007f]/g, "");
 }
 
 /** Symbol per severity used by formatFinding. */
@@ -93,8 +99,10 @@ export function pickVerdict(
 	synthesisVerdict: unknown,
 	hasError: boolean,
 ): string {
-	if (typeof synthesisVerdict === "string" && synthesisVerdict.length > 0) {
-		return synthesisVerdict;
+	const verdict =
+		typeof synthesisVerdict === "string" ? synthesisVerdict.trim() : "";
+	if (verdict.length > 0) {
+		return verdict;
 	}
 	return hasError ? "Review failed" : "Request changes";
 }
@@ -124,16 +132,17 @@ export function formatFinding(
 	finding: Finding,
 	theme: FindingTheme = defaultTheme,
 ): string {
-	const lensName = finding.lens
-		? (LENS_DISPLAY_NAMES[finding.lens] ?? finding.lens)
-		: "Review";
+	const lensName = sanitizeTerminalText(
+		finding.lens
+			? (LENS_DISPLAY_NAMES[finding.lens] ?? finding.lens)
+			: "Review",
+	);
 	const icon = SEVERITY_ICON[finding.severity] ?? "⚪";
 	const tag = theme.fg("accent", `[${lensName}]`);
-	const category = theme.bold(finding.category);
-	const source = stripAnsi(finding.source ?? "");
-	const location = finding.line
-		? ` (${finding.file}:${finding.line})`
-		: ` (${finding.file})`;
+	const category = theme.bold(sanitizeTerminalText(finding.category));
+	const source = sanitizeTerminalText(finding.source ?? "");
+	const file = sanitizeTerminalText(finding.file);
+	const location = finding.line ? ` (${file}:${finding.line})` : ` (${file})`;
 	const heading = `${icon} ${tag} ${category} — ${source}${location}`;
 	const suppressedTag = finding._suppressed
 		? ` ${theme.fg("dim", "[suppressed]")}`
@@ -221,13 +230,11 @@ type Theme = {
  * without a separate widget row.
  */
 export function formatReviewWorkingMessage(job: ReviewJob): string {
-	let activeCount = 0;
 	let completedOrErrorCount = 0;
 	const runningLenses: string[] = [];
 	for (const lens of job.lenses) {
 		const state = job.states.get(lens);
 		if (state?.status === "running") {
-			activeCount++;
 			runningLenses.push(LENS_DISPLAY_NAMES[lens] ?? lens);
 		} else if (state?.status === "done" || state?.status === "error") {
 			completedOrErrorCount++;
@@ -305,21 +312,32 @@ export class ReviewProgressWidget {
 		}
 
 		if (!this.widgetRegistered) {
-			this.uiCtx.setWidget(
-				this.widgetKey,
-				(tui: any, _theme: Theme) => {
-					this.tui = tui;
-					return {
-						render: () => this.renderWidget(),
-						invalidate: () => {
-							this.widgetRegistered = false;
-							this.tui = undefined;
-						},
-					};
-				},
-				{ placement: "aboveEditor" },
-			);
-			this.widgetRegistered = true;
+			try {
+				this.uiCtx.setWidget(
+					this.widgetKey,
+					(tui: any, _theme: Theme) => {
+						this.tui = tui;
+						return {
+							render: () => {
+								try {
+									return this.renderWidget();
+								} catch (err) {
+									logAutoreviewError("widget.render_error", err);
+									return [];
+								}
+							},
+							invalidate: () => {
+								this.widgetRegistered = false;
+								this.tui = undefined;
+							},
+						};
+					},
+					{ placement: "aboveEditor" },
+				);
+				this.widgetRegistered = true;
+			} catch (err) {
+				logAutoreviewError("widget.register_error", err);
+			}
 		} else {
 			this.tui?.requestRender?.();
 		}
@@ -327,7 +345,11 @@ export class ReviewProgressWidget {
 
 	dispose() {
 		if (this.uiCtx?.setWidget) {
-			this.uiCtx.setWidget(this.widgetKey, undefined);
+			try {
+				this.uiCtx.setWidget(this.widgetKey, undefined);
+			} catch (err) {
+				logAutoreviewError("widget.dispose_error", err);
+			}
 		}
 		this.widgetRegistered = false;
 		this.tui = undefined;

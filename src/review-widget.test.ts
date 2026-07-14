@@ -96,6 +96,12 @@ describe("formatElapsed (via widget render)", () => {
 		expect(renderElapsedLine(0)).toBe("0.0s");
 	});
 
+	it("uses a safe fallback for non-finite elapsed time", () => {
+		const job = buildRunningJob(0);
+		job.startedAt = Number.POSITIVE_INFINITY;
+		expect(formatReviewWorkingMessage(job)).toContain("0.0s");
+	});
+
 	it("renders live aggregate progress in the persistent widget", () => {
 		const lines = renderLines(buildRunningJob(12_300));
 		expect(lines).toHaveLength(1);
@@ -210,6 +216,18 @@ describe("formatFinding", () => {
 		expect(out).not.toContain("[deduplication]");
 	});
 
+	it("strips terminal control sequences from file and category", () => {
+		const out = formatFinding(
+			buildFinding({
+				file: "src/\u001b[31msecret.ts",
+				category: "Bad\u001b]8;;https://example.test\u0007Category",
+			}),
+		);
+		expect(out).not.toContain("\u001b");
+		expect(out).toContain("src/secret.ts");
+		expect(out).toContain("BadCategory");
+	});
+
 	it("falls back to the raw lens name when unknown", () => {
 		const out = formatFinding(buildFinding({ lens: "simplicity" }));
 		expect(out).toContain("[KISS]");
@@ -299,6 +317,40 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		expect(ctx.captured).toBeDefined();
 		ctx.setJobs([]);
 		expect(widget["widgetRegistered"]).toBe(false);
+	});
+
+	it("absorbs UI registration failures", () => {
+		let calls = 0;
+		const widget = new ReviewProgressWidget();
+		const uiCtx = {
+			setWidget: () => {
+				calls += 1;
+				if (calls > 1) throw new Error("registration failed");
+			},
+		};
+		widget.attach(uiCtx);
+		expect(() => widget.setJobs([buildRunningJob(0)])).not.toThrow();
+	});
+
+	it("returns an empty render when the widget formatter throws", () => {
+		let render: (() => string[]) | undefined;
+		const widget = new ReviewProgressWidget();
+		const uiCtx = {
+			setWidget: (
+				_key: string,
+				factory?: (tui: unknown, theme: unknown) => { render: () => string[] },
+			) => {
+				if (factory) render = factory({}, {}).render;
+			},
+		};
+		widget.attach(uiCtx);
+		widget.setJobs([
+			{
+				...buildRunningJob(0),
+				lenses: undefined as unknown as ReviewJob["lenses"],
+			},
+		]);
+		expect(render?.()).toEqual([]);
 	});
 });
 
@@ -415,6 +467,11 @@ describe("pickVerdict", () => {
 
 	it("falls through on empty string verdict", () => {
 		expect(pickVerdict("", false).length).toBeGreaterThan(0);
+	});
+
+	it("trims whitespace-only and padded verdicts", () => {
+		expect(pickVerdict("   ", false)).toBe("Request changes");
+		expect(pickVerdict("  Approve  ", false)).toBe("Approve");
 	});
 
 	it("returns the verdict even when the job errored", () => {
