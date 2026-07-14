@@ -283,10 +283,14 @@ export class ReviewProgressWidget {
 	}
 
 	private renderWidget(): string[] {
-		// Live progress is rendered through Pi's working-message row. This
-		// widget remains registered only to keep the UI attachment alive while
-		// a background review is active; it is removed on completion.
-		return [];
+		// Render active progress here rather than relying on Pi's transient
+		// working-message row, which may disappear when the tool call returns.
+		return this.jobs
+			.filter(
+				(job) =>
+					job.overallStatus === "running" || job.overallStatus === "queued",
+			)
+			.map(formatReviewWorkingMessage);
 	}
 
 	private update() {

@@ -95,6 +95,13 @@ describe("formatElapsed (via widget render)", () => {
 	it("renders 0.0s for a lens that just started", () => {
 		expect(renderElapsedLine(0)).toBe("0.0s");
 	});
+
+	it("renders live aggregate progress in the persistent widget", () => {
+		const lines = renderLines(buildRunningJob(12_300));
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("KISS running");
+		expect(lines[0]).toContain("12.3s");
+	});
 });
 
 describe("ReviewProgressWidget — completion lifecycle", () => {

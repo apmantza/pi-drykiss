@@ -190,28 +190,33 @@ export async function loadHistory(): Promise<ReviewHistoryEntry[]> {
  * Loads existing entries, appends the new one, writes back.
  */
 export async function appendHistory(entry: ReviewHistoryEntry): Promise<void> {
-	const dir = getGlobalBaseDir();
-	await mkdir(dir, { recursive: true });
-	const existing = await loadHistory();
-	// Avoid duplicates: skip if the same date/mode/breakdown combo already exists
-	const isDuplicate = existing.some(
-		(e) =>
-			e.date === entry.date &&
-			e.mode === entry.mode &&
-			e.breakdown.critical === entry.breakdown.critical &&
-			e.breakdown.warning === entry.breakdown.warning &&
-			e.breakdown.suggestion === entry.breakdown.suggestion &&
-			e.totalFindings === entry.totalFindings,
-	);
-	if (isDuplicate) return;
-	existing.push(entry);
-	// Keep at most 100 entries (newest first for writing convenience)
-	const trimmed = existing.slice(-100);
-	await writeFile(
-		getGlobalHistoryPath(),
-		JSON.stringify(trimmed, null, 2),
-		"utf8",
-	);
+	try {
+		const dir = getGlobalBaseDir();
+		await mkdir(dir, { recursive: true });
+		const existing = await loadHistory();
+		// Avoid duplicates: skip if the same date/mode/breakdown combo already exists
+		const isDuplicate = existing.some(
+			(e) =>
+				e.date === entry.date &&
+				e.mode === entry.mode &&
+				e.breakdown.critical === entry.breakdown.critical &&
+				e.breakdown.warning === entry.breakdown.warning &&
+				e.breakdown.suggestion === entry.breakdown.suggestion &&
+				e.totalFindings === entry.totalFindings,
+		);
+		if (isDuplicate) return;
+		existing.push(entry);
+		// Keep at most 100 entries (newest first for writing convenience)
+		const trimmed = existing.slice(-100);
+		await writeFile(
+			getGlobalHistoryPath(),
+			JSON.stringify(trimmed, null, 2),
+			"utf8",
+		);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`${LOG_PREFIX} Failed to append health score history: ${msg}`);
+	}
 }
 
 export function formatReviewForDisplay(review: PersistedReview): string {

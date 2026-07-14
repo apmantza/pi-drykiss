@@ -12,10 +12,7 @@ import { applyReviewState, setReviewInProgress } from "./review-session.js";
 import { createEditTracker } from "./edit-tracker.js";
 import { buildAutoInjectBlock } from "./auto-inject.js";
 import { ReviewManager } from "./review-manager.js";
-import {
-	ReviewProgressWidget,
-	formatReviewWorkingMessage,
-} from "./review-widget.js";
+import { ReviewProgressWidget } from "./review-widget.js";
 import { LOG_PREFIX } from "./constants.js";
 import {
 	cancelBackgroundReview,
@@ -49,26 +46,10 @@ export default function (pi: ExtensionAPI): void {
 	// ── Background review manager + live widget ────────────
 	const widget = new ReviewProgressWidget();
 	let lastContext: ExtensionContext | undefined;
-	const syncWorkingMessage = (): void => {
-		const ui = lastContext?.ui as
-			| { setWorkingMessage?: (message?: string) => void }
-			| undefined;
-		if (!ui?.setWorkingMessage) return;
-		const activeJob = manager
-			.listJobs()
-			.find(
-				(job) =>
-					job.overallStatus === "running" || job.overallStatus === "queued",
-			);
-		ui.setWorkingMessage(
-			activeJob ? formatReviewWorkingMessage(activeJob) : undefined,
-		);
-	};
 	const manager = new ReviewManager(
 		(_job) => {
 			try {
 				widget.setJobs(manager.listJobs());
-				syncWorkingMessage();
 			} catch (err) {
 				warnExtensionError("updating review widget", err, lastContext);
 			}
@@ -79,7 +60,6 @@ export default function (pi: ExtensionAPI): void {
 				const jobs = manager.listJobs();
 				hasRunningReview = jobs.some((j) => j.overallStatus === "running");
 				widget.setJobs(jobs);
-				syncWorkingMessage();
 			} catch (err) {
 				warnExtensionError("handling completed review", err, lastContext);
 			} finally {
