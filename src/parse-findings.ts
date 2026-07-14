@@ -91,7 +91,7 @@ export function parseFindingsJson(
 	try {
 		// Repair unescaped quotes / newlines inside string values FIRST, so the
 		// balanced-extraction and parse steps see valid JSON. Calling
-		// extractBalancedJson on the unsanitized raw mis-tracks strings at the
+		// extractBalancedJson on the unsanitized raw loses track of strings at the
 		// first unescaped quote and truncates the structure (e.g. docs lenses
 		// emit `loadPromptBody("iron-law", "shared")` inside a JSON string).
 		const sanitized = sanitizeJsonString(raw);
