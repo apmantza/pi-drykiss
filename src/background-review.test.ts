@@ -43,6 +43,7 @@ describe("background review tracking", () => {
 			return task;
 		});
 
+		await vi.waitFor(() => expect(taskSignal).toBeDefined());
 		const cancelled = cancelBackgroundReview(record.id);
 		if (!cancelled) throw new Error("Expected a cancellable background review");
 		expect(cancelled.status).toBe("cancelled");
@@ -51,6 +52,18 @@ describe("background review tracking", () => {
 		await Promise.resolve();
 		expect(getBackgroundReview(record.id)?.status).toBe("cancelled");
 		expect(formatBackgroundReviewStatus(cancelled)).toContain("cancelled");
+	});
+
+	it("does not evict running jobs when the record limit is exceeded", () => {
+		const ids: string[] = [];
+		for (let index = 0; index < 51; index++) {
+			const id = `background-test-running-${index}`;
+			ids.push(id);
+			startBackgroundReview(id, () => new Promise(() => undefined));
+		}
+
+		expect(getBackgroundReview(ids[0])).toBeDefined();
+		for (const id of ids) cancelBackgroundReview(id);
 	});
 
 	it("records task failures and exposes them in status", async () => {

@@ -1,4 +1,5 @@
 import type { ReviewResult } from "./review-result.js";
+import { logAutoreviewError } from "./logger.js";
 
 export type BackgroundReviewStatus = "running" | "done" | "error" | "cancelled";
 
@@ -37,7 +38,8 @@ export function startBackgroundReview(
 	const controller = new AbortController();
 	controllers.set(id, controller);
 
-	void task(controller.signal)
+	void Promise.resolve()
+		.then(() => task(controller.signal))
 		.then((response) => {
 			if (record.status === "cancelled") return;
 			const result = response.details?.result;
@@ -49,8 +51,10 @@ export function startBackgroundReview(
 			record.result = result;
 			try {
 				onComplete?.(result);
-			} catch {
-				// Completion notifications must never change the review outcome.
+			} catch (error) {
+				logAutoreviewError("background.on_complete_callback_error", error, {
+					jobId: id,
+				});
 			}
 		})
 		.catch((error: unknown) => {
@@ -61,8 +65,12 @@ export function startBackgroundReview(
 				error instanceof Error ? error.message : String(error);
 			try {
 				onError?.(error);
-			} catch {
-				// Failure notifications must never mask the original error.
+			} catch (callbackError) {
+				logAutoreviewError(
+					"background.on_error_callback_error",
+					callbackError,
+					{ jobId: id },
+				);
 			}
 		})
 		.finally(() => {
@@ -110,7 +118,8 @@ export function formatBackgroundReviewStatus(
 		typeof result.healthScore === "number"
 			? ` · score ${result.healthScore}/100`
 			: "";
-	return `DRYKISS background review complete · ${result.verdict} · ${result.counts.total} findings${score} · job ${record.id}`;
+	const target = result.target?.label ? ` · ${result.target.label}` : "";
+	return `DRYKISS background review complete${target} · Verdict: ${result.verdict} · ${result.counts.total} findings${score} · job ${record.id}`;
 }
 
 function pruneBackgroundReviews(): void {
@@ -121,8 +130,10 @@ function pruneBackgroundReviews(): void {
 		}
 	}
 	while (records.size > MAX_RECORDS) {
-		const oldest = records.keys().next().value;
-		if (!oldest) break;
-		records.delete(oldest);
+		const evictable = [...records.entries()].find(
+			([, record]) => record.status !== "running",
+		);
+		if (!evictable) break;
+		records.delete(evictable[0]);
 	}
 }

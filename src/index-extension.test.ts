@@ -141,6 +141,35 @@ describe("extension registration", () => {
 		);
 	});
 
+	it("status and cancel tools report background job state", async () => {
+		const { startBackgroundReview } = await import("./background-review.js");
+		let resolveTask: (() => void) | undefined;
+		const record = startBackgroundReview(
+			"index-test-background",
+			() =>
+				new Promise((resolve) => {
+					resolveTask = () => resolve({ details: { result: undefined } });
+				}),
+		);
+		const { pi } = makePi();
+		registerDrykiss(pi as any);
+		const tools = new Map(
+			pi.registerTool.mock.calls.map((call: any[]) => [call[0].name, call[0]]),
+		);
+		const signal = new AbortController().signal;
+
+		const status = await tools
+			.get("drykiss_autoreview_status")
+			.execute("status", { jobId: record.id }, signal, undefined, makeCtx());
+		expect(status.content[0].text).toContain("background review running");
+
+		const cancelled = await tools
+			.get("drykiss_autoreview_cancel")
+			.execute("cancel", { jobId: record.id }, signal, undefined, makeCtx());
+		expect(cancelled.content[0].text).toContain("background review cancelled");
+		resolveTask?.();
+	});
+
 	it("attaches the review widget on tool execution start", () => {
 		const { pi, handlers } = makePi();
 		registerDrykiss(pi as any);

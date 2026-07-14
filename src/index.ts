@@ -181,7 +181,7 @@ export default function (pi: ExtensionAPI): void {
 		name: "drykiss_autoreview",
 		label: "DRYKISS Autoreview",
 		description:
-			"Run a multi-lens DRYKISS review over a git/PR/codebase target. Pick a scope: local (uncommitted), staged, branch (needs base), commit (needs SHA), pr (needs URL), full, or files (needs paths). Returns a stable structured ReviewResult, or start it in the background with background=true.",
+			"Run a multi-lens DRYKISS review over a git/PR/codebase target. Pick a scope: local (uncommitted), staged, branch (needs base), commit (needs SHA), pr (needs URL), full, or files (needs paths). Blocking mode returns a stable ReviewResult; background mode returns a job ID and sends a completion notification.",
 		promptSnippet:
 			"Run a multi-lens DRYKISS autoreview over a git/PR/codebase target",
 		promptGuidelines: [

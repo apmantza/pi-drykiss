@@ -30,9 +30,11 @@ function renderLines(job: ReviewJob): string[] {
 	const uiCtx = {
 		setWidget: (
 			_key: string,
-			fn: (tui: any, theme: any) => { render: () => string[] },
+			fn: ((tui: any, theme: any) => { render: () => string[] }) | undefined,
 		) => {
-			captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+			captured = fn
+				? () => fn({ terminal: { columns: 200 } }, theme).render()
+				: () => [];
 		},
 	};
 	widget.attach(uiCtx);
@@ -95,238 +97,11 @@ describe("formatElapsed (via widget render)", () => {
 	});
 });
 
-describe("renderWidget — completed summary", () => {
-	function buildCompletedJob(
-		overrides: Partial<ReviewJob> & {
-			synthesisResult?: any;
-			overallStatus?: ReviewJob["overallStatus"];
-		} = {},
-	): ReviewJob {
-		const lens: ReviewLens = "simplicity";
-		const state: LensState = buildLensState({
-			status: "done",
-			durationMs: 4200,
-			findingsCount: 3,
-			modelName: "Claude Sonnet 4",
-			provider: "anthropic",
-		});
-		return {
-			id: "j3",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "done",
-			overallStatus: overrides.overallStatus ?? "done",
-			startedAt: Date.now() - 5000,
-			completedAt: Date.now(),
-			synthesisResult: overrides.synthesisResult ?? {
-				findings: [],
-				summary: "ok",
-				verdict: "Approve",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-				healthScore: 92,
-				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-			},
-			...overrides,
-		};
-	}
-
-	it("renders only the one-line summary for a completed job", () => {
-		const lines = renderLines(buildCompletedJob());
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toContain("DRYKISS Review");
-		expect(lines[0]).toContain("Verdict: Approve");
-		expect(lines[0]).not.toContain("· KISS");
-		expect(lines[0]).not.toContain("Claude Sonnet");
-	});
-
-	it("handles errored jobs with a red icon and missing synthesis", () => {
-		const lens: ReviewLens = "simplicity";
-		const state: LensState = buildLensState({
-			status: "error",
-			errorMessage: "boom",
-			modelName: "Sonnet",
-			provider: "anthropic",
-		});
-		const job: ReviewJob = {
-			id: "j4",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "error",
-			overallStatus: "error",
-			startedAt: Date.now() - 5000,
-			completedAt: Date.now(),
-		};
-		const lines = renderLines(job);
-		expect(lines[0]).toContain("DRYKISS Review");
-		expect(lines[0]).toContain("Review failed");
-		expect(lines).toHaveLength(1);
-	});
-
-	it("renders the elapsed duration in the heading", () => {
-		const lines = renderLines(buildCompletedJob());
-		// heading line should contain an elapsed time like "5.0s"
-		expect(lines[0]).toMatch(/\d+\.\ds/);
-	});
-
-	it("hides the score line when synthesis is missing (undefined healthScore)", () => {
-		const job = buildCompletedJob({
-			synthesisResult: {
-				findings: [],
-				summary: "ok",
-				verdict: "Approve",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-			} as any,
-		});
-		const lines = renderLines(job);
-		expect(lines[0]).not.toContain("score");
-	});
-
-	it("hides the score line when synthesis has no scoreBreakdown property", () => {
-		const job = buildCompletedJob({
-			synthesisResult: {
-				findings: [],
-				summary: "ok",
-				verdict: "Approve",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-				healthScore: 0,
-			} as any,
-		});
-		const lines = renderLines(job);
-		expect(lines[0]).toContain("score 0/100");
-	});
-
-	it("color-bands the score in the completed summary", () => {
-		const seenColors: Set<string> = new Set();
-		const theme = {
-			fg: (color: string, text: string) => {
-				seenColors.add(color);
-				return `[${color}:${text}]`;
-			},
-			bold: (text: string) => text,
-		};
-
-		function buildWithScore(score: number): ReviewJob {
-			const lens: ReviewLens = "simplicity";
-			return buildCompletedJob({
-				synthesisResult: {
-					findings: [],
-					summary: "ok",
-					verdict: "Approve",
-					criticalCount: 0,
-					highCount: 0,
-					mediumCount: 0,
-					lowCount: 0,
-					nitCount: 0,
-					healthScore: score,
-					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-				},
-				states: new Map([[lens, buildLensState({ status: "done" })]]),
-			});
-		}
-
-		function renderOne(job: ReviewJob): string[] {
-			let captured: (() => string[]) | undefined;
-			const widget = new ReviewProgressWidget();
-			const uiCtx = {
-				setWidget: (
-					_key: string,
-					fn: (tui: any, theme: any) => { render: () => string[] },
-				) => {
-					captured = () => fn({ terminal: { columns: 200 } }, theme).render();
-				},
-			};
-			widget.attach(uiCtx);
-			widget.setJobs([job]);
-			const lines = captured?.() ?? [];
-			widget.dispose();
-			return lines;
-		}
-
-		let lines = renderOne(buildWithScore(92));
-		expect(lines[0]).toContain("[success:score 92/100]");
-		lines = renderOne(buildWithScore(65));
-		expect(lines[0]).toContain("[warning:score 65/100]");
-		lines = renderOne(buildWithScore(30));
-		expect(lines[0]).toContain("[error:score 30/100]");
-		lines = renderOne(buildWithScore(80));
-		expect(lines[0]).toContain("[success:score 80/100]");
-		lines = renderOne(buildWithScore(50));
-		expect(lines[0]).toContain("[warning:score 50/100]");
-	});
-
-	it("prefers the final post-processed result over raw synthesis", () => {
-		const lines = renderLines(
-			buildCompletedJob({
-				synthesisResult: {
-					findings: [],
-					summary: "raw",
-					verdict: "Needs security review",
-					criticalCount: 0,
-					highCount: 7,
-					mediumCount: 0,
-					lowCount: 0,
-					nitCount: 0,
-					healthScore: 10,
-					scoreBreakdown: { critical: 0, warning: 7, suggestion: 0 },
-				},
-				finalResult: {
-					jobId: "j3",
-					clean: true,
-					status: "done",
-					reviewStatus: "done",
-					codeRisk: "clean",
-					qualityGate: {
-						status: "pass",
-						threshold: 70,
-						score: 100,
-						reasons: [],
-					},
-					verdict: "Approve",
-					verdictSource: "deterministic",
-					target: { mode: "local", label: "local changes" },
-					reportPath: "/tmp/drykiss-report.json",
-					files: [],
-					counts: {
-						total: 0,
-						critical: 0,
-						high: 0,
-						medium: 0,
-						low: 0,
-						nit: 0,
-						suppressed: 1,
-						previouslyRejected: 2,
-						validatorFalsePositive: 3,
-					},
-					findings: [],
-					summary: "final",
-					errors: [],
-					validationIssues: [],
-					healthScore: 100,
-					scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-				},
-			}),
-		);
-
-		expect(lines[0]).toContain("Verdict: Approve");
-		expect(lines[0]).toContain("local changes");
-		expect(lines[0]).toContain("score 100/100");
-		expect(lines[0]).not.toContain("Needs security review");
-		expect(lines).toHaveLength(1);
+describe("ReviewProgressWidget — completion lifecycle", () => {
+	it("renders no persistent summary after completion", () => {
+		const job = buildRunningJob(0);
+		job.overallStatus = "done";
+		expect(renderLines(job)).toEqual([]);
 	});
 });
 
@@ -484,9 +259,11 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		const uiCtx = {
 			setWidget: (
 				_key: string,
-				fn: (tui: any, theme: any) => { render: () => string[] },
+				fn: ((tui: any, theme: any) => { render: () => string[] }) | undefined,
 			) => {
-				captured = () => fn({ terminal: { columns: 200 } }, theme).render();
+				captured = fn
+					? () => fn({ terminal: { columns: 200 } }, theme).render()
+					: () => [];
 			},
 		};
 		widget.attach(uiCtx);
@@ -498,15 +275,14 @@ describe("ReviewProgressWidget — lifecycle", () => {
 		};
 	}
 
-	it("keeps the widget alive when only completed jobs remain", () => {
+	it("disposes the widget when only completed jobs remain", () => {
 		const widget = new ReviewProgressWidget();
 		const ctx = attachAndCapture(widget);
 		ctx.setJobs([makeCompletedJob()]);
 		expect(ctx.captured).toBeDefined();
 		const lines = ctx.captured!();
-		expect(lines.length).toBeGreaterThan(0);
-		expect(lines[0]).toContain("DRYKISS Review");
-		widget.dispose();
+		expect(lines).toEqual([]);
+		expect(widget["widgetRegistered"]).toBe(false);
 	});
 
 	it("disposes the widget when the jobs list is empty", () => {

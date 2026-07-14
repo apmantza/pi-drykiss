@@ -1,4 +1,3 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ReviewJob } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { stripAnsi } from "./content-utils.js";
@@ -75,9 +74,8 @@ export function collectModelPairs(
 
 /**
  * Pick a verdict string for display when synthesis.verdict may be
- * missing or non-string. Shared by the TUI widget completed summary
- * and the message renderer so the two surfaces never disagree on
- * "what verdict do we show for a job with no synthesis verdict?"
+ * missing or non-string. Shared by display helpers so all surfaces
+ * agree on "what verdict do we show for a job with no synthesis verdict?"
  *
  * Rules (in order):
  *   1. If synthesis.verdict is a non-empty string, return it.
@@ -89,7 +87,7 @@ export function collectModelPairs(
  *
  * Uses || (not ??) so empty strings also fall through to the
  * fallback — an LLM that emits {"verdict": ""} should not produce
- * a blank "Verdict:" line in the TUI.
+ * a blank "Verdict:" line.
  */
 export function pickVerdict(
 	synthesisVerdict: unknown,
@@ -266,37 +264,6 @@ export function formatReviewWorkingMessage(job: ReviewJob): string {
 	);
 }
 
-function formatCompletedHeading(
-	job: ReviewJob,
-	theme: Theme,
-	truncate: (line: string) => string,
-): string {
-	const synthesis = job.synthesisResult;
-	const finalResult = job.finalResult;
-	const hasError = job.overallStatus === "error";
-	const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-	const verdict =
-		finalResult?.verdict ?? pickVerdict(synthesis?.verdict, hasError);
-	const healthScore = finalResult?.healthScore ?? synthesis?.healthScore;
-	const elapsed =
-		job.completedAt && job.startedAt
-			? formatElapsed(job.completedAt - job.startedAt)
-			: "";
-	const headingParts = [
-		`${icon} ${theme.bold("DRYKISS Review")} · ${theme.fg("accent", `Verdict: ${verdict}`)}`,
-	];
-	if (finalResult?.target?.label) {
-		headingParts.push(theme.fg("dim", finalResult.target.label));
-	}
-	if (typeof healthScore === "number") {
-		const scoreColor =
-			healthScore >= 80 ? "success" : healthScore >= 50 ? "warning" : "error";
-		headingParts.push(theme.fg(scoreColor, `score ${healthScore}/100`));
-	}
-	if (elapsed) headingParts.push(elapsed);
-	return truncate(headingParts.join(` ${theme.fg("dim", "·")} `));
-}
-
 export class ReviewProgressWidget {
 	private uiCtx: any;
 	private readonly widgetKey = "drykiss-review";
@@ -315,54 +282,20 @@ export class ReviewProgressWidget {
 		this.update();
 	}
 
-	private renderWidget(_tui: any, theme: Theme): string[] {
-		const w = _tui.terminal?.columns ?? 80;
-		const truncate = (line: string) => truncateToWidth(line, w);
-		const lines: string[] = [];
-
-		for (const job of this.jobs) {
-			if (job.overallStatus === "done" || job.overallStatus === "error") {
-				lines.push(...this.renderCompletedSummary(job, theme, truncate));
-			}
-		}
-
-		return lines;
-	}
-
-	/** Render only the persistent one-line post-completion summary. */
-	private renderCompletedSummary(
-		job: ReviewJob,
-		theme: Theme,
-		truncate: (line: string) => string,
-	): string[] {
-		return [formatCompletedHeading(job, theme, truncate)];
+	private renderWidget(): string[] {
+		// Live progress is rendered through Pi's working-message row. This
+		// widget remains registered only to keep the UI attachment alive while
+		// a background review is active; it is removed on completion.
+		return [];
 	}
 
 	private update() {
 		if (!this.uiCtx?.setWidget) return;
 
-		// Keep the widget alive if there's anything to show: live
-		// jobs, or completed jobs whose summary hasn't been read
-		// yet. Without completed jobs the user would lose the
-		// health-score summary the instant synthesis finishes.
-		// The cleanup job in ReviewManager removes old completed
-		// jobs after 10 minutes, which is when this widget
-		// disposes naturally.
-		const hasAnything = this.jobs.length > 0;
-		// Live timer ticks are only useful while at least one job
-		// is running or queued (spinner + elapsed counter). Stop
-		// the 12Hz tick when only completed jobs remain.
 		const hasLive = this.jobs.some(
 			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
 		);
-		// Widget is only used for completed-job summaries, which are static.
-		// Live lens info is shown in the working message row, so we don't
-		// need a 12 Hz tick — just request a render once when there's content.
 		if (!hasLive) {
-			this.tui?.requestRender?.();
-		}
-
-		if (!hasAnything) {
 			this.dispose();
 			return;
 		}
@@ -370,10 +303,10 @@ export class ReviewProgressWidget {
 		if (!this.widgetRegistered) {
 			this.uiCtx.setWidget(
 				this.widgetKey,
-				(tui: any, theme: Theme) => {
+				(tui: any, _theme: Theme) => {
 					this.tui = tui;
 					return {
-						render: () => this.renderWidget(tui, theme),
+						render: () => this.renderWidget(),
 						invalidate: () => {
 							this.widgetRegistered = false;
 							this.tui = undefined;
