@@ -20,7 +20,11 @@ import type {
 import { resolveModel, runLensSubagent } from "./subagent-runner.js";
 import { isModelError } from "./model-selector.js";
 import { LOG_PREFIX } from "./constants.js";
-import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import {
+	logAutoreviewEvent,
+	logAutoreviewError,
+	tokenUsageDetails,
+} from "./logger.js";
 
 interface SynthesisRunnerOptions {
 	readonly retryOnModelError: RetryLensOnModelError;
@@ -127,6 +131,7 @@ export async function runSynthesis(
 			model: result.modelName,
 			provider: result.provider,
 			responseChars: result.text.length,
+			...(tokenUsageDetails(result.usage) ?? {}),
 			error: result.errorMessage,
 		});
 
@@ -158,6 +163,7 @@ export async function runSynthesis(
 					model: retryResult.modelName,
 					provider: retryResult.provider,
 					responseChars: retryResult.text.length,
+					...(tokenUsageDetails(retryResult.usage) ?? {}),
 					error: retryResult.errorMessage,
 				});
 				replaceSynthesisSession(job, retryResult.session);

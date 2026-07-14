@@ -16,7 +16,11 @@ import type {
 	RetryLensOnModelError,
 	ReviewJobState,
 } from "./review-lifecycle-types.js";
-import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import {
+	logAutoreviewEvent,
+	logAutoreviewError,
+	tokenUsageDetails,
+} from "./logger.js";
 
 interface LensRunnerOptions {
 	readonly getJob: (jobId: string) => ReviewJobState | undefined;
@@ -139,6 +143,7 @@ export async function runLens(
 		provider: result.provider,
 		durationMs: result.durationMs,
 		responseChars: result.text.length,
+		...(tokenUsageDetails(result.usage) ?? {}),
 		error: result.errorMessage,
 	});
 	await saveLog(job, state, task.lens, result.session);
@@ -163,6 +168,7 @@ export async function runLens(
 				lens: task.lens,
 				model: retryResult.modelName,
 				provider: retryResult.provider,
+				...(tokenUsageDetails(retryResult.usage) ?? {}),
 				error: retryResult.errorMessage,
 			});
 			state.session = retryResult.session;

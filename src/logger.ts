@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Usage } from "@earendil-works/pi-ai";
 import { redactSecrets } from "./secret-redaction.js";
 
 /** Append-only diagnostic log for autoreview lifecycle events. */
@@ -34,6 +35,27 @@ function safeDetails(
 		}
 	}
 	return result;
+}
+
+/** Return numeric token/cost fields suitable for lifecycle logs. */
+export function tokenUsageDetails(
+	usage: Usage | undefined,
+): Record<string, number> | undefined {
+	if (!usage) return undefined;
+	return {
+		inputTokens: usage.input,
+		outputTokens: usage.output,
+		cacheReadTokens: usage.cacheRead,
+		cacheWriteTokens: usage.cacheWrite,
+		totalTokens: usage.totalTokens,
+		costTotal: usage.cost.total,
+		...(usage.cacheWrite1h === undefined
+			? {}
+			: { cacheWrite1hTokens: usage.cacheWrite1h }),
+		...(usage.reasoning === undefined
+			? {}
+			: { reasoningTokens: usage.reasoning }),
+	};
 }
 
 /**

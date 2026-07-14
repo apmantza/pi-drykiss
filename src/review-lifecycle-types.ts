@@ -2,7 +2,7 @@ import type {
 	ExtensionContext,
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { Model, Api } from "@earendil-works/pi-ai";
+import type { Model, Api, Usage } from "@earendil-works/pi-ai";
 import type { ReviewLens, SynthesisResult } from "./types.js";
 
 export type LensStatus = "queued" | "running" | "done" | "error";
@@ -49,6 +49,7 @@ export interface SubagentResult {
 	modelName: string;
 	provider?: string;
 	durationMs: number;
+	usage?: Usage;
 	errorMessage?: string;
 	session?: AgentSession;
 }

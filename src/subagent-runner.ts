@@ -6,7 +6,7 @@
  * Pattern adapted from: https://github.com/vigolium/piolium
  */
 
-import type { Model, Api } from "@earendil-works/pi-ai";
+import type { Model, Api, Usage } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -29,6 +29,7 @@ export interface SubagentResult {
 	/** Provider id (e.g. "anthropic", "openai") for the model that ran. */
 	provider?: string;
 	durationMs: number;
+	usage?: Usage;
 	errorMessage?: string;
 	/** The live session object — caller must dispose when no longer needed. */
 	session?: AgentSession;
@@ -85,6 +86,7 @@ export async function runLensSubagent(
 
 	let finalText = "";
 	let errorMessage: string | undefined;
+	let usage: Usage | undefined;
 	let currentText = "";
 	let session: AgentSession | undefined;
 
@@ -149,9 +151,11 @@ export async function runLensSubagent(
 					content?: unknown;
 					stopReason?: string;
 					errorMessage?: string;
+					usage?: Usage;
 				};
 				if (message.role !== "assistant") return;
 				if (message.errorMessage) errorMessage = message.errorMessage;
+				if (message.usage) usage = message.usage;
 				const text = extractAssistantText(message.content);
 				if (text) finalText = text;
 			}
@@ -219,6 +223,7 @@ export async function runLensSubagent(
 		provider: model.provider,
 		durationMs: Date.now() - start,
 		session,
+		...(usage ? { usage } : {}),
 		...(errorMessage ? { errorMessage } : {}),
 	};
 }

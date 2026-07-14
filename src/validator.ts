@@ -24,7 +24,11 @@ import { parseBalancedJsonArray } from "./json-extract.js";
 import { resolveModelSmart } from "./llm.js";
 import { runLensSubagent } from "./subagent-runner.js";
 import { loadPromptBody } from "./prompt-loader.js";
-import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import {
+	logAutoreviewEvent,
+	logAutoreviewError,
+	tokenUsageDetails,
+} from "./logger.js";
 import { parseVerdictRecord } from "./verdict-utils.js";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Finding } from "./types.js";
@@ -232,6 +236,7 @@ export async function runValidator(
 					provider: response.provider,
 					responseChars: response.text.length,
 					durationMs: response.durationMs,
+					...(tokenUsageDetails(response.usage) ?? {}),
 					attempt,
 				});
 				if (response.errorMessage) throw new Error(response.errorMessage);
