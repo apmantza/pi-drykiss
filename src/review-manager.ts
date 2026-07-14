@@ -14,7 +14,6 @@ import { runLens as runLensTask } from "./lens-runner.js";
 import type {
 	LensExecutionTask,
 	LensState,
-	LensStatus,
 	ReviewJobState,
 } from "./review-lifecycle-types.js";
 export type {

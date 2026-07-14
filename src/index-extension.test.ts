@@ -124,14 +124,20 @@ describe("extension registration", () => {
 		loadConfig.mockResolvedValue({});
 	});
 
-	it("registers only one tool, no commands", () => {
+	it("registers review, status, and cancel tools, no commands", () => {
 		const { pi } = makePi();
 		registerDrykiss(pi as any);
 
 		expect(pi.registerCommand).not.toHaveBeenCalled();
-		expect(pi.registerTool).toHaveBeenCalledTimes(1);
+		expect(pi.registerTool).toHaveBeenCalledTimes(3);
 		expect(pi.registerTool).toHaveBeenCalledWith(
 			expect.objectContaining({ name: "drykiss_autoreview" }),
+		);
+		expect(pi.registerTool).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "drykiss_autoreview_status" }),
+		);
+		expect(pi.registerTool).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "drykiss_autoreview_cancel" }),
 		);
 	});
 

@@ -42,10 +42,6 @@ function renderLines(job: ReviewJob): string[] {
 	return lines;
 }
 
-function renderJobLine(job: ReviewJob, lineIndex = 1): string {
-	return renderLines(job)[lineIndex] ?? "";
-}
-
 function buildRunningJob(elapsedMs: number): ReviewJob {
 	const lens: ReviewLens = "simplicity";
 	const state: LensState = {
@@ -97,7 +93,6 @@ describe("formatElapsed (via widget render)", () => {
 	it("renders 0.0s for a lens that just started", () => {
 		expect(renderElapsedLine(0)).toBe("0.0s");
 	});
-
 });
 
 describe("renderWidget — completed summary", () => {
@@ -140,83 +135,13 @@ describe("renderWidget — completed summary", () => {
 		};
 	}
 
-	it("renders heading + per-lens line for a completed job", () => {
+	it("renders only the one-line summary for a completed job", () => {
 		const lines = renderLines(buildCompletedJob());
-		// Line 0: heading with verdict
+		expect(lines).toHaveLength(1);
 		expect(lines[0]).toContain("DRYKISS Review");
 		expect(lines[0]).toContain("Verdict: Approve");
-		// Line 1: per-lens line
-		expect(lines[1]).toContain("KISS");
-		expect(lines[1]).toContain("✓");
-		expect(lines[1]).toContain("4.2s");
-		expect(lines[1]).toContain("3 findings");
-		expect(lines[1]).toContain("@ anthropic/Claude Sonnet 4");
-	});
-
-	it("includes critical/high counts in the severity breakdown line", () => {
-		const lines = renderLines(
-			buildCompletedJob({
-				synthesisResult: {
-					findings: [],
-					summary: "needs work",
-					verdict: "Request changes",
-					criticalCount: 2,
-					highCount: 5,
-					mediumCount: 3,
-					lowCount: 1,
-					nitCount: 0,
-					healthScore: 35,
-					scoreBreakdown: { critical: 2, warning: 5, suggestion: 0 },
-				},
-			}),
-		);
-		// Severity breakdown is the last line.
-		const breakdown = lines[lines.length - 1];
-		expect(breakdown).toContain("2 critical");
-		expect(breakdown).toContain("5 high");
-		expect(breakdown).toContain("3 medium");
-	});
-
-	it("omits severity breakdown when no findings", () => {
-		const lines = renderLines(buildCompletedJob());
-		// Should be heading + 1 per-lens line, no breakdown.
-		expect(lines).toHaveLength(2);
-	});
-
-	it("lists multiple per-lens lines for multi-lens jobs", () => {
-		const lens1: ReviewLens = "simplicity";
-		const lens2: ReviewLens = "deduplication";
-		const job = buildCompletedJob({
-			lenses: [lens1, lens2],
-			states: new Map([
-				[
-					lens1,
-					buildLensState({
-						status: "done",
-						modelName: "Claude Sonnet 4",
-						provider: "anthropic",
-						durationMs: 3000,
-						findingsCount: 2,
-					}),
-				],
-				[
-					lens2,
-					buildLensState({
-						status: "done",
-						modelName: "GPT-4o",
-						provider: "openai",
-						durationMs: 4000,
-						findingsCount: 1,
-					}),
-				],
-			]),
-		});
-		const lines = renderLines(job);
-		// Line 0: heading, Line 1: KISS, Line 2: DRY
-		expect(lines[1]).toContain("KISS");
-		expect(lines[1]).toContain("anthropic/Claude Sonnet 4");
-		expect(lines[2]).toContain("DRY");
-		expect(lines[2]).toContain("openai/GPT-4o");
+		expect(lines[0]).not.toContain("· KISS");
+		expect(lines[0]).not.toContain("Claude Sonnet");
 	});
 
 	it("handles errored jobs with a red icon and missing synthesis", () => {
@@ -240,9 +165,7 @@ describe("renderWidget — completed summary", () => {
 		const lines = renderLines(job);
 		expect(lines[0]).toContain("DRYKISS Review");
 		expect(lines[0]).toContain("Review failed");
-		// Per-lens line should show error status
-		expect(lines[1]).toContain("✗");
-		expect(lines[1]).toContain("boom");
+		expect(lines).toHaveLength(1);
 	});
 
 	it("renders the elapsed duration in the heading", () => {
@@ -403,148 +326,7 @@ describe("renderWidget — completed summary", () => {
 		expect(lines[0]).toContain("local changes");
 		expect(lines[0]).toContain("score 100/100");
 		expect(lines[0]).not.toContain("Needs security review");
-		expect(lines[2]).toContain("0 findings");
-		expect(lines[2]).toContain("1 suppressed");
-		expect(lines[2]).toContain("2 previously-rejected");
-		expect(lines[2]).toContain("3 validator-refuted");
-		expect(lines[3]).toContain("report:");
-		expect(lines[3]).toContain("drykiss-report.json");
-	});
-});
-
-describe("per-lens line — session log link", () => {
-	const lens: ReviewLens = "simplicity";
-
-	function buildCompletedJobWithState(state: LensState): ReviewJob {
-		return {
-			id: "j1",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "done",
-			overallStatus: "done",
-			startedAt: Date.now(),
-			completedAt: Date.now(),
-			synthesisResult: {
-				findings: [],
-				summary: "ok",
-				verdict: "Approve",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-				healthScore: 100,
-				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-			},
-		};
-	}
-
-	it("appends an OSC 8 hyperlink for a done lens with logPath", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 8400,
-				findingsCount: 5,
-				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
-			}),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).toContain("\x1b]8;;file://");
-		expect(line).toContain("j1-simplicity.jsonl");
-	});
-
-	it("appends the link for an errored lens with logPath", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({
-				status: "error",
-				errorMessage: "boom",
-				logPath: "/home/user/.pi/drykiss/sessions/j1-simplicity.jsonl",
-			}),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).toContain("\x1b]8;;");
-		expect(line).toContain("j1-simplicity.jsonl");
-	});
-
-	it("does NOT append a link for a done lens without logPath", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({ status: "done", durationMs: 1000, findingsCount: 0 }),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).not.toContain("\x1b]8;;");
-	});
-});
-
-describe("per-lens line — provider display", () => {
-	const lens: ReviewLens = "simplicity";
-
-	function buildCompletedJobWithState(state: LensState): ReviewJob {
-		return {
-			id: "j2",
-			files: [],
-			lenses: [lens],
-			states: new Map([[lens, state]]),
-			synthesisStatus: "done",
-			overallStatus: "done",
-			startedAt: Date.now(),
-			completedAt: Date.now(),
-			synthesisResult: {
-				findings: [],
-				summary: "ok",
-				verdict: "Approve",
-				criticalCount: 0,
-				highCount: 0,
-				mediumCount: 0,
-				lowCount: 0,
-				nitCount: 0,
-				healthScore: 100,
-				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
-			},
-		};
-	}
-
-	it("renders provider/modelName together when provider is set", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 1000,
-				findingsCount: 0,
-				modelName: "Claude Sonnet 4",
-				provider: "anthropic",
-			}),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).toContain("@ anthropic/Claude Sonnet 4");
-	});
-
-	it("falls back to modelName alone when provider is missing", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 1000,
-				findingsCount: 0,
-				modelName: "Claude Sonnet 4",
-			}),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).toContain("@ Claude Sonnet 4");
-		expect(line).not.toContain("/Claude Sonnet 4");
-	});
-
-	it("treats whitespace-only provider as missing", () => {
-		const job = buildCompletedJobWithState(
-			buildLensState({
-				status: "done",
-				durationMs: 1000,
-				findingsCount: 0,
-				modelName: "GPT-4o",
-				provider: "   ",
-			}),
-		);
-		const line = renderJobLine(job, 1);
-		expect(line).toContain("@ GPT-4o");
-		expect(line).not.toContain("/GPT-4o");
+		expect(lines).toHaveLength(1);
 	});
 });
 

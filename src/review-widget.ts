@@ -1,8 +1,6 @@
-import { truncateToWidth, hyperlink } from "@earendil-works/pi-tui";
-import { basename } from "node:path";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ReviewJob } from "./review-manager.js";
 import { LENS_DISPLAY_NAMES } from "./constants.js";
-import { pathToFileLink } from "./persist.js";
 import { stripAnsi } from "./content-utils.js";
 import type { Finding, Severity } from "./types.js";
 
@@ -22,26 +20,6 @@ function formatElapsed(ms: number): string {
 	const hours = Math.floor(mins / 60);
 	const remMins = mins % 60;
 	return `${hours}h ${remMins.toString().padStart(2, "0")}m`;
-}
-
-/**
- * Render an OSC 8 hyperlink pointing at a lens's exported session
- * transcript, or an empty string if no log path is available.
- *
- * Falls back to plain text in terminals that don't support OSC 8 — the
- * escape sequences are ignored and the user sees the basename, which is
- * still copy-pasteable.
- */
-function renderLogLink(logPath: string | undefined, theme: Theme): string {
-	if (!logPath) return "";
-	const name = basename(logPath);
-	const url = pathToFileLink(logPath);
-	// OSC 8 hyperlinks render with the terminal's default link styling
-	// (typically colored + underlined) in supporting terminals. In others
-	// the escape codes are stripped, leaving just the dim-colored basename
-	// which is still copy-pasteable.
-	const label = theme.fg("dim", name);
-	return ` · ${hyperlink(label, url)}`;
 }
 
 /** Symbol per severity used by formatFinding. */
@@ -297,7 +275,8 @@ function formatCompletedHeading(
 	const finalResult = job.finalResult;
 	const hasError = job.overallStatus === "error";
 	const icon = hasError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-	const verdict = finalResult?.verdict ?? pickVerdict(synthesis?.verdict, hasError);
+	const verdict =
+		finalResult?.verdict ?? pickVerdict(synthesis?.verdict, hasError);
 	const healthScore = finalResult?.healthScore ?? synthesis?.healthScore;
 	const elapsed =
 		job.completedAt && job.startedAt
@@ -316,108 +295,6 @@ function formatCompletedHeading(
 	}
 	if (elapsed) headingParts.push(elapsed);
 	return truncate(headingParts.join(` ${theme.fg("dim", "·")} `));
-}
-
-function formatCompletedLensLine(
-	job: ReviewJob,
-	lens: ReviewJob["lenses"][number],
-	theme: Theme,
-	truncate: (line: string) => string,
-): string | undefined {
-	const state = job.states.get(lens);
-	if (!state) return undefined;
-	const displayName = LENS_DISPLAY_NAMES[lens] ?? lens;
-	const lensIcon =
-		state.status === "done"
-			? theme.fg("success", "✓")
-			: state.status === "error"
-				? theme.fg("error", "✗")
-				: theme.fg("dim", "○");
-	const duration =
-		state.durationMs > 0 ? `${(state.durationMs / 1000).toFixed(1)}s` : "-";
-	const findings =
-		state.findingsCount > 0 ? `${state.findingsCount} findings` : "0 findings";
-	const errorTag =
-		state.status === "error" && state.errorMessage
-			? theme.fg("error", ` · ${state.errorMessage.slice(0, 30)}`)
-			: "";
-	const provider = state.provider?.trim() ?? "";
-	const modelName = state.modelName?.trim() ?? "";
-	const modelLabel = provider ? `${provider}/${modelName}` : modelName;
-	const model = modelLabel ? theme.fg("dim", `@ ${modelLabel}`) : "";
-	const link =
-		state.status === "done" || state.status === "error"
-			? renderLogLink(state.logPath, theme)
-			: "";
-	return truncate(
-		`  ${lensIcon} ${theme.bold(displayName)} · ${duration} · ${findings}${model ? ` · ${model}` : ""}${errorTag}${link}`,
-	);
-}
-
-function formatFindingBreakdown(
-	job: ReviewJob,
-	theme: Theme,
-	truncate: (line: string) => string,
-): string | undefined {
-	const synthesis = job.synthesisResult;
-	const counts = job.finalResult?.counts;
-	const totalFindings = counts
-		? (counts.total ?? 0)
-		: (synthesis?.criticalCount ?? 0) +
-			(synthesis?.highCount ?? 0) +
-			(synthesis?.mediumCount ?? 0) +
-			(synthesis?.lowCount ?? 0) +
-			(synthesis?.nitCount ?? 0);
-	const suppressed = counts?.suppressed ?? 0;
-	const previouslyRejected = counts?.previouslyRejected ?? 0;
-	const validatorFalsePositive = counts?.validatorFalsePositive ?? 0;
-	const validatorUnverified = counts?.validatorUnverified ?? 0;
-	const validatorReal = counts?.validatorReal ?? 0;
-	if (
-		totalFindings === 0 &&
-		suppressed === 0 &&
-		previouslyRejected === 0 &&
-		validatorFalsePositive === 0 &&
-		validatorUnverified === 0 &&
-		validatorReal === 0
-	) {
-		return undefined;
-	}
-
-	const parts: string[] = [`${totalFindings} findings`];
-	const critical = counts?.critical ?? synthesis?.criticalCount ?? 0;
-	const high = counts?.high ?? synthesis?.highCount ?? 0;
-	const medium = counts?.medium ?? synthesis?.mediumCount ?? 0;
-	const low = counts?.low ?? synthesis?.lowCount ?? 0;
-	const nit = counts?.nit ?? synthesis?.nitCount ?? 0;
-	if (critical > 0) parts.push(`${critical} critical`);
-	if (high > 0) parts.push(`${high} high`);
-	if (medium > 0) parts.push(`${medium} medium`);
-	if (low > 0) parts.push(`${low} low`);
-	if (nit > 0) parts.push(`${nit} nit`);
-	if (suppressed > 0) parts.push(`${suppressed} suppressed`);
-	if (previouslyRejected > 0)
-		parts.push(`${previouslyRejected} previously-rejected`);
-	if (validatorFalsePositive > 0)
-		parts.push(`${validatorFalsePositive} validator-refuted`);
-	if (validatorUnverified > 0)
-		parts.push(`${validatorUnverified} validator-unverified`);
-	if (validatorReal > 0) parts.push(`${validatorReal} validator-confirmed`);
-	return truncate(`  ${theme.fg("dim", parts.join(" · "))}`);
-}
-
-function formatReportLine(
-	job: ReviewJob,
-	theme: Theme,
-	truncate: (line: string) => string,
-): string | undefined {
-	const reportPath = job.finalResult?.reportPath ?? job.reviewPath;
-	if (!reportPath) return undefined;
-	const reportName = basename(reportPath);
-	const reportUrl = pathToFileLink(reportPath);
-	return truncate(
-		`  ${theme.fg("dim", "report:")} ${hyperlink(theme.fg("dim", reportName), reportUrl)}`,
-	);
 }
 
 export class ReviewProgressWidget {
@@ -452,36 +329,13 @@ export class ReviewProgressWidget {
 		return lines;
 	}
 
-	/**
-	 * Render a compact post-completion summary for a job that has
-	 * finished. Surfaces the health score, verdict, and per-lens
-	 * model breakdown so the user sees the bottom line immediately,
-	 * without waiting for the follow-up notification message.
-	 *
-	 * The completed summary is intentionally short (4 lines max) so it
-	 * doesn't compete with the running-widget for vertical space —
-	 * once the user dismisses or scrolls past it, the widget hides
-	 * itself via the existing `hasAnything` check in `update()`.
-	 */
+	/** Render only the persistent one-line post-completion summary. */
 	private renderCompletedSummary(
 		job: ReviewJob,
 		theme: Theme,
 		truncate: (line: string) => string,
 	): string[] {
-		const out: string[] = [formatCompletedHeading(job, theme, truncate)];
-
-		for (const lens of job.lenses) {
-			const line = formatCompletedLensLine(job, lens, theme, truncate);
-			if (line) out.push(line);
-		}
-
-		const breakdown = formatFindingBreakdown(job, theme, truncate);
-		if (breakdown) out.push(breakdown);
-
-		const report = formatReportLine(job, theme, truncate);
-		if (report) out.push(report);
-
-		return out;
+		return [formatCompletedHeading(job, theme, truncate)];
 	}
 
 	private update() {

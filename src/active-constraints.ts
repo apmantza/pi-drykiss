@@ -12,7 +12,7 @@
  * the known RISK_CODES catalogue. Severity values are validated against
  * the known SeverityOverride union.
  */
-import type { RiskTargeting, SeverityOverride } from "./config.js";
+import type { RiskTargeting } from "./config.js";
 import { RISK_CODES } from "./prompts/risk-codes.js";
 import { SEVERITY_VALUES } from "./constants.js";
 

@@ -113,13 +113,76 @@ describe("drykiss_autoreview tool", () => {
 			}),
 			undefined,
 		);
-		expect(result.details.result.clean).toBe(true);
+		expect(result.details.result!.clean).toBe(true);
 		expect(manager.recordFinalResult).toHaveBeenCalledWith(
-			result.details.result,
+			result.details.result!,
 		);
 		// Default format is "compact": one-line header, kiss-style.
 		expect(result.content[0].text).toMatch(/^DRYKISS clean /m);
 		expect(result.content[0].text).toContain("local changes");
+	});
+
+	it("returns a job ID and continues a background review", async () => {
+		const { getChangedFiles } = await import("./git-diff.js");
+		const { getBackgroundReview } = await import("./background-review.js");
+		vi.mocked(getChangedFiles).mockResolvedValue([
+			{ path: "src/a.ts", status: "modified", language: "TypeScript" },
+		]);
+		const notify = vi.fn();
+		const ctx = {
+			cwd: "/home/test",
+			modelRegistry: { getAvailable: vi.fn().mockReturnValue([]) },
+			ui: { notify },
+		} as any;
+		const manager = {
+			recordFinalResult: vi.fn(),
+			runReview: vi.fn().mockResolvedValue({
+				jobId: "job-background",
+				clean: true,
+				status: "done",
+				reviewStatus: "done",
+				codeRisk: "clean",
+				qualityGate: { status: "pass", threshold: 70, score: 100, reasons: [] },
+				verdict: "Approve",
+				verdictSource: "deterministic",
+				target: { mode: "local", label: "local changes" },
+				files: ["src/a.ts"],
+				counts: {
+					total: 0,
+					critical: 0,
+					high: 0,
+					medium: 0,
+					low: 0,
+					nit: 0,
+					suppressed: 0,
+					previouslyRejected: 0,
+				},
+				findings: [],
+				summary: "Clean.",
+				errors: [],
+				validationIssues: [],
+				healthScore: 100,
+				scoreBreakdown: { critical: 0, warning: 0, suggestion: 0 },
+			}),
+		} as any;
+
+		const response = await executeDrykissAutoreviewTool(
+			{ mode: "local", lens: "security", background: true },
+			ctx,
+			{ exec: vi.fn().mockResolvedValue({ stdout: "" }) } as any,
+			manager,
+		);
+
+		const background = response.details.background;
+		expect(background?.status).toBe("running");
+		expect(response.content[0].text).toContain(`job ${background?.id}`);
+		await vi.waitFor(() => expect(manager.runReview).toHaveBeenCalled());
+		const completed = getBackgroundReview(background!.id);
+		expect(completed?.status).toBe("done");
+		expect(notify).toHaveBeenCalledWith(
+			expect.stringContaining("background review complete"),
+			"info",
+		);
 	});
 
 	it("uses single `lens` param to select one lens", async () => {
@@ -338,7 +401,7 @@ describe("drykiss_autoreview tool", () => {
 				manager,
 			);
 
-			expect(result.details.result.clean).toBe(true);
+			expect(result.details.result!.clean).toBe(true);
 			expect(warn).toHaveBeenCalledWith(
 				"%s Failed to record final review result:",
 				"[DRYKISS]",
@@ -450,7 +513,7 @@ describe("drykiss_autoreview tool", () => {
 });
 
 describe("tool parameter schemas (LLM-facing surface)", () => {
-	it("DrykissAutoreviewParams exposes scope + lens + lenses + format", async () => {
+	it("DrykissAutoreviewParams exposes scope + lens + lenses + background + format", async () => {
 		const { DrykissAutoreviewParams } = await import("./review-command.js");
 		const props = Object.keys((DrykissAutoreviewParams as any).properties);
 		// `lens` was added when the separate drykiss_review tool was
@@ -465,6 +528,7 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 				"pr",
 				"lens",
 				"lenses",
+				"background",
 				"format",
 			].sort((a, b) => a.localeCompare(b)),
 		);

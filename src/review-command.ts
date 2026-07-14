@@ -26,6 +26,10 @@ import { formatReviewResultCompact } from "./compact-format.js";
 import { formatReviewResultForTool } from "./review-output.js";
 import { LOG_PREFIX } from "./constants.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import {
+	startBackgroundReview,
+	type BackgroundReviewRecord,
+} from "./background-review.js";
 
 const MAX_FILES = 40;
 
@@ -135,6 +139,13 @@ export const DrykissAutoreviewParams = Type.Object({
 	//   - `validate`   → config opt-in
 	//   - `deep*`      → Bugbot deep-mode pipeline; deserves its own
 	//                    tool surface
+	// ── Execution ──
+	background: Type.Optional(
+		Type.Union([Type.Boolean(), Type.Literal("auto")], {
+			description:
+				"Return immediately and continue in the background. Use 'auto' to background only full-codebase all-lens reviews.",
+		}),
+	),
 	// ── Output (rare override) ──
 	format: Type.Optional(
 		Type.Union([Type.Literal("compact"), Type.Literal("structured")]),
@@ -238,6 +249,18 @@ async function runStandaloneScout(
 	};
 }
 
+function isLongReview(params: {
+	mode?: ReviewMode;
+	lens?: "all" | "scout" | Exclude<ReviewLens, "all">;
+	lenses?: "all" | Exclude<ReviewLens, "all">[];
+}): boolean {
+	const allLenses =
+		params.lens === "all" ||
+		params.lenses === "all" ||
+		(params.lens === undefined && params.lenses === undefined);
+	return params.mode === "full" && allLenses;
+}
+
 export async function executeDrykissAutoreviewTool(
 	params: {
 		mode?: ReviewMode;
@@ -278,6 +301,8 @@ export async function executeDrykissAutoreviewTool(
 		 * above. Default "compact".
 		 */
 		format?: "compact" | "structured";
+		/** Return immediately, or use "auto" for full all-lens reviews only. */
+		background?: boolean | "auto";
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -289,8 +314,71 @@ export async function executeDrykissAutoreviewTool(
 	}) => void,
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
-	details: { result: ReviewResult; progress?: string };
+	details: {
+		result?: ReviewResult;
+		progress?: string;
+		background?: Pick<BackgroundReviewRecord, "id" | "status" | "startedAt">;
+	};
 }> {
+	const backgroundRequested =
+		params.background === true ||
+		(params.background === "auto" && isLongReview(params));
+	if (backgroundRequested) {
+		const backgroundId = randomUUID().slice(0, 12);
+		const backgroundParams = { ...params, background: false };
+		const record = startBackgroundReview(
+			backgroundId,
+			(signal) =>
+				executeDrykissAutoreviewTool(
+					backgroundParams,
+					ctx,
+					pi,
+					manager,
+					signal,
+					undefined,
+				),
+			(result) => {
+				const score =
+					typeof result.healthScore === "number"
+						? ` · score ${result.healthScore}/100`
+						: "";
+				try {
+					ctx.ui.notify(
+						`DRYKISS background review ${result.status === "error" ? "failed" : "complete"} · ${result.verdict} · ${result.counts.total} findings${score} · job ${backgroundId}`,
+						result.status === "error" ? "warning" : "info",
+					);
+				} catch {
+					// UI notification failures must not affect the completed review.
+				}
+			},
+			(error) => {
+				try {
+					ctx.ui.notify(
+						`DRYKISS background review failed · job ${backgroundId} · ${error instanceof Error ? error.message : String(error)}`,
+						"warning",
+					);
+				} catch {
+					// UI notification failures must not affect the background job.
+				}
+			},
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `DRYKISS background review started · job ${record.id}`,
+				},
+			],
+			details: {
+				background: {
+					id: record.id,
+					status: record.status,
+					startedAt: record.startedAt,
+				},
+			},
+		};
+	}
+
 	const correlationId = randomUUID();
 	logAutoreviewEvent("autoreview.start", {
 		correlationId,

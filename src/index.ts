@@ -3,6 +3,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { Type } from "@sinclair/typebox";
 import {
 	executeDrykissAutoreviewTool,
 	DrykissAutoreviewParams,
@@ -16,6 +17,11 @@ import {
 	formatReviewWorkingMessage,
 } from "./review-widget.js";
 import { LOG_PREFIX } from "./constants.js";
+import {
+	cancelBackgroundReview,
+	formatBackgroundReviewStatus,
+	getBackgroundReview,
+} from "./background-review.js";
 import { toErrorMessage } from "./error-utils.js";
 
 function warnExtensionError(
@@ -175,7 +181,7 @@ export default function (pi: ExtensionAPI): void {
 		name: "drykiss_autoreview",
 		label: "DRYKISS Autoreview",
 		description:
-			"Run a blocking multi-lens DRYKISS review over a git/PR/codebase target. Pick a scope: local (uncommitted), staged, branch (needs base), commit (needs SHA), pr (needs URL), full, or files (needs paths). Returns a stable structured ReviewResult.",
+			"Run a multi-lens DRYKISS review over a git/PR/codebase target. Pick a scope: local (uncommitted), staged, branch (needs base), commit (needs SHA), pr (needs URL), full, or files (needs paths). Returns a stable structured ReviewResult, or start it in the background with background=true.",
 		promptSnippet:
 			"Run a multi-lens DRYKISS autoreview over a git/PR/codebase target",
 		promptGuidelines: [
@@ -183,6 +189,7 @@ export default function (pi: ExtensionAPI): void {
 			"Pick exactly one scope via the `mode` field: 'local' for uncommitted changes, 'staged' for staged changes, 'branch' with `base` for branch reviews, 'commit' with `commit` for single commits, 'pr' with `pr` for GitHub PRs, 'full' for the entire codebase, 'files' with `files` for explicit paths. Omit `mode` to use a smart default (staged → local).",
 			"Optional: pass `lens` (single lens or 'all') or `lenses` (array) to run a subset. Default is all lenses. Pass `lens: 'security'` for a focused single-lens review.",
 			"Optional: pass `format: 'structured'` if you need the full markdown report; default 'compact' is one line per finding.",
+			"Optional: pass `background: true` for long-running reviews, or `background: 'auto'` to background full-codebase all-lens reviews only. The tool returns a job ID immediately; use drykiss_autoreview_status to retrieve its status and result.",
 			"Model selection, context mode, max files, validator, and deep mode are config-driven via ~/.pi/drykiss/config.json — not exposed as tool parameters.",
 			"Treat drykiss_autoreview findings as advisory: verify real code before fixing, reject speculative findings, and rerun focused tests after any review-triggered fix.",
 		],
@@ -232,6 +239,11 @@ export default function (pi: ExtensionAPI): void {
 			// avoids a redundant placeholder row under the loader.
 			if (options?.isPartial) {
 				return new Text("", 0, 0);
+			}
+			// Background invocation: show the accepted job ID immediately; the
+			// widget and completion notification surface the eventual result.
+			if (result.details?.background) {
+				return new Text(theme.fg("dim", result.content?.[0]?.text ?? ""), 0, 0);
 			}
 			// Final result: persist a result summary, not the last progress line.
 			// Keep this aligned with ReviewProgressWidget's completed summary:
@@ -284,6 +296,102 @@ export default function (pi: ExtensionAPI): void {
 			// Fallback for unexpected shapes: render nothing rather than a
 			// misleading placeholder.
 			return new Text("", 0, 0);
+		},
+	});
+
+	pi.registerTool({
+		name: "drykiss_autoreview_status",
+		label: "DRYKISS Autoreview Status",
+		description:
+			"Get the status and final result of a background DRYKISS autoreview by job ID.",
+		parameters: Type.Object({
+			jobId: Type.String({ description: "Background review job ID" }),
+		}),
+		async execute(
+			_toolCallId: string,
+			params: { jobId: string },
+			_signal: AbortSignal,
+			_onUpdate: any,
+			_ctx: any,
+		) {
+			const record = getBackgroundReview(params.jobId);
+			if (!record) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `No background DRYKISS review found for job ${params.jobId}.`,
+						},
+					],
+					details: { background: { id: params.jobId, status: "unknown" } },
+				};
+			}
+			return {
+				content: [
+					{ type: "text" as const, text: formatBackgroundReviewStatus(record) },
+				],
+				details: {
+					background: record,
+					...(record.result ? { result: record.result } : {}),
+				},
+			};
+		},
+		renderCall(args: { jobId?: string }, theme: any) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("drykiss_autoreview_status ")) +
+					theme.fg("accent", args.jobId ?? ""),
+				0,
+				0,
+			);
+		},
+		renderResult(result: any, _options: any, theme: any) {
+			return new Text(theme.fg("dim", result.content?.[0]?.text ?? ""), 0, 0);
+		},
+	});
+
+	pi.registerTool({
+		name: "drykiss_autoreview_cancel",
+		label: "Cancel DRYKISS Autoreview",
+		description: "Cancel a running background DRYKISS autoreview by job ID.",
+		parameters: Type.Object({
+			jobId: Type.String({ description: "Background review job ID" }),
+		}),
+		async execute(
+			_toolCallId: string,
+			params: { jobId: string },
+			_signal: AbortSignal,
+			_onUpdate: any,
+			_ctx: any,
+		) {
+			const record = cancelBackgroundReview(params.jobId);
+			if (!record) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `No background DRYKISS review found for job ${params.jobId}.`,
+						},
+					],
+					details: { background: { id: params.jobId, status: "unknown" } },
+				};
+			}
+			return {
+				content: [
+					{ type: "text" as const, text: formatBackgroundReviewStatus(record) },
+				],
+				details: { background: record },
+			};
+		},
+		renderCall(args: { jobId?: string }, theme: any) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("drykiss_autoreview_cancel ")) +
+					theme.fg("accent", args.jobId ?? ""),
+				0,
+				0,
+			);
+		},
+		renderResult(result: any, _options: any, theme: any) {
+			return new Text(theme.fg("dim", result.content?.[0]?.text ?? ""), 0, 0);
 		},
 	});
 }
