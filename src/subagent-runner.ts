@@ -71,6 +71,7 @@ export async function resolveAllModels(
  * Pattern adapted from: https://github.com/tintinweb/pi-subagents
  */
 export async function runLensSubagent(
+	ctx: ExtensionContext,
 	cwd: string,
 	model: Model<Api>,
 	systemPrompt: string,
@@ -116,6 +117,16 @@ export async function runLensSubagent(
 			noTools: "all",
 		});
 		session = created;
+
+		// Since 0.80.8, createAgentSession builds its own ModelRuntime from
+		// agentDir (built-ins + models.json) and no longer inherits the host's
+		// in-memory extension provider overlays. Copy those overlays across so
+		// the subagent can resolve auth for models backed by extension-defined
+		// providers (e.g. custom/self-hosted endpoints registered at startup).
+		for (const providerId of ctx.modelRegistry.getRegisteredProviderIds()) {
+			const config = ctx.modelRegistry.getRegisteredProviderConfig(providerId);
+			if (config) created.modelRuntime.registerProvider(providerId, config);
+		}
 
 		// Name the session so it appears in Pi's session list (like pi-subagents)
 		session.setSessionName(`DRYKISS: ${displayName}`);

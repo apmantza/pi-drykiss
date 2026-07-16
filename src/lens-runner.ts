@@ -123,6 +123,7 @@ export async function runLens(
 	};
 	const run = (model: Model<Api>) =>
 		runLensSubagent(
+			ctx,
 			cwd,
 			model,
 			task.systemPrompt,

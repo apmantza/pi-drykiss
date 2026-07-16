@@ -185,7 +185,7 @@ describe("ReviewManager", () => {
 		const { runLensSubagent } = await import("./subagent-runner.js");
 		vi.mocked(runLensSubagent).mockImplementation(
 			async (...args: unknown[]) => {
-				const lens = args[4] as string;
+				const lens = args[5] as string;
 				return {
 					lens,
 					text:
@@ -241,7 +241,7 @@ describe("ReviewManager", () => {
 		};
 		vi.mocked(runLensSubagent).mockImplementation(
 			async (...args: unknown[]) => {
-				const lens = args[4] as string;
+				const lens = args[5] as string;
 				return {
 					lens,
 					text:
@@ -296,9 +296,9 @@ describe("ReviewManager", () => {
 		vi.mocked(runLensSubagent).mockImplementation(
 			async (...args: unknown[]) =>
 				({
-					lens: args[4],
+					lens: args[5],
 					text:
-						args[4] === "synthesis"
+						args[5] === "synthesis"
 							? JSON.stringify({
 									summary: "One finding.",
 									findings: [candidate],
@@ -457,7 +457,7 @@ describe("ReviewManager", () => {
 		let callCount = 0;
 		mockRun.mockImplementation(async (...args: unknown[]) => {
 			callCount++;
-			const lens = args[4] as string;
+			const lens = args[5] as string;
 			if (callCount === 1) throw new Error("simulated subagent crash");
 			return {
 				lens,
@@ -535,8 +535,8 @@ describe("ReviewManager", () => {
 		const { runLensSubagent } = await import("./subagent-runner.js");
 		const mockRun = vi.mocked(runLensSubagent);
 		mockRun.mockImplementation(async (...args: unknown[]) => {
-			const model = args[1] as { name: string };
-			const lens = args[4] as string;
+			const model = args[2] as { name: string };
+			const lens = args[5] as string;
 			if (lens === "security" && model.name === "mock-model") {
 				return {
 					lens,
@@ -591,6 +591,7 @@ describe("ReviewManager", () => {
 			"info",
 		);
 		expect(mockRun).toHaveBeenCalledWith(
+			ctx,
 			"/home/test",
 			expect.objectContaining({ id: "fallback" }),
 			expect.any(String),
@@ -616,7 +617,7 @@ describe("ReviewManager", () => {
 		const { runLensSubagent } = await import("./subagent-runner.js");
 		vi.mocked(runLensSubagent).mockImplementation(
 			async (...args: unknown[]) => {
-				const lens = args[4] as string;
+				const lens = args[5] as string;
 				if (lens === "synthesis") {
 					throw new Error("simulated synthesis crash");
 				}

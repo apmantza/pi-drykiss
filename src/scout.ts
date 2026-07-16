@@ -148,6 +148,7 @@ export async function runScout(
 		const model = await resolveModelSmart(ctx, options.modelHint, "scout");
 		if (!model) throw new Error("No model available for scout.");
 		const response = await runLensSubagent(
+			ctx,
 			cwd,
 			model,
 			systemPrompt,
