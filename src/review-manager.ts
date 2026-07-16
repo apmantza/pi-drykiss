@@ -281,6 +281,14 @@ export class ReviewManager {
 			startedAt: Date.now(),
 		};
 		this.jobs.set(id, job);
+		// Publish the job immediately. Background reviews return before the
+		// first lens update, so the persistent progress widget needs this
+		// initial lifecycle event to discover the newly-created job.
+		try {
+			this.onUpdate?.(job);
+		} catch {
+			/* UI updates must not prevent the review from starting. */
+		}
 		logAutoreviewEvent("review.job_created", {
 			jobId: id,
 			files: job.files.length,

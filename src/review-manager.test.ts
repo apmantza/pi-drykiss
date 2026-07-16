@@ -135,6 +135,33 @@ describe("ReviewManager", () => {
 		expect(job!.lenses).toEqual(["simplicity"]);
 	});
 
+	it("publishes a newly-created job before background work starts", async () => {
+		const onUpdate = vi.fn();
+		const managerWithUpdates = new ReviewManager(onUpdate);
+		const ctx = makeMinimalCtx();
+		const pi = makeMinimalPi();
+		const jobId = await managerWithUpdates.startReview(
+			ctx,
+			pi,
+			"/home/test",
+			[
+				{
+					path: "test.ts",
+					status: "modified" as const,
+					language: "TypeScript",
+				},
+			],
+			new Map([["test.ts", "diff content"]]),
+			undefined,
+			undefined,
+			{ lenses: ["simplicity"] },
+		);
+
+		expect(onUpdate).toHaveBeenCalledWith(
+			expect.objectContaining({ id: jobId, overallStatus: "running" }),
+		);
+	});
+
 	it("lists jobs sorted by start time", async () => {
 		const ctx = makeMinimalCtx();
 		const pi = makeMinimalPi();
