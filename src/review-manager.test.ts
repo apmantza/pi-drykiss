@@ -162,6 +162,34 @@ describe("ReviewManager", () => {
 		);
 	});
 
+	it("continues when the initial update callback throws", async () => {
+		const error = new Error("widget unavailable");
+		const onUpdate = vi.fn(() => {
+			if (onUpdate.mock.calls.length === 1) throw error;
+		});
+		const managerWithUpdates = new ReviewManager(onUpdate);
+		const jobId = await managerWithUpdates.startReview(
+			makeMinimalCtx(),
+			makeMinimalPi(),
+			"/home/test",
+			[
+				{
+					path: "test.ts",
+					status: "modified" as const,
+					language: "TypeScript",
+				},
+			],
+			new Map([["test.ts", "diff content"]]),
+			undefined,
+			undefined,
+			{ lenses: [] },
+		);
+
+		expect(managerWithUpdates["jobs"].get(jobId)).toEqual(
+			expect.objectContaining({ id: jobId, overallStatus: "running" }),
+		);
+	});
+
 	it("lists jobs sorted by start time", async () => {
 		const ctx = makeMinimalCtx();
 		const pi = makeMinimalPi();

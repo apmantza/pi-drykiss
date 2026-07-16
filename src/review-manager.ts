@@ -286,7 +286,10 @@ export class ReviewManager {
 		// initial lifecycle event to discover the newly-created job.
 		try {
 			this.onUpdate?.(job);
-		} catch {
+		} catch (err) {
+			logAutoreviewError("review.job_created_update_error", err, {
+				jobId: id,
+			});
 			/* UI updates must not prevent the review from starting. */
 		}
 		logAutoreviewEvent("review.job_created", {
