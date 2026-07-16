@@ -71,7 +71,6 @@ export async function resolveAllModels(
  * Pattern adapted from: https://github.com/tintinweb/pi-subagents
  */
 export async function runLensSubagent(
-	ctx: ExtensionContext,
 	cwd: string,
 	model: Model<Api>,
 	systemPrompt: string,
@@ -103,15 +102,16 @@ export async function runLensSubagent(
 		});
 		await resourceLoader.reload();
 
-		// Create session with SettingsManager and modelRegistry for full Pi integration
-		// (matches pi-subagents pattern for visible sessions)
+		// Create session with SettingsManager for full Pi integration.
+		// Since 0.80.8, createAgentSession builds its own ModelRuntime from
+		// agentDir (auth.json + models.json); the host's modelRegistry is no
+		// longer passable as a session option.
 		const { session: created } = await createAgentSession({
 			cwd,
 			agentDir,
 			model,
 			sessionManager: SessionManager.inMemory(cwd),
 			settingsManager: SettingsManager.create(cwd, agentDir),
-			modelRegistry: ctx.modelRegistry,
 			resourceLoader,
 			noTools: "all",
 		});

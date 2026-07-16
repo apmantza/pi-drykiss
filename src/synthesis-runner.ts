@@ -118,7 +118,6 @@ export async function runSynthesis(
 			model: model.name,
 		});
 		const result = await runLensSubagent(
-			ctx,
 			cwd,
 			model,
 			systemPrompt,
@@ -148,7 +147,6 @@ export async function runSynthesis(
 				"synthesis",
 				(modelForRetry) =>
 					runLensSubagent(
-						ctx,
 						cwd,
 						modelForRetry,
 						systemPrompt,

@@ -221,7 +221,6 @@ export async function runValidator(
 		let response: Awaited<ReturnType<typeof runLensSubagent>> | undefined;
 		for (let attempt = 1; attempt <= 2; attempt += 1) {
 			response = await runLensSubagent(
-				ctx,
 				ctx.cwd,
 				model,
 				systemPrompt,
