@@ -277,6 +277,17 @@ export class ReviewProgressWidget {
 	private widgetRegistered = false;
 	private tui: any;
 	private jobs: ReviewJob[] = [];
+	private readonly pendingBackgrounds = new Map<string, number>();
+
+	beginBackgroundReview(id: string): void {
+		this.pendingBackgrounds.set(id, Date.now());
+		this.update();
+	}
+
+	endBackgroundReview(id: string): void {
+		this.pendingBackgrounds.delete(id);
+		this.update();
+	}
 
 	attach(uiCtx: any) {
 		if (!uiCtx?.setWidget) return;
@@ -292,20 +303,27 @@ export class ReviewProgressWidget {
 	private renderWidget(): string[] {
 		// Render active progress here rather than relying on Pi's transient
 		// working-message row, which may disappear when the tool call returns.
-		return this.jobs
+		const liveLines = this.jobs
 			.filter(
 				(job) =>
 					job.overallStatus === "running" || job.overallStatus === "queued",
 			)
 			.map(formatReviewWorkingMessage);
+		if (liveLines.length > 0) return liveLines;
+		return [...this.pendingBackgrounds.entries()].map(([, startedAt]) => {
+			const elapsed = formatElapsed(Date.now() - startedAt);
+			return `Review starting · [${"░".repeat(10)}] 0/— complete · ${elapsed}`;
+		});
 	}
 
 	private update() {
 		if (!this.uiCtx?.setWidget) return;
 
-		const hasLive = this.jobs.some(
-			(j) => j.overallStatus === "running" || j.overallStatus === "queued",
-		);
+		const hasLive =
+			this.pendingBackgrounds.size > 0 ||
+			this.jobs.some(
+				(j) => j.overallStatus === "running" || j.overallStatus === "queued",
+			);
 		if (!hasLive) {
 			this.dispose();
 			return;

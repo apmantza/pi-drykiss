@@ -27,6 +27,7 @@ export function startBackgroundReview(
 	task: BackgroundReviewTask,
 	onComplete?: (result: ReviewResult) => void,
 	onError?: (error: unknown) => void,
+	onSettled?: () => void,
 ): BackgroundReviewRecord {
 	pruneBackgroundReviews();
 	const record: BackgroundReviewRecord = {
@@ -75,6 +76,13 @@ export function startBackgroundReview(
 		})
 		.finally(() => {
 			controllers.delete(id);
+			try {
+				onSettled?.();
+			} catch (error) {
+				logAutoreviewError("background.on_settled_callback_error", error, {
+					jobId: id,
+				});
+			}
 		});
 
 	return record;

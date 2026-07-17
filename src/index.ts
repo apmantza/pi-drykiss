@@ -189,6 +189,10 @@ export default function (pi: ExtensionAPI): void {
 				manager,
 				signal,
 				onUpdate,
+				{
+					onStart: (id) => widget.beginBackgroundReview(id),
+					onSettled: (id) => widget.endBackgroundReview(id),
+				},
 			);
 		},
 

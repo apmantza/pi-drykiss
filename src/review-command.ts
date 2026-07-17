@@ -326,6 +326,10 @@ export async function executeDrykissAutoreviewTool(
 		content: Array<{ type: "text"; text: string }>;
 		details?: unknown;
 	}) => void,
+	backgroundLifecycle?: {
+		onStart?: (id: string) => void;
+		onSettled?: (id: string) => void;
+	},
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
 	details: {
@@ -340,6 +344,7 @@ export async function executeDrykissAutoreviewTool(
 	if (backgroundRequested) {
 		const backgroundId = randomUUID().slice(0, 12);
 		const backgroundParams = { ...params, background: false };
+		backgroundLifecycle?.onStart?.(backgroundId);
 		const record = startBackgroundReview(
 			backgroundId,
 			(signal) =>
@@ -376,6 +381,7 @@ export async function executeDrykissAutoreviewTool(
 					// UI notification failures must not affect the background job.
 				}
 			},
+			() => backgroundLifecycle?.onSettled?.(backgroundId),
 		);
 		return {
 			content: [
