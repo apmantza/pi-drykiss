@@ -140,12 +140,25 @@ describe("loadPromptBody", () => {
 		expect(result).toBe("bundled shared content");
 	});
 
-	it("uses env var short-circuit when set", async () => {
+	it("uses env var prompt when available", async () => {
 		process.env.DRYKISS_PROMPTS_DIR = "/env/prompts";
 		vi.mocked(readFile).mockResolvedValue("env prompt content");
 		const { loadPromptBody } = await import("./prompt-loader.js");
 		const result = await loadPromptBody("env-lens", "lens");
 		expect(result).toBe("env prompt content");
+		delete process.env.DRYKISS_PROMPTS_DIR;
+	});
+
+	it("falls back to bundled prompts when the env directory is missing", async () => {
+		process.env.DRYKISS_PROMPTS_DIR = "/env/prompts";
+		vi.mocked(readFile)
+			.mockRejectedValueOnce(
+				Object.assign(new Error("not found"), { code: "ENOENT" as const }),
+			)
+			.mockResolvedValueOnce("bundled prompt content");
+		const { loadPromptBody } = await import("./prompt-loader.js");
+		const result = await loadPromptBody("env-lens", "lens");
+		expect(result).toBe("bundled prompt content");
 		delete process.env.DRYKISS_PROMPTS_DIR;
 	});
 });

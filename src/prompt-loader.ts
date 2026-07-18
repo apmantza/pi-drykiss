@@ -124,7 +124,7 @@ export async function loadPromptBody(
 	const env = process.env.DRYKISS_PROMPTS_DIR;
 	const dirs =
 		env && env.trim().length > 0
-			? [env]
+			? [env, bundledPromptsDir()]
 			: [userPromptsDir(), bundledPromptsDir()];
 
 	let lastErr: unknown;

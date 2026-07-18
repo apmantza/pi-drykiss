@@ -55,7 +55,7 @@ function safeOnUpdate(
 
 // ── Tool parameter schema ─────────────────────────────────
 
-/** Shared TypeBox union of the seven DRYKISS lens names (no "all"). */
+/** Shared TypeBox union of the eight DRYKISS lens names (no "all"). */
 const LensNameParam = Type.Union(
 	[
 		Type.Literal("simplicity"),
@@ -412,8 +412,10 @@ export async function executeDrykissAutoreviewTool(
 	try {
 		await ensureDefaultPrompts(ctx.cwd);
 	} catch (err) {
+		// Prompt loading has its own bundled fallback. A user-directory seed
+		// failure (for example, a read-only home directory) must not prevent a
+		// review from running with the shipped prompts.
 		logAutoreviewError("autoreview.prompt_seed_error", err, { cwd: ctx.cwd });
-		throw err;
 	}
 	const { config: effectiveConfig, warnings } = await loadEffectiveConfig(
 		ctx.cwd,

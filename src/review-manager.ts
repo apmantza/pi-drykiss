@@ -349,6 +349,10 @@ export class ReviewManager {
 	private async drain(ctx: ExtensionContext, pi: ExtensionAPI, cwd: string) {
 		while (this.taskQueue.length > 0 && this.runningCount < CONCURRENCY) {
 			const task = this.taskQueue.shift()!;
+			const job = this.jobs.get(task.jobId);
+			// Cancellation removes queued work, but guard the dequeue boundary too
+			// so a concurrent drain cannot start a task after abort() wins the race.
+			if (task.signal.aborted || job?.overallStatus !== "running") continue;
 			this.runningCount++;
 			this.runLens(ctx, pi, cwd, task)
 				.catch((err) => {
