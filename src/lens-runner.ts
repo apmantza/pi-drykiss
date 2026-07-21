@@ -21,6 +21,11 @@ import {
 	logAutoreviewError,
 	tokenUsageDetails,
 } from "./logger.js";
+import {
+	computeCacheKey,
+	getCachedResult,
+	setCachedResult,
+} from "./review-cache.js";
 
 interface LensRunnerOptions {
 	readonly getJob: (jobId: string) => ReviewJobState | undefined;
@@ -36,6 +41,8 @@ interface LensRunnerOptions {
 		pi: ExtensionAPI,
 		cwd: string,
 	) => void;
+	/** When false, skip the cache check and always run the LLM. Defaults to true. */
+	readonly cache?: boolean;
 }
 
 function applySuccessfulOutput(
@@ -117,6 +124,52 @@ export async function runLens(
 	});
 	notify(options.onUpdate, job);
 
+	// ── Cache check ───────────────────────────────────────────────────────
+	const cacheEnabled = options.cache !== false;
+	if (cacheEnabled) {
+		const cacheKey = computeCacheKey(
+			task.userPrompt,
+			task.systemPrompt,
+			task.model.id,
+		);
+		const cached = await getCachedResult(cacheKey);
+		if (cached) {
+			console.log(
+				`${LOG_PREFIX} Cache hit for ${task.lens} lens — skipping LLM call`,
+			);
+			state.status = "done";
+			state.rawOutput = JSON.stringify(cached, null, 2);
+			state.findingsCount = cached.length;
+			state.durationMs = 0;
+			logAutoreviewEvent("lens.complete", {
+				jobId: task.jobId,
+				lens: task.lens,
+				status: state.status,
+				findings: state.findingsCount,
+				durationMs: state.durationMs,
+				cacheHit: true,
+			});
+			notify(options.onUpdate, job);
+			const allDone = job.lenses.every((lens) => {
+				const lensState = job.states.get(lens);
+				return lensState?.status === "done" || lensState?.status === "error";
+			});
+			if (allDone) {
+				logAutoreviewEvent("lenses.complete", {
+					jobId: task.jobId,
+					lenses: job.lenses,
+					errors: job.lenses.filter(
+						(lens) => job.states.get(lens)?.status === "error",
+					).length,
+				});
+				await options.onAllLensesDone(ctx, cwd, job);
+			}
+			options.drain(ctx, pi, cwd);
+			return;
+		}
+	}
+	// ── End cache check ───────────────────────────────────────────────────
+
 	const streamUpdate = () => {
 		state.streamingText = "streaming...";
 		task.onStreamUpdate();
@@ -190,6 +243,20 @@ export async function runLens(
 				setLensError(state, retryResult.errorMessage);
 			} else {
 				applySuccessfulOutput(state, retryResult.text, task.lens);
+				if (cacheEnabled && !state.errorMessage) {
+					const cacheKey = computeCacheKey(
+						task.userPrompt,
+						task.systemPrompt,
+						retryResult.modelName,
+					);
+					const findings = safeParseFindings(state.rawOutput);
+					if (findings) {
+						setCachedResult(cacheKey, findings, {
+							lens: task.lens,
+							model: retryResult.modelName,
+						}).catch(() => {});
+					}
+				}
 			}
 		} else {
 			// retryOnModelError returned null: user cancelled model selection.
@@ -206,6 +273,20 @@ export async function runLens(
 		setLensError(state, result.errorMessage);
 	} else {
 		applySuccessfulOutput(state, result.text, task.lens);
+		if (cacheEnabled && !state.errorMessage) {
+			const cacheKey = computeCacheKey(
+				task.userPrompt,
+				task.systemPrompt,
+				task.model.id,
+			);
+			const findings = safeParseFindings(state.rawOutput);
+			if (findings) {
+				setCachedResult(cacheKey, findings, {
+					lens: task.lens,
+					model: task.model.id,
+				}).catch(() => {});
+			}
+		}
 	}
 
 	logAutoreviewEvent("lens.complete", {
@@ -238,4 +319,15 @@ function setLensError(state: LensState, message: string): void {
 	state.status = "error";
 	state.errorMessage = message;
 	state.rawOutput = `ERROR: ${message}`;
+}
+
+/** Parse findings from a rawOutput string for caching. Returns null on failure. */
+function safeParseFindings(rawOutput: string): import("./types.js").Finding[] | null {
+	try {
+		const parsed = JSON.parse(rawOutput) as unknown;
+		if (Array.isArray(parsed)) return parsed as import("./types.js").Finding[];
+		return null;
+	} catch {
+		return null;
+	}
 }

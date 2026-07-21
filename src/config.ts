@@ -54,6 +54,10 @@ export interface DrykissCommands {
 	readonly test?: string;
 	/** Lint command used by the tests/clarity lens to check style. */
 	readonly lint?: string;
+	/** Format check command referenced by the clarity lens (e.g. "prettier --check ."). Not executed — included in prompt context only. */
+	readonly format?: string;
+	/** Typecheck command referenced by the architecture/resilience lenses (e.g. "tsc --noEmit"). Not executed — included in prompt context only. */
+	readonly typecheck?: string;
 }
 
 /** Severity override rule: when a finding's riskCode matches, override its severity. */
@@ -289,6 +293,27 @@ export interface DrykissConfig {
 	 * Default: false (opt-in).
 	 */
 	triage?: boolean;
+	/**
+	 * Maximum total tokens allowed in a single lens prompt (system + user
+	 * combined). Uses a char/4 approximation. When the assembled prompt
+	 * would exceed this limit, low-priority files (no diff, large) are
+	 * dropped until the prompt fits. A warning is logged for each dropped
+	 * file batch.
+	 *
+	 * Default: undefined (no limit — current behavior).
+	 */
+	maxContextTokens?: number;
+	/**
+	 * Enable disk-based caching of lens results. When true (default), a
+	 * SHA-256 cache keyed on file content + lens system prompt + model ID
+	 * is consulted before each LLM call. Cache entries are stored under
+	 * ~/.pi/drykiss/cache/ and expire after 7 days.
+	 * Use `--no-cache` at the CLI (or set this to false) to force a fresh
+	 * review every time.
+	 *
+	 * Default: true.
+	 */
+	cache?: boolean;
 }
 
 function getConfigPath(): string {
@@ -449,7 +474,10 @@ export async function loadEffectiveConfig(
 		? Object.fromEntries(
 				Object.entries(config.commands)
 					.filter(([, v]) => isNonEmptyString(v))
-					.filter(([k]) => k === "test" || k === "lint"),
+					.filter(
+						([k]) =>
+							k === "test" || k === "lint" || k === "format" || k === "typecheck",
+					),
 			)
 		: undefined;
 	const cleanedReview = cleanReviewPolicy(config.review);

@@ -409,6 +409,13 @@ export async function executeDrykissAutoreviewTool(
 		 * review to `git diff <since>..HEAD`.
 		 */
 		since?: string;
+		/**
+		 * When true, bypass the lens result cache and force a fresh LLM
+		 * call for every lens. Equivalent to `--no-cache` at the CLI.
+		 * Overrides `config.cache` when set explicitly. Default: false
+		 * (cache is used if enabled in config).
+		 */
+		noCache?: boolean;
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -742,6 +749,8 @@ export async function executeDrykissAutoreviewTool(
 			: undefined,
 		preSeedLensOutputs: preSeedLensOutputs.size > 0 ? preSeedLensOutputs : undefined,
 		fixMode: params.fix === true,
+		// When noCache is explicitly set, override config.cache.
+		cache: params.noCache === true ? false : undefined,
 	});
 	const formatMode = params.format ?? "compact";
 	const jobs =

@@ -156,6 +156,10 @@ export interface ReviewHistoryEntry {
 	};
 	readonly totalFindings: number;
 	readonly verdict: string;
+	/** Per-file finding counts for this run. Keys are normalized file paths. */
+	readonly fileCounts?: Record<string, number>;
+	/** Per-risk-code finding counts for this run. Keys are riskCode strings. */
+	readonly riskCodeCounts?: Record<string, number>;
 }
 
 function getGlobalHistoryPath(): string {
@@ -217,6 +221,90 @@ export async function appendHistory(entry: ReviewHistoryEntry): Promise<void> {
 		const msg = err instanceof Error ? err.message : String(err);
 		console.warn(`${LOG_PREFIX} Failed to append health score history: ${msg}`);
 	}
+}
+
+/* ── Trend query helpers ────────────────────────────────────────────── */
+
+/**
+ * Return the per-file finding counts across all history entries that include
+ * `fileCounts` for the given file path.
+ *
+ * Each element describes one history entry and the delta relative to the
+ * previous entry in the same mode (or the entry immediately before it in
+ * chronological order when mode filtering is not applied by the caller).
+ *
+ * Only entries that contain `fileCounts` with a value for `file` are included.
+ * Entries without `fileCounts` (i.e. written before this feature shipped) are
+ * skipped so callers always see well-defined numeric data.
+ */
+export function getFileTrends(
+	history: ReviewHistoryEntry[],
+	file: string,
+): { date: string; mode: string; current: number; previous: number; delta: number }[] {
+	const relevant = history.filter(
+		(e) => e.fileCounts !== undefined && file in e.fileCounts,
+	);
+	return relevant.map((entry, idx) => {
+		const current = entry.fileCounts![file] ?? 0;
+		const previous = idx > 0 ? (relevant[idx - 1].fileCounts![file] ?? 0) : current;
+		return { date: entry.date, mode: entry.mode, current, previous, delta: current - previous };
+	});
+}
+
+/**
+ * Return the per-risk-code finding counts across all history entries that
+ * include `riskCodeCounts` for the given risk code.
+ *
+ * Semantics mirror `getFileTrends`: only entries with `riskCodeCounts`
+ * containing `code` are included; delta is relative to the previous such
+ * entry.
+ */
+export function getRiskCodeTrends(
+	history: ReviewHistoryEntry[],
+	code: string,
+): { date: string; mode: string; current: number; previous: number; delta: number }[] {
+	const relevant = history.filter(
+		(e) => e.riskCodeCounts !== undefined && code in e.riskCodeCounts,
+	);
+	return relevant.map((entry, idx) => {
+		const current = entry.riskCodeCounts![code] ?? 0;
+		const previous = idx > 0 ? (relevant[idx - 1].riskCodeCounts![code] ?? 0) : current;
+		return { date: entry.date, mode: entry.mode, current, previous, delta: current - previous };
+	});
+}
+
+/**
+ * Return the files whose finding counts have increased the most between the
+ * last two history entries that contain `fileCounts` data.
+ *
+ * Only entries with `fileCounts` are considered; if fewer than two such entries
+ * exist the function returns an empty array.
+ *
+ * @param history - The full history array (chronological order, newest last).
+ * @param limit   - Maximum number of results to return. Defaults to 5.
+ * @returns Files sorted by `delta` descending (most worsened first). Files
+ *          with a zero or negative delta are excluded.
+ */
+export function getWorseningFiles(
+	history: ReviewHistoryEntry[],
+	limit = 5,
+): { file: string; delta: number }[] {
+	const withCounts = history.filter((e) => e.fileCounts !== undefined);
+	if (withCounts.length < 2) return [];
+
+	const latest = withCounts[withCounts.length - 1].fileCounts!;
+	const prev = withCounts[withCounts.length - 2].fileCounts!;
+
+	// Union of all file keys present in either entry
+	const allFiles = new Set([...Object.keys(latest), ...Object.keys(prev)]);
+
+	const results: { file: string; delta: number }[] = [];
+	for (const file of allFiles) {
+		const delta = (latest[file] ?? 0) - (prev[file] ?? 0);
+		if (delta > 0) results.push({ file, delta });
+	}
+
+	return results.sort((a, b) => b.delta - a.delta).slice(0, limit);
 }
 
 export function formatReviewForDisplay(review: PersistedReview): string {

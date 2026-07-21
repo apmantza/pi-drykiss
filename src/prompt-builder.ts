@@ -27,6 +27,7 @@ import {
 	selectPathInstructions,
 } from "./review-policy.js";
 import type { ReviewPathInstruction } from "./config.js";
+import { applyTokenBudget } from "./token-budget.js";
 
 // Keep this indirection so vi.mock can intercept the loader in tests.
 const _userPromptsDir = (): string => userPromptsDir();
@@ -131,12 +132,25 @@ function buildProjectIndexContext(index: ProjectIndexEntry[]): string {
 }
 
 function buildCommandsContext(
-	commands: { test?: string; lint?: string } | undefined,
+	commands:
+		| { test?: string; lint?: string; format?: string; typecheck?: string }
+		| undefined,
 ): string {
-	if (!commands || (!commands.test && !commands.lint)) return "";
+	if (
+		!commands ||
+		(!commands.test &&
+			!commands.lint &&
+			!commands.format &&
+			!commands.typecheck)
+	)
+		return "";
 	const lines = ["\n### Configured Commands\n"];
 	if (commands.test) lines.push(`- Test command: \`${commands.test}\``);
 	if (commands.lint) lines.push(`- Lint command: \`${commands.lint}\``);
+	if (commands.format)
+		lines.push(`- Format check command: \`${commands.format}\``);
+	if (commands.typecheck)
+		lines.push(`- Typecheck command: \`${commands.typecheck}\``);
 	lines.push(
 		"Use these commands when validating findings, but only run safe read-only checks.",
 	);
@@ -178,7 +192,7 @@ export async function buildReviewPrompts(
 		>;
 		projectIndex?: ProjectIndexEntry[];
 		activeConstraints?: string;
-		commands?: { test?: string; lint?: string };
+		commands?: { test?: string; lint?: string; format?: string; typecheck?: string };
 		guidelines?: string | null;
 		pathInstructions?: readonly ReviewPathInstruction[];
 		/**
@@ -196,9 +210,57 @@ export async function buildReviewPrompts(
 		 * field in every finding it emits.
 		 */
 		fixMode?: boolean;
+		/**
+		 * Maximum total tokens (system + user) per lens prompt. Uses a char/4
+		 * approximation. When set, low-priority files are dropped to fit within
+		 * the budget. See `src/token-budget.ts`.
+		 */
+		maxContextTokens?: number;
 	},
 ): Promise<ReviewPrompt[]> {
-	const context = buildFileContext(files, diffs, options?.contents);
+	// Apply token budget enforcement before building the file context.
+	// We compute the system prompt for the first lens (or a representative one)
+	// once to estimate overhead, then drop files as needed.
+	let effectiveFiles = files;
+	let effectiveContents = options?.contents;
+	if (options?.maxContextTokens !== undefined) {
+		// Build a representative system prompt to measure overhead.
+		const representativeLens: AnyLens =
+			lens === "all" ? LENS_NAMES[0] : (lens as AnyLens);
+		const representativeSystemPrompt = await composeLensPrompt(
+			representativeLens,
+			{
+				activeConstraints: options.activeConstraints,
+				fixMode: options.fixMode,
+			},
+		);
+		// Fixed overhead: system prompt + the constant instruction prefix.
+		const overhead =
+			representativeSystemPrompt + EXAMINE_CONTEXT_INSTRUCTION;
+		const entries = files.map((file) => ({
+			file,
+			diff: diffs.get(file.path) ?? "",
+			content: options?.contents?.get(file.path),
+		}));
+		const surviving = applyTokenBudget(
+			entries,
+			overhead,
+			options.maxContextTokens,
+		);
+		effectiveFiles = surviving.map((e) => e.file);
+		// Rebuild a filtered contents map for the surviving files if needed.
+		if (
+			options.contents !== undefined &&
+			effectiveFiles.length !== files.length
+		) {
+			const survivingPaths = new Set(effectiveFiles.map((f) => f.path));
+			effectiveContents = new Map(
+				[...options.contents].filter(([p]) => survivingPaths.has(p)),
+			);
+		}
+	}
+
+	const context = buildFileContext(effectiveFiles, diffs, effectiveContents);
 	const indexBlock = options?.projectIndex
 		? buildProjectIndexContext(options.projectIndex)
 		: "";
@@ -231,7 +293,7 @@ export async function buildReviewPrompts(
 		if (commandsBlock) prompt += `\n${commandsBlock}`;
 		if (includeIndex && indexBlock) prompt += `\n${indexBlock}`;
 		const pathInstructions = selectPathInstructions(
-			files,
+			effectiveFiles,
 			currentLens,
 			options?.pathInstructions,
 		);

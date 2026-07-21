@@ -4,6 +4,6 @@
     "rootDir": ".",
     "declaration": false
   },
-  "include": ["scripts/review-bench.ts", "src/review-bench.ts"],
+  "include": ["scripts/review-bench.ts", "scripts/ci-review.ts", "src/review-bench.ts"],
   "exclude": ["node_modules", "dist"]
 }

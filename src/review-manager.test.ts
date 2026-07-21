@@ -3,6 +3,13 @@ import { LENS_NAMES } from "./types.js";
 
 // We test the ReviewManager by importing and using its public API.
 // The subagent runner is dynamically imported inside runLens, so we mock it.
+// Disable the review cache so tests always exercise the subagent runner mock.
+vi.mock("./review-cache.js", () => ({
+	computeCacheKey: vi.fn().mockReturnValue("mock-cache-key"),
+	getCachedResult: vi.fn().mockResolvedValue(undefined),
+	setCachedResult: vi.fn().mockResolvedValue(undefined),
+	clearCache: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("./subagent-runner.js", () => ({
 	runLensSubagent: vi.fn().mockResolvedValue({
 		text: '[{"file":"test.ts","severity":"low","category":"test","summary":"test finding"}]',

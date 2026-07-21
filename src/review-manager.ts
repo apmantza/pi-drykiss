@@ -5,7 +5,7 @@ import type {
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { ReviewLens, AnyLens, ChangedFile } from "./types.js";
+import type { ReviewLens, AnyLens, ChangedFile, Finding } from "./types.js";
 import { LENS_NAMES, createFallbackSynthesis } from "./types.js";
 import { buildReviewPrompts } from "./prompt-builder.js";
 import { appendHistory, loadHistory } from "./persist.js";
@@ -105,6 +105,8 @@ export class ReviewManager {
 	private readonly onUpdate?: OnReviewUpdate;
 	private readonly onComplete?: OnReviewComplete;
 	private concurrency: number;
+	/** Whether to use the disk-based lens result cache. Default: true. */
+	private cacheEnabled = true;
 
 	/** Queue of lens review tasks waiting for a slot. */
 	private taskQueue: {
@@ -204,7 +206,7 @@ export class ReviewManager {
 			model?: string;
 			lenses?: AnyLens[];
 			activeConstraints?: string;
-			commands?: { test?: string; lint?: string };
+			commands?: { test?: string; lint?: string; format?: string; typecheck?: string };
 			pathInstructions?: readonly import("./config.js").ReviewPathInstruction[];
 			/** Review mode (e.g. "pr", "full") — drives the posture context block. */
 			mode?: string;
@@ -224,8 +226,15 @@ export class ReviewManager {
 			 * finding.
 			 */
 			fixMode?: boolean;
+			/**
+			 * When false, bypass the lens result cache and always run LLM calls.
+			 * Defaults to true (caching enabled).
+			 */
+			cache?: boolean;
 		},
 	): Promise<string> {
+		// Update instance-level cache flag so runLens picks it up.
+		this.cacheEnabled = options.cache !== false;
 		const id = randomUUID().slice(0, 12);
 		const lenses: AnyLens[] = options.lenses ?? [...LENS_NAMES];
 		logAutoreviewEvent("review.job_start", {
@@ -511,6 +520,7 @@ export class ReviewManager {
 					this.logDrainFailure(err, runCtx, runPi, runCwd),
 				);
 			},
+			cache: this.cacheEnabled,
 		});
 	}
 
@@ -607,7 +617,7 @@ export class ReviewManager {
 				pattern: string;
 				id: string;
 			}>;
-			commands?: { test?: string; lint?: string };
+			commands?: { test?: string; lint?: string; format?: string; typecheck?: string };
 			pathInstructions?: readonly import("./config.js").ReviewPathInstruction[];
 			/**
 			 * Active risk-targeting constraints rendered into the lens
@@ -637,6 +647,11 @@ export class ReviewManager {
 			 * system prompt. Passed straight through to `startReview`.
 			 */
 			fixMode?: boolean;
+			/**
+			 * When false, bypass the lens result cache and always run LLM calls.
+			 * Passed straight through to `startReview`. Defaults to true.
+			 */
+			cache?: boolean;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -664,6 +679,7 @@ export class ReviewManager {
 				scopeLabel: options.target?.label,
 				preSeedLensOutputs: options.preSeedLensOutputs,
 				fixMode: options.fixMode,
+				cache: options.cache,
 			},
 		);
 		const started = this.jobs.get(jobId);
@@ -761,6 +777,21 @@ export class ReviewManager {
 			verdict: result.verdict,
 			validatorError: result.validatorError,
 		});
+		// Build per-file and per-risk-code counts from the active findings
+		// (excludes suppressed / previously-rejected / discarded findings so
+		// the breakdown reflects the same population as the health score).
+		const activeFindingsForHistory = result.findings.filter(
+			(f) => !(f as Finding & { _suppressed?: true })._suppressed &&
+				!(f as Finding & { _previouslyRejected?: true })._previouslyRejected,
+		);
+		const fileCounts: Record<string, number> = {};
+		const riskCodeCounts: Record<string, number> = {};
+		for (const f of activeFindingsForHistory) {
+			fileCounts[f.file] = (fileCounts[f.file] ?? 0) + 1;
+			if (f.riskCode) {
+				riskCodeCounts[f.riskCode] = (riskCodeCounts[f.riskCode] ?? 0) + 1;
+			}
+		}
 		appendHistory({
 			date: new Date().toISOString(),
 			mode: options.target?.label ?? "unknown",
@@ -768,6 +799,8 @@ export class ReviewManager {
 			breakdown: result.scoreBreakdown,
 			totalFindings: result.counts.total,
 			verdict: result.verdict,
+			fileCounts,
+			riskCodeCounts,
 		}).catch(() => {});
 		return result;
 	}

@@ -29,6 +29,8 @@
     "index.ts",
     "src",
     "scripts/review-bench.ts",
+    "scripts/ci-review.ts",
+    ".github/workflows/drykiss-review.yml",
     "fixtures/review-bench",
     "!src/**/*.test.ts",
     "!src/calibration-fixtures.ts",

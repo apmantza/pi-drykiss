@@ -34,6 +34,11 @@ interface FlatReviewExecution {
 	 * finding with a ready-to-apply code replacement snippet.
 	 */
 	readonly fixMode?: boolean;
+	/**
+	 * When false, bypass the lens result cache and always run LLM calls.
+	 * Defaults to true (use config.cache value, which defaults to true).
+	 */
+	readonly cache?: boolean;
 }
 
 /** Run the standard flat review and record its final result. */
@@ -55,6 +60,7 @@ export async function executeFlatReview(
 		onProgress,
 		preSeedLensOutputs,
 		fixMode,
+		cache,
 	} = execution;
 	const result = await manager.runReview(
 		ctx,
@@ -86,6 +92,8 @@ export async function executeFlatReview(
 			onProgress,
 			preSeedLensOutputs,
 			fixMode,
+			// cache defaults to config.cache (which defaults to true)
+			cache: cache ?? config.cache,
 		},
 		signal,
 	);
