@@ -228,6 +228,8 @@ export async function runValidator(
 				userPrompt,
 				options?.lens ?? "validator",
 				options?.signal,
+				undefined,
+				options?.correlationId,
 			);
 			try {
 				logAutoreviewEvent("validator.model_complete", {
@@ -240,8 +242,21 @@ export async function runValidator(
 					attempt,
 				});
 				if (response.errorMessage) throw new Error(response.errorMessage);
-				if (response.text.trim()) break;
+				if (response.text.trim()) {
+					if (attempt > 1) {
+						console.warn(
+							"%s Validator attempt %d succeeded after empty response on attempt 1.",
+							LOG_PREFIX,
+							attempt,
+						);
+					}
+					break;
+				}
 				if (attempt < 2) {
+					console.warn(
+						"%s Validator attempt 1 returned empty text; retrying (attempt 2).",
+						LOG_PREFIX,
+					);
 					logAutoreviewEvent("validator.retry_start", {
 						...correlation,
 						findings: findings.length,
@@ -257,6 +272,10 @@ export async function runValidator(
 			}
 		}
 		if (!response?.text.trim()) {
+			console.warn(
+				"%s Validator returned empty text on both attempts; giving up.",
+				LOG_PREFIX,
+			);
 			throw new Error("validator returned an empty response");
 		}
 		text = response.text;

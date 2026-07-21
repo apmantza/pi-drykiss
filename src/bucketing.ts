@@ -109,8 +109,14 @@ export function bucketFindings(findings: readonly Finding[]): FindingBucket[] {
 	if (findings.length === 0) return [];
 	const buckets: InternalBucket[] = [];
 
+	// Pre-tokenize all finding summaries once so the inner sameBug loop
+	// does not re-tokenize a finding's summary on every bucket comparison.
+	const findingTokens = new Map<Finding, Set<string>>(
+		findings.map((f) => [f, tokenize(f.summary)]),
+	);
+
 	for (const finding of findings) {
-		const tokens = tokenize(finding.summary);
+		const tokens = findingTokens.get(finding)!;
 		const match = buckets.find((b) =>
 			sameBug({ file: finding.file, line: finding.line, tokens }, b),
 		);

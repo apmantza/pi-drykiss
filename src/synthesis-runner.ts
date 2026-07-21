@@ -29,6 +29,7 @@ import {
 interface SynthesisRunnerOptions {
 	readonly retryOnModelError: RetryLensOnModelError;
 	readonly onComplete: (job: ReviewJobState) => void;
+	readonly onUpdate?: (job: ReviewJobState) => void;
 }
 
 function lensReviewsFor(
@@ -43,9 +44,10 @@ function lensReviewsFor(
 async function buildPrompt(
 	cwd: string,
 	lensReviews: Array<{ lens: string; rawOutput: string }>,
-): Promise<{ systemPrompt: string; userPrompt: string }> {
+): Promise<{ systemPrompt: string; userPrompt: string; bucketingFailed: boolean }> {
 	try {
-		return await buildBucketedSynthesisPrompt(lensReviews);
+		const prompt = await buildBucketedSynthesisPrompt(lensReviews);
+		return { ...prompt, bucketingFailed: false };
 	} catch (err) {
 		logAutoreviewError("synthesis.bucket_prompt_error", err, {
 			lensReviews: lensReviews.length,
@@ -55,7 +57,8 @@ async function buildPrompt(
 			LOG_PREFIX,
 			err,
 		);
-		return buildSynthesisPrompt(cwd, lensReviews);
+		const prompt = await buildSynthesisPrompt(cwd, lensReviews);
+		return { ...prompt, bucketingFailed: true };
 	}
 }
 
@@ -93,7 +96,17 @@ export async function runSynthesis(
 		lenses: job.lenses,
 	});
 	const lensReviews = lensReviewsFor(job);
-	const { systemPrompt, userPrompt } = await buildPrompt(cwd, lensReviews);
+	const { systemPrompt, userPrompt, bucketingFailed } = await buildPrompt(cwd, lensReviews);
+	if (bucketingFailed) {
+		const warning =
+			`${LOG_PREFIX} Bucketing failed, using unbucketed synthesis (quality may be reduced)`;
+		job.warnings = [...(job.warnings ?? []), warning];
+		try {
+			options.onUpdate?.(job);
+		} catch {
+			/* UI updates must not prevent synthesis from continuing. */
+		}
+	}
 	logAutoreviewEvent("synthesis.prompt_ready", {
 		jobId: job.id,
 		systemChars: systemPrompt.length,

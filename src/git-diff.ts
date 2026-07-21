@@ -476,13 +476,35 @@ async function* projectIndexCandidates(
 	}
 }
 
+/** Run up to `limit` async tasks concurrently and return results in order. */
+async function withConcurrency<T>(
+	tasks: Array<() => Promise<T>>,
+	limit: number,
+): Promise<T[]> {
+	const results: T[] = new Array(tasks.length);
+	let next = 0;
+	async function worker(): Promise<void> {
+		while (next < tasks.length) {
+			const idx = next++;
+			results[idx] = await tasks[idx]();
+		}
+	}
+	const workers: Promise<void>[] = [];
+	for (let i = 0; i < Math.min(limit, tasks.length); i++) {
+		workers.push(worker());
+	}
+	await Promise.all(workers);
+	return results;
+}
+
 export async function getProjectIndex(
 	cwd: string,
 	maxFiles = 200,
 	paths?: readonly string[],
 	ignorePatterns?: readonly string[],
 ): Promise<ProjectIndexEntry[]> {
-	const entries: ProjectIndexEntry[] = [];
+	// Phase 1: collect candidate paths (preserving dedup + filter logic).
+	const candidates: string[] = [];
 	const seenPaths = new Set<string>();
 
 	for await (const filePath of projectIndexCandidates(cwd, paths)) {
@@ -490,17 +512,32 @@ export async function getProjectIndex(
 		if (seenPaths.has(normalized)) continue;
 		seenPaths.add(normalized);
 		if (ignorePatterns && matchesAnyGlob(normalized, ignorePatterns)) continue;
-		if (entries.length >= maxFiles) break;
+		candidates.push(normalized);
+		if (candidates.length >= maxFiles) break;
+	}
 
-		try {
-			const raw = await readFile(assertPathInRoot(normalized, cwd), "utf8");
-			const ext = normalized.split(".").pop()?.toLowerCase() ?? "";
-			const exports = extractExports(raw, ext);
-			if (exports.length > 0) {
-				entries.push({ path: normalized, exports });
+	// Phase 2: read files in parallel with a concurrency cap of 8.
+	const CONCURRENCY = 8;
+	type ReadResult = { normalized: string; raw: string } | { normalized: string; err: unknown };
+
+	const tasks = candidates.map(
+		(normalized) => async (): Promise<ReadResult> => {
+			try {
+				const raw = await readFile(assertPathInRoot(normalized, cwd), "utf8");
+				return { normalized, raw };
+			} catch (err) {
+				return { normalized, err };
 			}
-		} catch (err) {
-			// skip unreadable files with a warning so the index is not silently incomplete
+		},
+	);
+
+	const results = await withConcurrency(tasks, CONCURRENCY);
+
+	// Phase 3: extract exports from successful reads, warn on failures.
+	const entries: ProjectIndexEntry[] = [];
+	for (const result of results) {
+		if ("err" in result) {
+			const { normalized, err } = result;
 			const code = getNodeErrorCode(err);
 			if (code === "EACCES" || code === "EPERM") {
 				console.warn(`${LOG_PREFIX} Skipping ${normalized}: permission denied`);
@@ -508,6 +545,13 @@ export async function getProjectIndex(
 				const msg = err instanceof Error ? err.message : String(err);
 				console.warn(`${LOG_PREFIX} Skipping ${normalized}: ${msg}`);
 			}
+			continue;
+		}
+		const { normalized, raw } = result;
+		const ext = normalized.split(".").pop()?.toLowerCase() ?? "";
+		const exports = extractExports(raw, ext);
+		if (exports.length > 0) {
+			entries.push({ path: normalized, exports });
 		}
 	}
 

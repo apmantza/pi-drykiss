@@ -28,6 +28,7 @@ import {
 	mkdir,
 	readFile,
 	rename,
+	rmdir,
 	stat,
 	unlink,
 	writeFile,
@@ -314,6 +315,7 @@ export async function loadRejections(
 export function matchesRejection(
 	finding: { file: string; line?: number; message: string },
 	rejections: readonly RejectionRecord[],
+	rejectionTokens?: ReadonlyMap<RejectionRecord, Set<string>>,
 ): boolean {
 	if (rejections.length === 0) return false;
 	const tokens = tokenize(finding.message);
@@ -323,7 +325,7 @@ export function matchesRejection(
 			{
 				file: record.file,
 				line: record.line,
-				tokens: tokenize(record.message),
+				tokens: rejectionTokens?.get(record) ?? tokenize(record.message),
 			},
 		),
 	);
@@ -340,6 +342,12 @@ export function applyRejections(
 	rejections: readonly RejectionRecord[],
 ): Finding[] {
 	if (rejections.length === 0 || findings.length === 0) return [...findings];
+	// Pre-tokenize all rejection record messages once so the N×M comparison
+	// loop (findings × rejections) does not re-tokenize each record message
+	// on every finding iteration.
+	const rejectionTokens = new Map<RejectionRecord, Set<string>>(
+		rejections.map((record) => [record, tokenize(record.message)]),
+	);
 	// Single forward pass: separate rejected from fresh in one go,
 	// avoiding the intermediate `tagged` array and repeated casts.
 	// The spread object satisfies the Finding interface directly via the
@@ -351,6 +359,7 @@ export function applyRejections(
 			matchesRejection(
 				{ file: finding.file, line: finding.line, message: finding.summary },
 				rejections,
+				rejectionTokens,
 			)
 		) {
 			downranked.push({ ...finding, _previouslyRejected: true });
@@ -378,6 +387,112 @@ export function toRejectionRecords(
 	}));
 }
 
+// ── Cross-process file lock (mkdir-based, atomic on POSIX + Windows) ────────
+
+/**
+ * How long to wait for another process to release the lock before giving up,
+ * in milliseconds. The read-modify-write cycle is fast (a few KB file), so
+ * 5 s is generous.
+ */
+const LOCK_TIMEOUT_MS = 5_000;
+
+/**
+ * Interval between lock-acquisition retries, in milliseconds. Short enough
+ * to keep latency low, long enough not to spin-burn CPU.
+ */
+const LOCK_RETRY_INTERVAL_MS = 50;
+
+/**
+ * Age in milliseconds beyond which a lock directory is considered stale
+ * (i.e. left behind by a process that died mid-write). 30 s is well above
+ * any plausible write duration.
+ */
+const LOCK_STALE_MS = 30_000;
+
+/**
+ * Acquire a mkdir-based cross-process lock for `storePath`.
+ *
+ * `mkdir` is atomic on virtually every OS: exactly one caller will succeed
+ * and the rest will get EEXIST. This gives us a lock without any extra
+ * dependencies or OS-specific APIs.
+ *
+ * Stale-lock detection: if the lock directory is older than LOCK_STALE_MS
+ * we assume the owning process crashed without cleaning up and forcibly
+ * remove it before retrying.
+ *
+ * Returns a release function that must be called when the critical section
+ * is done. Never throws — if the lock cannot be acquired within
+ * LOCK_TIMEOUT_MS we resolve with a no-op release so the caller can
+ * proceed (best-effort, matches the module's "never breaks a review"
+ * contract). A warning is logged in that case.
+ */
+async function acquireLock(
+	lockPath: string,
+): Promise<() => Promise<void>> {
+	const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+	const release = async (): Promise<void> => {
+		try {
+			await rmdir(lockPath);
+		} catch (err) {
+			// If the directory is already gone (e.g. we never actually held
+			// the lock), that is fine. Log anything else.
+			const code = (err as NodeJS.ErrnoException | undefined)?.code;
+			if (code !== "ENOENT") {
+				console.warn("%s Failed to release rejection store lock:", LOG_PREFIX, err);
+			}
+		}
+	};
+
+	while (true) {
+		try {
+			await mkdir(lockPath);
+			// mkdir succeeded — we own the lock.
+			return release;
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException | undefined)?.code;
+			if (code !== "EEXIST") {
+				// Unexpected error (e.g. permission denied on parent dir).
+				// Give up and return a no-op release so the caller can
+				// continue without the lock (best-effort).
+				console.warn("%s Could not create rejection store lock:", LOG_PREFIX, err);
+				return async () => undefined;
+			}
+
+			// Lock directory already exists — check if it is stale.
+			try {
+				const info = await stat(lockPath);
+				if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
+					console.warn(
+						"%s Removing stale rejection store lock (age %dms):",
+						LOG_PREFIX,
+						Math.round(Date.now() - info.mtimeMs),
+					);
+					await rmdir(lockPath);
+					// Retry immediately after removing stale lock.
+					continue;
+				}
+			} catch {
+				// stat or rmdir failed (lock was released by real owner between
+				// our mkdir and our stat — a benign race). Just retry.
+			}
+
+			if (Date.now() >= deadline) {
+				console.warn(
+					"%s Timed out waiting for rejection store lock; proceeding without lock.",
+					LOG_PREFIX,
+				);
+				return async () => undefined;
+			}
+
+			// Wait a short interval before retrying.
+			await new Promise<void>((resolve) =>
+				setTimeout(resolve, LOCK_RETRY_INTERVAL_MS),
+			);
+		}
+	}
+}
+
 /**
  * Append new rejections, deduping against existing ones and capping the
  * total. Never throws — a write failure silently no-ops so a review is
@@ -389,15 +504,17 @@ export function toRejectionRecords(
  * that errors (silent) is removed from the chain so it doesn't poison
  * subsequent writes.
  *
- * Cross-process races (two separate CLI runs) are not handled: at
- * worst the second writer overwrites the first's append, losing a
- * few records on a rare concurrent run. This matches the documented
- * "best-effort, never breaks a review" design and avoids the
- * append-without-dedup path that the previous review flagged.
+ * Cross-process safety: a mkdir-based lock file (`.lock` directory next to
+ * the store) serializes the read-modify-write cycle across separate Node
+ * processes reviewing the same project simultaneously. The lock has stale
+ * detection (LOCK_STALE_MS) and a timeout (LOCK_TIMEOUT_MS) so a crashed
+ * process can never permanently block subsequent runs.
  *
- * Atomicity: writes go to a temp file and then `rename()` replaces the
- * target. If the process dies mid-write the original store is left
- * intact and the new content is in `<path>.tmp` for human recovery.
+ * Atomicity: writes go to a temp file (`<path>.<pid>.<ts>.tmp`) and then
+ * `rename()` replaces the target. If the process dies mid-write the
+ * original store is left intact and the temp file can be identified by
+ * its PID+timestamp suffix for human recovery. The unique suffix also
+ * prevents collisions with stale temp files left by crashed processes.
  *
  * The `path` argument is resolved inside the function body via
  * `safeGetRejectionsPath` so any error from `getRejectionsPath` is
@@ -435,14 +552,26 @@ async function doAppendRejections(
 	cap: number,
 	path: string,
 ): Promise<void> {
-	const tmpPath = `${path}.tmp`;
+	const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+	const lockPath = `${path}.lock`;
+
+	// Ensure the parent directory exists before we try to create the lock.
+	await mkdir(dirname(path), { recursive: true });
+
+	const releaseLock = await acquireLock(lockPath);
 	try {
 		const existing = await loadRejections(cwd, path);
+		// Pre-tokenize existing rejection messages once so the entries×existing
+		// dedup filter does not re-tokenize each existing record per entry.
+		const existingTokens = new Map<RejectionRecord, Set<string>>(
+			existing.map((record) => [record, tokenize(record.message)]),
+		);
 		const fresh = entries.filter(
 			(entry) =>
 				!matchesRejection(
 					{ file: entry.file, line: entry.line, message: entry.message },
 					existing,
+					existingTokens,
 				),
 		);
 		if (fresh.length === 0) return;
@@ -450,12 +579,14 @@ async function doAppendRejections(
 		// whole file is a few tens of KB. Simpler than the append-only
 		// fast path and avoids the dedup-skipped-on-append edge case.
 		const merged = [...existing, ...fresh].slice(-cap);
-		await mkdir(dirname(path), { recursive: true });
-		// Atomic replace: write to a temp file, then rename over the
-		// target. rename() is atomic on POSIX, and on Windows it
-		// atomically replaces the destination. If the process dies
-		// mid-write, the original store is preserved and the half-
-		// written content is in `<path>.tmp` for human recovery.
+		// Atomic replace: write to a uniquely-named temp file (PID +
+		// timestamp suffix), then rename over the target. rename() is
+		// atomic on POSIX, and on Windows it atomically replaces the
+		// destination. If the process dies mid-write, the original store
+		// is preserved and the half-written content is in the temp file
+		// (identifiable by its `.<pid>.<ts>.tmp` suffix) for human
+		// recovery. The unique name avoids collisions with stale temp
+		// files left by previously-crashed processes.
 		const data = merged.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
 		await writeFile(tmpPath, data, { mode: STORE_FILE_MODE, encoding: "utf8" });
 		await rename(tmpPath, path);
@@ -463,7 +594,11 @@ async function doAppendRejections(
 		// Persisting rejections must never break a review. Best-effort
 		// unlink of the half-written tmp file so it doesn't linger on
 		// disk and confuse a human looking at the project dir.
-		unlink(tmpPath).catch(() => undefined);
+		unlink(tmpPath).catch((unlinkErr) => {
+			console.warn("%s Failed to clean up temp rejection store file:", LOG_PREFIX, unlinkErr);
+		});
 		console.warn("%s Failed to persist rejections:", LOG_PREFIX, err);
+	} finally {
+		await releaseLock();
 	}
 }

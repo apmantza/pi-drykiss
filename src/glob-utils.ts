@@ -6,7 +6,15 @@
 const MAX_GLOB_PATTERN_LENGTH = 512;
 const MAX_GLOB_WILDCARDS = 20;
 
+/** Cache of compiled glob matchers keyed by a sorted JSON representation of the pattern array. */
+const compiledMatchersCache = new Map<string, RegExp[]>();
+
 export function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
+	const cacheKey = JSON.stringify([...patterns].sort());
+	const cached = compiledMatchersCache.get(cacheKey);
+	if (cached !== undefined) {
+		return cached;
+	}
 	const matchers: RegExp[] = [];
 	for (const p of patterns) {
 		if (p.length > MAX_GLOB_PATTERN_LENGTH) continue;
@@ -17,6 +25,7 @@ export function compileGlobMatchers(patterns: readonly string[]): RegExp[] {
 			// Skip invalid patterns
 		}
 	}
+	compiledMatchersCache.set(cacheKey, matchers);
 	return matchers;
 }
 

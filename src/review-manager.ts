@@ -48,7 +48,7 @@ import { loadRejections } from "./rejections.js";
 import { runValidator, selectFindingsForValidation } from "./validator.js";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
 
-const CONCURRENCY = 3;
+const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_PROGRESS_INTERVAL_MS = 1000;
 
 export interface ReviewJob extends ReviewJobState {
@@ -104,6 +104,7 @@ export class ReviewManager {
 	private readonly jobs = new Map<string, ReviewJob>();
 	private readonly onUpdate?: OnReviewUpdate;
 	private readonly onComplete?: OnReviewComplete;
+	private concurrency: number;
 
 	/** Queue of lens review tasks waiting for a slot. */
 	private taskQueue: {
@@ -179,9 +180,14 @@ export class ReviewManager {
 		return retryResult;
 	}
 
-	constructor(onUpdate?: OnReviewUpdate, onComplete?: OnReviewComplete) {
+	constructor(
+		onUpdate?: OnReviewUpdate,
+		onComplete?: OnReviewComplete,
+		concurrency?: number,
+	) {
 		this.onUpdate = onUpdate;
 		this.onComplete = onComplete;
+		this.concurrency = concurrency ?? DEFAULT_CONCURRENCY;
 	}
 
 	async startReview(
@@ -334,7 +340,9 @@ export class ReviewManager {
 			}
 
 			// Start draining
-			this.drain(ctx, pi, cwd).catch(this.logDrainFailure);
+			this.drain(ctx, pi, cwd).catch((err) =>
+				this.logDrainFailure(err, ctx, pi, cwd),
+			);
 			return id;
 		} catch (err) {
 			logAutoreviewError("review.job_setup_error", err, { jobId: id });
@@ -347,8 +355,12 @@ export class ReviewManager {
 	}
 
 	private async drain(ctx: ExtensionContext, pi: ExtensionAPI, cwd: string) {
-		while (this.taskQueue.length > 0 && this.runningCount < CONCURRENCY) {
-			const task = this.taskQueue.shift()!;
+		while (this.taskQueue.length > 0 && this.runningCount < this.concurrency) {
+			// Guard against concurrent mutation (e.g. abort() filtering the array
+			// between the length check above and the shift here).
+			const task = this.taskQueue.shift();
+			if (!task) break;
+
 			const job = this.jobs.get(task.jobId);
 			// Cancellation removes queued work, but guard the dequeue boundary too
 			// so a concurrent drain cannot start a task after abort() wins the race.
@@ -367,7 +379,20 @@ export class ReviewManager {
 							state.status = "error";
 							state.errorMessage =
 								err instanceof Error ? err.message : String(err);
-							state.session = undefined;
+							// Dispose any live session before clearing the reference so
+							// that an unexpected runLens rejection does not leak the
+							// session handle.  Double-dispose is guarded by the null
+							// check: runLens already nulls state.session on its own
+							// error paths, so this only fires when a live session is
+							// still present.
+							if (state.session) {
+								try {
+									state.session.dispose();
+								} catch {
+									/* dispose is best-effort */
+								}
+								state.session = undefined;
+							}
 						}
 						try {
 							this.onUpdate?.(job);
@@ -382,13 +407,42 @@ export class ReviewManager {
 					 * runningCount bookkeeping. Without the re-drain call here
 					 * the queue would stall as soon as any task rejected. */
 					this.runningCount--;
-					this.drain(ctx, pi, cwd).catch(this.logDrainFailure);
+					this.drain(ctx, pi, cwd).catch((err) =>
+						this.logDrainFailure(err, ctx, pi, cwd),
+					);
 				});
 		}
 	}
 
-	private readonly logDrainFailure = (err: unknown): void => {
-		console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
+	private readonly logDrainFailure = (
+		err: unknown,
+		ctx: ExtensionContext,
+		pi: ExtensionAPI,
+		cwd: string,
+	): void => {
+		console.warn(
+			"%s Review queue drain failed (queue=%d running=%d): %o",
+			LOG_PREFIX,
+			this.taskQueue.length,
+			this.runningCount,
+			err,
+		);
+		// Re-schedule a drain pass when the queue is non-empty so that a
+		// structural error (e.g. OOM spike, transient queue corruption) does
+		// not permanently stall remaining lens tasks.
+		if (this.taskQueue.length > 0) {
+			Promise.resolve()
+				.then(() => this.drain(ctx, pi, cwd))
+				.catch((retryErr) => {
+					console.warn(
+						"%s Review queue drain retry also failed (queue=%d running=%d): %o",
+						LOG_PREFIX,
+						this.taskQueue.length,
+						this.runningCount,
+						retryErr,
+					);
+				});
+		}
 	};
 
 	private async runLens(
@@ -404,9 +458,9 @@ export class ReviewManager {
 			onAllLensesDone: (runCtx, runCwd, job) =>
 				this.handleAllLensesDone(runCtx, runCwd, job),
 			drain: (runCtx, runPi, runCwd) => {
-				this.drain(runCtx, runPi, runCwd).catch((err) => {
-					console.warn("%s Review queue drain failed:", LOG_PREFIX, err);
-				});
+				this.drain(runCtx, runPi, runCwd).catch((err) =>
+					this.logDrainFailure(err, runCtx, runPi, runCwd),
+				);
 			},
 		});
 	}
@@ -422,6 +476,25 @@ export class ReviewManager {
 			this.synthesisLocks.delete(job.id);
 			return;
 		}
+
+		// Warn when a lens completes successfully with zero findings but at least
+		// one peer lens found findings for the same file set. This makes a silent
+		// zero distinguishable from a genuine clean result.
+		const anyPeerHasFindings = job.lenses.some((lens) => {
+			const state = job.states.get(lens);
+			return state?.status === "done" && (state.findingsCount ?? 0) > 0;
+		});
+		if (anyPeerHasFindings) {
+			for (const lens of job.lenses) {
+				const state = job.states.get(lens);
+				if (state?.status === "done" && (state.findingsCount ?? 0) === 0) {
+					console.warn(
+						`${LOG_PREFIX} Lens '${lens}' returned 0 findings — verify output if unexpected`,
+					);
+				}
+			}
+		}
+
 		job.synthesisStatus = "running";
 		job.synthesisStartedAt = Date.now();
 		try {
@@ -457,6 +530,7 @@ export class ReviewManager {
 		await runSynthesisTask(ctx, cwd, job, {
 			retryOnModelError: this.retryOnModelError,
 			onComplete: (completedJob) => this.onComplete?.(completedJob),
+			onUpdate: this.onUpdate ? (updatedJob) => this.onUpdate!(updatedJob as ReviewJob) : undefined,
 		});
 	}
 
@@ -687,8 +761,8 @@ export class ReviewManager {
 				signal?.removeEventListener("abort", onAbort);
 			};
 
+			signal?.addEventListener("abort", onAbort, { once: true });
 			if (signal?.aborted) onAbort();
-			else signal?.addEventListener("abort", onAbort, { once: true });
 		});
 	}
 
@@ -740,6 +814,14 @@ export class ReviewManager {
 
 	startCleanup() {
 		setInterval(() => this.cleanup(), 60_000).unref();
+	}
+
+	/**
+	 * Update the maximum number of lens subagents to run in parallel.
+	 * Takes effect immediately for the next drain pass. Valid range: 1–10.
+	 */
+	setConcurrency(value: number): void {
+		this.concurrency = value;
 	}
 
 	abort(id: string): boolean {

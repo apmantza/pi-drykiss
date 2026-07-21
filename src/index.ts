@@ -20,6 +20,7 @@ import {
 	getBackgroundReview,
 } from "./background-review.js";
 import { toErrorMessage } from "./error-utils.js";
+import { loadConfig } from "./config.js";
 
 function warnExtensionError(
 	action: string,
@@ -83,6 +84,19 @@ export default function (pi: ExtensionAPI): void {
 	} catch (err) {
 		warnExtensionError("starting review cleanup timer", err, lastContext);
 	}
+	// Apply the configured concurrency limit asynchronously (file read).
+	// Falls back to the default (3) if the config is missing or invalid.
+	loadConfig()
+		.then((cfg) => {
+			if (typeof cfg.concurrency === "number") {
+				manager.setConcurrency(cfg.concurrency);
+			}
+		})
+		.catch((err) => {
+			console.warn(
+				`${LOG_PREFIX} Failed to load concurrency from config: ${toErrorMessage(err)}`,
+			);
+		});
 	const editTracker = createEditTracker();
 
 	// Grab UI context from tool executions so widget renders even when no

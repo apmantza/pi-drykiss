@@ -305,6 +305,35 @@ function toReviewOptions(
 	};
 }
 
+/**
+ * Runs `tasks` with at most `limit` concurrent executions at a time.
+ * Each task is a zero-argument async factory; results are returned in the
+ * same order as the input array.
+ */
+async function withConcurrencyLimit<T>(
+	tasks: (() => Promise<T>)[],
+	limit: number,
+): Promise<T[]> {
+	const results: T[] = new Array(tasks.length);
+	let nextIndex = 0;
+
+	async function worker(): Promise<void> {
+		while (nextIndex < tasks.length) {
+			const i = nextIndex++;
+			results[i] = await tasks[i]();
+		}
+	}
+
+	const workers = Array.from(
+		{ length: Math.min(limit, tasks.length) },
+		() => worker(),
+	);
+	await Promise.all(workers);
+	return results;
+}
+
+const GATHER_CONCURRENCY = 8;
+
 async function gatherDiffs(
 	pi: ExtensionAPI,
 	cwd: string,
@@ -315,7 +344,8 @@ async function gatherDiffs(
 	const diffs = new Map<string, string>();
 	const errors: string[] = [];
 	let completed = 0;
-	for (const file of files) {
+
+	const tasks = files.map((file) => async () => {
 		try {
 			diffs.set(file.path, await getFileDiff(pi, cwd, file.path, options));
 		} catch (err) {
@@ -326,7 +356,9 @@ async function gatherDiffs(
 			completed += 1;
 			onProgress?.(completed, files.length, "Preparing diffs");
 		}
-	}
+	});
+
+	await withConcurrencyLimit(tasks, GATHER_CONCURRENCY);
 	return { value: diffs, errors };
 }
 
@@ -338,7 +370,8 @@ async function gatherContents(
 	const contents = new Map<string, FileContent>();
 	const errors: string[] = [];
 	let completed = 0;
-	for (const file of files) {
+
+	const tasks = files.map((file) => async () => {
 		try {
 			const result = await getFileContent(cwd, file.path);
 			if (result) contents.set(file.path, result);
@@ -349,7 +382,9 @@ async function gatherContents(
 			completed += 1;
 			onProgress?.(completed, files.length, "Loading file contents");
 		}
-	}
+	});
+
+	await withConcurrencyLimit(tasks, GATHER_CONCURRENCY);
 	return { value: contents, errors };
 }
 

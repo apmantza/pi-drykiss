@@ -159,7 +159,10 @@ function processStringControlChars(
 	return result.join("");
 }
 
-export function lenientJsonParse<T = unknown>(raw: string): T {
+export function lenientJsonParse<T = unknown>(raw: string, label?: string): T {
+	const originalLength = raw.length;
+	const prefix = label ? `[${label}] ` : "";
+
 	// Try strict parse first (fast path)
 	try {
 		return JSON.parse(raw) as T;
@@ -201,7 +204,10 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 	const lastObjBrace = fixed.lastIndexOf("}");
 	const lastArrBracket = fixed.lastIndexOf("]");
 	const lastComplete = Math.max(lastObjBrace, lastArrBracket);
+	let truncationDetail = "";
 	if (lastComplete > 0 && lastComplete < fixed.length - 1) {
+		const truncatedChars = fixed.length - lastComplete - 1;
+		truncationDetail = ` (truncated ${truncatedChars} trailing chars to reach last closing delimiter)`;
 		fixed = fixed.substring(0, lastComplete + 1);
 	}
 
@@ -210,7 +216,7 @@ export function lenientJsonParse<T = unknown>(raw: string): T {
 		return JSON.parse(fixed) as T;
 	} catch (err) {
 		throw new Error(
-			`Failed to parse repaired JSON: ${err instanceof Error ? err.message : String(err)}`,
+			`${prefix}Failed to parse repaired JSON (original response length: ${originalLength} chars${truncationDetail}): ${err instanceof Error ? err.message : String(err)}`,
 		);
 	}
 }

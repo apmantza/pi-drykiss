@@ -119,7 +119,7 @@ export function parseFindingsJson(
 		} catch {
 			// jsonText is already sanitized; fall back to the tolerant parser
 			// for trailing-comma / single-quote / unterminated cases.
-			parsed = lenientJsonParse(jsonText);
+			parsed = lenientJsonParse(jsonText, lens);
 		}
 
 		// Normalize the parsed value to a findings array:
@@ -166,9 +166,8 @@ export function parseFindingsJson(
 
 		return { findings: parseFindingsArray(findingsSource, lens) };
 	} catch {
-		const msg = lens
-			? `Failed to parse JSON for ${lens} lens. The LLM output may contain unescaped characters.`
-			: "Failed to parse JSON. The LLM output may contain unescaped characters.";
+		const lensContext = lens ? ` for ${lens} lens` : "";
+		const msg = `Failed to parse JSON${lensContext} (original response length: ${raw.length} chars). The LLM output may contain unescaped characters.`;
 		return { findings: [], parseError: msg };
 	}
 }

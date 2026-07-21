@@ -422,6 +422,7 @@ export async function executeDrykissAutoreviewTool(
 	);
 	for (const warning of warnings) {
 		console.warn(`${LOG_PREFIX} ${warning}`);
+		safeOnUpdate(onUpdate, `${LOG_PREFIX} Config warning: ${warning}`);
 	}
 	logAutoreviewEvent("autoreview.config_loaded", {
 		correlationId,
@@ -739,5 +740,9 @@ function formatReviewProgress(job: ReviewJob): string {
 		synthesis = "";
 	}
 	const errorText = errored ? ` · ${errored} error(s)` : "";
-	return `DRYKISS autoreview progress: [${bar}] ${done}/${total} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s`;
+	const warningsText =
+		job.warnings && job.warnings.length > 0
+			? `\n${job.warnings.join("\n")}`
+			: "";
+	return `DRYKISS autoreview progress: [${bar}] ${done}/${total} lens(es) complete${runningText}${synthesis}${errorText} · ${elapsed}s${warningsText}`;
 }

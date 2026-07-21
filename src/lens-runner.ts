@@ -154,10 +154,17 @@ export async function runLens(
 			lens: task.lens,
 			error: result.errorMessage,
 		});
+		// Capture the initial-run session and clear state.session before
+		// entering the retry.  retryOnModelError will dispose failedSession
+		// internally; clearing state.session first prevents the drain catch
+		// handler from seeing a stale, already-disposed reference if the
+		// retry call itself throws.
+		const failedSession = state.session;
+		state.session = undefined;
 		const retryResult = await options.retryOnModelError(
 			ctx,
 			task.model,
-			state.session,
+			failedSession,
 			task.lens,
 			run,
 			{ error: result.errorMessage, lens: task.lens },
@@ -171,6 +178,10 @@ export async function runLens(
 				...(tokenUsageDetails(retryResult.usage) ?? {}),
 				error: retryResult.errorMessage,
 			});
+			// retryResult.session is undefined when the retry itself threw an
+			// exception (subagent-runner disposed it); non-undefined when the
+			// model returned an error in the response (session kept for
+			// inspection via /drykiss-jobs).
 			state.session = retryResult.session;
 			state.modelName = retryResult.modelName;
 			if (retryResult.provider) state.provider = retryResult.provider;
@@ -181,6 +192,9 @@ export async function runLens(
 				applySuccessfulOutput(state, retryResult.text, task.lens);
 			}
 		} else {
+			// retryOnModelError returned null: user cancelled model selection.
+			// failedSession was already disposed inside retryOnModelError; ensure
+			// state.session remains undefined.
 			setLensError(state, result.errorMessage);
 			state.session = undefined;
 		}

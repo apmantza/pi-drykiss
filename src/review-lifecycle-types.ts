@@ -41,6 +41,8 @@ export interface ReviewJobState {
 	overallStatus: "queued" | "running" | "done" | "error";
 	startedAt: number;
 	completedAt?: number;
+	/** User-visible warnings accumulated during the review run. */
+	warnings?: string[];
 }
 
 export interface SubagentResult {

@@ -246,6 +246,12 @@ export interface DrykissConfig {
 	 * excluded from active counts, risk, and quality-gate evaluation.
 	 */
 	validate?: boolean;
+	/**
+	 * Maximum number of lens subagents to run in parallel.
+	 * Higher values reduce wall-clock review time at the cost of more
+	 * simultaneous API calls. Must be between 1 and 10. Default: 3.
+	 */
+	concurrency?: number;
 }
 
 function getConfigPath(): string {
@@ -385,7 +391,7 @@ export async function loadEffectiveConfig(
 			}
 			if (!isValidSeverity(rule.to)) {
 				warnings.push(
-					`Invalid severity "${String(rule.to)}" for ${rule.riskCode}`,
+					`Invalid severity "${String(rule.to)}" for ${rule.riskCode} — valid values are: ${[...SEVERITY_VALUES].join(", ")}`,
 				);
 				continue;
 			}
@@ -411,6 +417,7 @@ export async function loadEffectiveConfig(
 		: undefined;
 	const cleanedReview = cleanReviewPolicy(config.review);
 	const cleanedScout = cleanScoutConfig(config.scout);
+	const cleanedConcurrency = cleanConcurrency(config.concurrency, warnings);
 
 	return {
 		config: {
@@ -437,6 +444,9 @@ export async function loadEffectiveConfig(
 			ignorePatterns: cleanedIgnorePatterns,
 			commands: cleanedCommands,
 			review: cleanedReview,
+			...(cleanedConcurrency !== undefined
+				? { concurrency: cleanedConcurrency }
+				: {}),
 		},
 		warnings,
 	};
@@ -518,6 +528,28 @@ function cleanScoutConfig(value: unknown): ScoutConfig | undefined {
 
 function isNonNegativeInteger(value: unknown): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+const CONCURRENCY_MIN = 1;
+const CONCURRENCY_MAX = 10;
+
+function cleanConcurrency(
+	value: unknown,
+	warnings: string[],
+): number | undefined {
+	if (value === undefined) return undefined;
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value < CONCURRENCY_MIN ||
+		value > CONCURRENCY_MAX
+	) {
+		warnings.push(
+			`Invalid concurrency value "${String(value)}"; must be an integer between ${CONCURRENCY_MIN} and ${CONCURRENCY_MAX}. Using default (3).`,
+		);
+		return undefined;
+	}
+	return value;
 }
 
 function cleanPathFilters(value: unknown): ReviewPathFilters | undefined {

@@ -252,6 +252,7 @@ export function buildReviewResult(
 			synthesis?.summary,
 			ignored.dropped,
 			options.discardedFindings?.length ?? 0,
+			validationIssues.length,
 		),
 		errors,
 		validationIssues,
@@ -282,7 +283,17 @@ export function validateFindings(
 			issues.push(issue);
 			return;
 		}
-		valid.push({ ...finding, file: normalizePath(finding.file) });
+		const coercedLine =
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			finding.line !== undefined && typeof (finding.line as any) === "string"
+				? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+					parseInt(finding.line as any, 10)
+				: finding.line;
+		valid.push({
+			...finding,
+			file: normalizePath(finding.file),
+			...(coercedLine !== finding.line ? { line: coercedLine } : {}),
+		});
 	});
 
 	return { findings: valid, issues };
@@ -307,8 +318,16 @@ function validateFinding(
 			finding,
 		);
 	}
-	if (finding.line !== undefined && !isPositiveInteger(finding.line)) {
-		return issue(index, `invalid line: ${String(finding.line)}`, finding);
+	if (finding.line !== undefined) {
+		const coerced =
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			typeof (finding.line as any) === "string"
+				? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+					parseInt(finding.line as any, 10)
+				: finding.line;
+		if (!isPositiveInteger(coerced)) {
+			return issue(index, `invalid line: ${String(finding.line)}`, finding);
+		}
 	}
 	for (const field of REQUIRED_FINDING_STRING_FIELDS) {
 		if (
@@ -361,6 +380,7 @@ function formatSummary(
 	summary: string | undefined,
 	ignoredCount: number,
 	discardedCount: number,
+	validationDroppedCount: number,
 ): string {
 	const base = summary ?? "Review did not produce a synthesis result.";
 	const notes: string[] = [];
@@ -372,6 +392,11 @@ function formatSummary(
 	if (discardedCount > 0) {
 		notes.push(
 			`Validator refuted ${discardedCount} finding(s); see discardedFindings for audit details.`,
+		);
+	}
+	if (validationDroppedCount > 0) {
+		notes.push(
+			`${validationDroppedCount} finding(s) dropped due to validation issues.`,
 		);
 	}
 	return notes.length > 0 ? `${base}\n(${notes.join(" ")})` : base;
@@ -442,11 +467,23 @@ export function applySeverityOverrides(
 	for (const rule of overrides) {
 		overrideMap.set(rule.riskCode, rule.to);
 	}
-	return findings.map((f) => {
-		const newSeverity = f.riskCode ? overrideMap.get(f.riskCode) : undefined;
+	const noRiskCodeFindings: Finding[] = [];
+	const result = findings.map((f) => {
+		if (!f.riskCode) {
+			noRiskCodeFindings.push(f);
+			return f;
+		}
+		const newSeverity = overrideMap.get(f.riskCode);
 		if (!newSeverity) return f;
 		return { ...f, severity: newSeverity };
 	});
+	if (noRiskCodeFindings.length > 0) {
+		const sample = noRiskCodeFindings[0].file;
+		console.warn(
+			`${LOG_PREFIX} ${noRiskCodeFindings.length} finding(s) lack a riskCode and were not eligible for severity overrides (sample file: ${sample})`,
+		);
+	}
+	return result;
 }
 
 /**
