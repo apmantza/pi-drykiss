@@ -34,6 +34,12 @@ export interface ComposeOptions {
 	 * with the `{{active_constraints}}` placeholder substituted with this text.
 	 */
 	readonly activeConstraints?: string;
+	/**
+	 * When true, the `fix-mode.md` shared fragment is appended to the lens
+	 * system prompt, instructing the lens to include a concrete `fix` field
+	 * in every finding it emits.
+	 */
+	readonly fixMode?: boolean;
 }
 
 /** Substitute `{{key}}` placeholders in a template string. */
@@ -55,7 +61,7 @@ export async function composeLensPrompt(
 	lens: AnyLens,
 	options: ComposeOptions = {},
 ): Promise<string> {
-	const [ironLaw, lensBody, jsonOutput, grounding, activeTemplate] =
+	const [ironLaw, lensBody, jsonOutput, grounding, activeTemplate, fixModeFragment] =
 		await Promise.all([
 			loadPromptBody("iron-law", "shared"),
 			loadPromptBody(lens, "lens"),
@@ -63,6 +69,9 @@ export async function composeLensPrompt(
 			loadPromptBody("grounding-rules", "shared"),
 			options.activeConstraints
 				? loadPromptBody("active-constraints", "shared")
+				: Promise.resolve(""),
+			options.fixMode
+				? loadPromptBody("fix-mode", "shared")
 				: Promise.resolve(""),
 		]);
 
@@ -75,11 +84,13 @@ export async function composeLensPrompt(
 		);
 	}
 	sections.push(jsonOutput, grounding);
+	if (fixModeFragment) sections.push(fixModeFragment);
 	const composed = sections.filter(Boolean).join("\n\n");
 	logAutoreviewEvent("prompt.composed", {
 		kind: "lens",
 		name: lens,
 		chars: composed.length,
+		fixMode: options.fixMode === true,
 	});
 	return composed;
 }

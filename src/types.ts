@@ -66,6 +66,56 @@ export const LENS_NAMES: readonly Exclude<ReviewLens, "all">[] = [
 ];
 
 /**
+ * Named review modes that map to predefined lens subsets.
+ *   - review  → all lenses (default, same as running without a mode)
+ *   - audit   → security, resilience, architecture
+ *   - debt    → simplicity, deduplication, clarity
+ *   - test    → tests
+ *   - health  → all lenses (same as review, but triggers health-score display)
+ *   - sweep   → all lenses (full coverage in a single pass)
+ */
+export type LensMode = "review" | "audit" | "debt" | "test" | "health" | "sweep";
+
+/** Set of valid LensMode values for runtime membership tests. */
+export const LENS_MODE_VALUES: ReadonlySet<string> = new Set<string>([
+	"review",
+	"audit",
+	"debt",
+	"test",
+	"health",
+	"sweep",
+]);
+
+/** Returns true when `value` is a valid LensMode string. */
+export function isLensMode(value: unknown): value is LensMode {
+	return typeof value === "string" && LENS_MODE_VALUES.has(value);
+}
+
+/**
+ * Maps each named LensMode to the ordered list of lenses it activates.
+ * All entries use built-in lens names only; custom lenses are additive and
+ * handled separately at the call site.
+ */
+export const LENS_MODE_MAP: Record<LensMode, readonly Exclude<ReviewLens, "all">[]> = {
+	/** Default: run every built-in lens. */
+	review: LENS_NAMES,
+	/** Security & structural integrity: security, resilience, architecture. */
+	audit: ["security", "resilience", "architecture"],
+	/** Technical-debt focus: simplicity, deduplication, clarity. */
+	debt: ["simplicity", "deduplication", "clarity"],
+	/** Test-coverage focus: tests lens only. */
+	test: ["tests"],
+	/**
+	 * Health check: all lenses (identical lens set to "review").
+	 * Callers may use this mode to signal that health-score display should
+	 * be emphasised in the output.
+	 */
+	health: LENS_NAMES,
+	/** Full sweep: all lenses in a single pass (identical to "review"). */
+	sweep: LENS_NAMES,
+};
+
+/**
  * A user-defined custom lens name. Any non-empty string that corresponds
  * to a `.md` file discovered under `~/.pi/drykiss/prompts/` and does not
  * match a built-in lens name is treated as a custom lens.
@@ -155,6 +205,13 @@ export interface Finding {
 	 *   - high: security, reliability, or architectural risk.
 	 */
 	readonly riskLevel?: "low" | "medium" | "high";
+	/**
+	 * Suggested replacement code produced when fix mode is active (`--fix`).
+	 * Contains the minimal ready-to-apply snippet that resolves this finding.
+	 * Empty string means the fix is a pure deletion. Optional because fix mode
+	 * is opt-in; callers should not require this field to be present.
+	 */
+	readonly fix?: string;
 	/**
 	 * Internal marker set by `applySuppressions` (Phase 3). Not part of
 	 * the LLM output contract — added post-hoc by the suppression engine.
@@ -391,6 +448,7 @@ export function mapRawToFinding(raw: any, lens?: AnyLens): Finding {
 		action: isValidAction(raw.action) ? raw.action : undefined,
 		riskLevel: isValidRiskLevel(raw.riskLevel) ? raw.riskLevel : undefined,
 		priority: normalizePriority(raw.priority),
+		fix: typeof raw.fix === "string" ? raw.fix : undefined,
 	};
 }
 

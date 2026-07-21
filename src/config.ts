@@ -14,7 +14,7 @@ import { toErrorMessage } from "./error-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
-import { LENS_NAMES, type ReviewLens, type AnyLens, isAnyLens } from "./types.js";
+import { LENS_NAMES, type ReviewLens, type AnyLens, isAnyLens, type LensMode, LENS_MODE_VALUES } from "./types.js";
 import type { FindingBudget } from "./finding-budget.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
@@ -270,6 +270,25 @@ export interface DrykissConfig {
 	 * Defaults to `true`.
 	 */
 	deep?: boolean;
+	/**
+	 * Default named review mode used when neither `lens`, `lenses`, nor an
+	 * explicit `reviewMode` is passed to the review tool. When undefined,
+	 * the tool defaults to running all lenses (equivalent to `reviewMode:
+	 * "review"`). Valid values: "review" | "audit" | "debt" | "test" |
+	 * "health" | "sweep".
+	 */
+	defaultMode?: LensMode;
+	/**
+	 * When true, show an interactive triage UI after each review completes
+	 * (UI sessions only). For each active finding the user may:
+	 *   - Accept   → acknowledge; no action recorded.
+	 *   - Dismiss  → write to rejections.jsonl so future runs downrank it.
+	 *   - Defer    → add a 30-day suppression to the project config.
+	 *   - Skip all → exit triage immediately.
+	 *
+	 * Default: false (opt-in).
+	 */
+	triage?: boolean;
 }
 
 function getConfigPath(): string {
@@ -441,6 +460,7 @@ export async function loadEffectiveConfig(
 		config.deep,
 		warnings,
 	);
+	const cleanedDefaultMode = cleanDefaultMode(config.defaultMode, warnings);
 
 	return {
 		config: {
@@ -474,9 +494,31 @@ export async function loadEffectiveConfig(
 				? { deepLenses: cleanedDeepLenses }
 				: {}),
 			...(cleanedDeep !== undefined ? { deep: cleanedDeep } : {}),
+			...(cleanedDefaultMode !== undefined
+				? { defaultMode: cleanedDefaultMode }
+				: { defaultMode: undefined }),
 		},
 		warnings,
 	};
+}
+
+/**
+ * Validate the `defaultMode` config field. Emits a warning and returns
+ * `undefined` for any value that is not a valid LensMode string.
+ */
+function cleanDefaultMode(
+	value: unknown,
+	warnings: string[],
+): LensMode | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !LENS_MODE_VALUES.has(value)) {
+		const valid = [...LENS_MODE_VALUES].join(", ");
+		warnings.push(
+			`Invalid defaultMode value "${String(value)}"; must be one of: ${valid}. Ignoring.`,
+		);
+		return undefined;
+	}
+	return value as LensMode;
 }
 
 function isNonEmptyString(value: unknown): value is string {

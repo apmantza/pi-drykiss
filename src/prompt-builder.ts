@@ -37,8 +37,9 @@ export { ensureDefaultPrompts, resetPrompts } from "./prompt-seed.js";
 export async function loadLensSystemPrompt(
 	lens: AnyLens,
 	activeConstraints?: string,
+	fixMode?: boolean,
 ): Promise<string> {
-	return composeLensPrompt(lens, { activeConstraints });
+	return composeLensPrompt(lens, { activeConstraints, fixMode });
 }
 
 /** Compose the synthesis system prompt. Delegates to the composer (P0.5). */
@@ -189,6 +190,12 @@ export async function buildReviewPrompts(
 		mode?: string;
 		/** Human-readable scope label (e.g. "owner/repo#123", "full codebase"). */
 		scopeLabel?: string;
+		/**
+		 * When true, append the `fix-mode.md` shared fragment to each lens
+		 * system prompt, instructing the lens to include a concrete `fix`
+		 * field in every finding it emits.
+		 */
+		fixMode?: boolean;
 	},
 ): Promise<ReviewPrompt[]> {
 	const context = buildFileContext(files, diffs, options?.contents);
@@ -198,6 +205,7 @@ export async function buildReviewPrompts(
 	const commandsBlock = buildCommandsContext(options?.commands);
 	const composeOpts: ComposeOptions = {
 		activeConstraints: options?.activeConstraints,
+		fixMode: options?.fixMode,
 	};
 	const guidelines =
 		options?.guidelines === undefined

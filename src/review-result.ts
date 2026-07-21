@@ -15,6 +15,8 @@ import {
 	type ReviewQualityGate,
 	type ReviewStatus,
 } from "./review-finalizer.js";
+import type { ProjectIndexEntry } from "./git-diff.js";
+import { generateMermaidGraph } from "./dependency-graph.js";
 
 const REQUIRED_FINDING_STRING_FIELDS = [
 	"category",
@@ -151,6 +153,13 @@ export interface BuildReviewResultOptions {
 	readonly findingBudget?: FindingBudget;
 	/** Scope-preparation failures collected before lens execution. */
 	readonly preparationErrors?: readonly string[];
+	/**
+	 * Project index entries used to generate a Mermaid dependency graph.
+	 * When provided and the architecture lens was run, `buildReviewResult`
+	 * generates a `mermaidGraph` and attaches it to the result. Ignored
+	 * when the synthesis already produced its own `mermaidGraph`.
+	 */
+	readonly projectIndex?: readonly ProjectIndexEntry[];
 }
 
 const SEVERITY_SET = SEVERITY_VALUES;
@@ -264,10 +273,52 @@ export function buildReviewResult(
 		...(options.qualityGateThreshold !== undefined
 			? { qualityGateThreshold: options.qualityGateThreshold }
 			: {}),
-		...(synthesis?.mermaidGraph
-			? { mermaidGraph: synthesis.mermaidGraph }
-			: {}),
+		...(resolveMermaidGraph(synthesis, job, options)),
 	};
+}
+
+/**
+ * Resolve the mermaid graph for the review result.
+ *
+ * Priority:
+ *   1. If synthesis produced a `mermaidGraph`, use it as-is.
+ *   2. Otherwise, if a `projectIndex` was supplied in options and the
+ *      architecture lens ran (or any findings exist), generate a graph
+ *      from the index + any architecture-lens findings.
+ *   3. If neither is available, return an empty object (no graph field).
+ */
+function resolveMermaidGraph(
+	synthesis: SynthesisResult | undefined,
+	job: ReviewJobState,
+	options: BuildReviewResultOptions,
+): { mermaidGraph?: string } {
+	if (synthesis?.mermaidGraph) {
+		return { mermaidGraph: synthesis.mermaidGraph };
+	}
+
+	const index = options.projectIndex;
+	if (!index || index.length === 0) return {};
+
+	// Only generate a dependency graph when the architecture lens was included
+	// in this review. This keeps the output focused and avoids emitting a
+	// large graph when only unrelated lenses ran.
+	const archLensRan = job.lenses.includes("architecture");
+	if (!archLensRan) return {};
+
+	const allFindings: Finding[] = [
+		...(options.findings ?? synthesis?.findings ?? []),
+		...(options.discardedFindings ?? []),
+	];
+
+	try {
+		const graph = generateMermaidGraph([...index], allFindings);
+		return { mermaidGraph: graph };
+	} catch (err) {
+		console.warn(
+			`${LOG_PREFIX} Failed to generate Mermaid dependency graph: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return {};
+	}
 }
 
 export function validateFindings(

@@ -218,6 +218,12 @@ export class ReviewManager {
 			 * single-pass lens results.
 			 */
 			preSeedLensOutputs?: Map<AnyLens, string>;
+			/**
+			 * When true, the fix-mode prompt section is appended to each lens
+			 * system prompt, instructing lenses to emit a `fix` field in every
+			 * finding.
+			 */
+			fixMode?: boolean;
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
@@ -260,6 +266,7 @@ export class ReviewManager {
 			pathInstructions: options.pathInstructions,
 			mode: options.mode,
 			scopeLabel: options.scopeLabel,
+			fixMode: options.fixMode,
 		});
 		const promptMap = new Map(allPrompts.map((p) => [p.lens, p]));
 		logAutoreviewEvent("review.prompts_ready", {
@@ -625,6 +632,11 @@ export class ReviewManager {
 			 * review pipeline. Passed straight through to `startReview`.
 			 */
 			preSeedLensOutputs?: Map<AnyLens, string>;
+			/**
+			 * When true, the fix-mode prompt section is appended to each lens
+			 * system prompt. Passed straight through to `startReview`.
+			 */
+			fixMode?: boolean;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -651,6 +663,7 @@ export class ReviewManager {
 				mode: options.target?.mode,
 				scopeLabel: options.target?.label,
 				preSeedLensOutputs: options.preSeedLensOutputs,
+				fixMode: options.fixMode,
 			},
 		);
 		const started = this.jobs.get(jobId);
@@ -676,6 +689,7 @@ export class ReviewManager {
 			qualityGateThreshold: options.qualityGateThreshold,
 			findingBudget: options.findingBudget,
 			preparationErrors: options.preparationErrors,
+			projectIndex: projectIndex ?? undefined,
 		};
 		let result = buildReviewResult(job, resultOptions);
 

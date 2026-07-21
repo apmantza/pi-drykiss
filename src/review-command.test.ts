@@ -536,6 +536,9 @@ describe("tool parameter schemas (LLM-facing surface)", () => {
 				"background",
 				"format",
 				"postToPr",
+				"reviewMode",
+				"fix",
+				"since",
 			].sort((a, b) => a.localeCompare(b)),
 		);
 	});

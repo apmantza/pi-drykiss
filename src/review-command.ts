@@ -11,8 +11,8 @@ import { loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
 import { runDeepAutoreview } from "./deep-review-command.js";
 import { executeFlatReview } from "./review-tool-executor.js";
-import type { ReviewLens, AnyLens } from "./types.js";
-import { LENS_NAMES } from "./types.js";
+import type { ReviewLens, AnyLens, LensMode } from "./types.js";
+import { LENS_NAMES, LENS_MODE_MAP, isLensMode } from "./types.js";
 import { discoverCustomLenses } from "./prompt-loader.js";
 import { runScout, type ScoutResult, type ScoutStatus } from "./scout.js";
 import {
@@ -36,6 +36,7 @@ import {
 	verdictToGitHubEvent,
 	type PrInfo,
 } from "./github-pr.js";
+import { runTriage, formatTriageSummary } from "./triage.js";
 
 const MAX_FILES = 40;
 
@@ -149,6 +150,36 @@ export const DrykissAutoreviewParams = Type.Object({
 				description: "Subset of DRYKISS lenses to run",
 			}),
 		]),
+	),
+	reviewMode: Type.Optional(
+		Type.Union(
+			[
+				Type.Literal("review"),
+				Type.Literal("audit"),
+				Type.Literal("debt"),
+				Type.Literal("test"),
+				Type.Literal("health"),
+				Type.Literal("sweep"),
+			],
+			{
+				description:
+					"Named review mode that maps to a predefined lens subset. Mutually exclusive with `lens`/`lenses` — when provided, it overrides both. " +
+					"review=all lenses (default), audit=security+resilience+architecture, debt=simplicity+deduplication+clarity, test=tests, health=all lenses, sweep=all lenses.",
+			},
+		),
+	),
+	// ── On-demand prompt sections ──
+	fix: Type.Optional(
+		Type.Boolean({
+			description:
+				"When true, instruct every lens to include a concrete `fix` field in each finding with a ready-to-apply code replacement snippet.",
+		}),
+	),
+	since: Type.Optional(
+		Type.String({
+			description:
+				"A git ref (commit SHA, branch name, or tag). When provided, the review covers only the diff between this ref and HEAD — equivalent to mode=branch with base set to this ref.",
+		}),
 	),
 	// Note: the previous schema exposed `model`, `contextMode`,
 	// `maxFiles`, `validate`, and `deep*` parameters. We removed
@@ -280,6 +311,7 @@ type AutoreviewRequest = {
 	mode?: ReviewMode;
 	lens?: "all" | "scout" | AnyLens;
 	lenses?: "all" | AnyLens[];
+	reviewMode?: LensMode;
 };
 
 function isLongReview(params: AutoreviewRequest): boolean {
@@ -311,6 +343,12 @@ export async function executeDrykissAutoreviewTool(
 		pr?: string;
 		lens?: "all" | "scout" | AnyLens;
 		lenses?: "all" | AnyLens[];
+		/**
+		 * Named review mode that maps to a predefined lens subset.
+		 * Mutually exclusive with `lens`/`lenses` — when provided, it takes
+		 * precedence over both. See `LENS_MODE_MAP` in `./types.ts`.
+		 */
+		reviewMode?: LensMode;
 		/**
 		 * Internal-only: callers (deep-mode pipeline, tests) may pass
 		 * a model hint. The LLM-facing tool schema (DrykissAutoreviewParams)
@@ -359,6 +397,18 @@ export async function executeDrykissAutoreviewTool(
 		 * `gh` CLI to be authenticated.
 		 */
 		postToPr?: boolean;
+		/**
+		 * When true, append the fix-mode prompt section to each lens system
+		 * prompt, instructing lenses to include a concrete `fix` field in
+		 * every finding with a ready-to-apply code replacement snippet.
+		 */
+		fix?: boolean;
+		/**
+		 * A git ref (commit SHA, branch name, or tag). When provided,
+		 * overrides `mode` to "branch" and `base` to this ref, scoping the
+		 * review to `git diff <since>..HEAD`.
+		 */
+		since?: string;
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -449,6 +499,7 @@ export async function executeDrykissAutoreviewTool(
 		mode: params.mode ?? "auto",
 		lens: params.lens ?? "all",
 		lenses: params.lenses,
+		reviewMode: params.reviewMode,
 		deep: params.deep,
 	});
 	try {
@@ -488,7 +539,14 @@ export async function executeDrykissAutoreviewTool(
 	const suppressions = effectiveConfig.suppressions ?? [];
 	const contextMode =
 		params.contextMode ?? effectiveConfig.contextMode ?? "full";
-	const lenses = resolveLenses(params.lens, params.lenses);
+	// Apply config.defaultMode when the caller has not explicitly requested
+	// a lens subset via `lens`, `lenses`, or `reviewMode`.
+	const effectiveReviewMode: import("./types.js").LensMode | undefined =
+		params.reviewMode ??
+		(params.lens === undefined && params.lenses === undefined
+			? effectiveConfig.defaultMode
+			: undefined);
+	const lenses = resolveLenses(params.lens, params.lenses, effectiveReviewMode);
 	const fileProgress = makeAutoreviewFileProgress(onUpdate);
 	logAutoreviewEvent("autoreview.scope_start", {
 		correlationId,
@@ -496,13 +554,18 @@ export async function executeDrykissAutoreviewTool(
 		mode: params.mode ?? "auto",
 		scoutEnabled: effectiveConfig.scout?.enabled === true,
 	});
+	// --since <ref>: shorthand for mode=branch, base=<ref>
+	// Override any explicit mode/base when since is provided.
+	const sinceMode: ReviewMode | undefined = params.since ? "branch" : params.mode;
+	const sinceBase: string | undefined = params.since ?? params.base;
+
 	const scope = await resolveReviewScope(
 		pi,
 		ctx.cwd,
 		{
-			mode: params.mode,
+			mode: sinceMode,
 			files: params.files,
-			base: params.base,
+			base: sinceBase,
 			commit: params.commit,
 			pr: params.pr,
 		},
@@ -678,6 +741,7 @@ export async function executeDrykissAutoreviewTool(
 			? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
 			: undefined,
 		preSeedLensOutputs: preSeedLensOutputs.size > 0 ? preSeedLensOutputs : undefined,
+		fixMode: params.fix === true,
 	});
 	const formatMode = params.format ?? "compact";
 	const jobs =
@@ -737,6 +801,38 @@ export async function executeDrykissAutoreviewTool(
 		}
 	}
 
+	// ── Post-review interactive triage (opt-in) ────────────────────────────
+	// Triage is offered when:
+	//   - config.triage === true  (explicit opt-in)
+	//   - There are active (non-suppressed, non-rejected) findings to triage
+	//   - The review did not run in background mode (background === true/auto
+	//     callers always suppress interactive UI within their detached tasks)
+	let triageNote = "";
+	const triageEnabled = effectiveConfig.triage === true;
+	const activeFindings = finalResult.findings.filter(
+		(f) => !f._suppressed && !f._previouslyRejected,
+	);
+	if (triageEnabled && activeFindings.length > 0) {
+		try {
+			const triageSummary = await runTriage(finalResult, ctx, ctx.cwd);
+			triageNote = formatTriageSummary(triageSummary);
+			if (triageSummary.dismissed.length > 0 || triageSummary.deferred.length > 0) {
+				logAutoreviewEvent("autoreview.triage_complete", {
+					jobId: finalResult.jobId,
+					accepted: triageSummary.accepted.length,
+					dismissed: triageSummary.dismissed.length,
+					deferred: triageSummary.deferred.length,
+					skipped: triageSummary.skipped.length,
+				});
+			}
+		} catch (err) {
+			// Triage failures must never break the review result delivery.
+			console.warn(
+				`${LOG_PREFIX} Triage failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	}
+
 	const text =
 		progressLine +
 		(scoutNote ? `${scoutNote}\n` : "") +
@@ -747,7 +843,8 @@ export async function executeDrykissAutoreviewTool(
 			: formatReviewResultForTool(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
 				})) +
-		prPostNote;
+		prPostNote +
+		triageNote;
 
 	return {
 		content: [{ type: "text", text }],
@@ -786,10 +883,24 @@ function buildScoutNote(scope: ReviewScope): string {
 	return "";
 }
 
+/**
+ * Resolve the list of lenses to run.
+ *
+ * Priority (highest to lowest):
+ *   1. `reviewMode` — maps a named mode (audit, debt, test, …) to a lens
+ *      subset via `LENS_MODE_MAP`. Overrides `single` and `multi`.
+ *   2. `single` (`lens` param) — a single lens name or "all".
+ *   3. `multi` (`lenses` param) — an explicit array or "all".
+ *   4. Default: all built-in lenses.
+ */
 function resolveLenses(
 	single: "all" | AnyLens | undefined,
 	multi: "all" | AnyLens[] | undefined,
+	reviewMode?: LensMode,
 ): AnyLens[] {
+	if (reviewMode && isLensMode(reviewMode)) {
+		return [...LENS_MODE_MAP[reviewMode]];
+	}
 	if (single) {
 		if (single === "all") return [...LENS_NAMES];
 		return [single];

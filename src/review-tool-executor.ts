@@ -28,6 +28,12 @@ interface FlatReviewExecution {
 	 * task and feed their findings directly into synthesis.
 	 */
 	readonly preSeedLensOutputs?: Map<AnyLens, string>;
+	/**
+	 * When true, the fix-mode prompt section is appended to each lens
+	 * system prompt, instructing lenses to emit a `fix` field in every
+	 * finding with a ready-to-apply code replacement snippet.
+	 */
+	readonly fixMode?: boolean;
 }
 
 /** Run the standard flat review and record its final result. */
@@ -48,6 +54,7 @@ export async function executeFlatReview(
 		signal,
 		onProgress,
 		preSeedLensOutputs,
+		fixMode,
 	} = execution;
 	const result = await manager.runReview(
 		ctx,
@@ -78,6 +85,7 @@ export async function executeFlatReview(
 			preparationErrors: scope.preparationErrors,
 			onProgress,
 			preSeedLensOutputs,
+			fixMode,
 		},
 		signal,
 	);
