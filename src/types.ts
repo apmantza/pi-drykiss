@@ -37,7 +37,7 @@ export interface ReviewOptions {
 }
 
 export interface LensReview {
-	readonly lens: ReviewLens;
+	readonly lens: AnyLens;
 	readonly findings: Finding[];
 	readonly rawOutput: string;
 }
@@ -64,6 +64,42 @@ export const LENS_NAMES: readonly Exclude<ReviewLens, "all">[] = [
 	"security",
 	"docs",
 ];
+
+/**
+ * A user-defined custom lens name. Any non-empty string that corresponds
+ * to a `.md` file discovered under `~/.pi/drykiss/prompts/` and does not
+ * match a built-in lens name is treated as a custom lens.
+ */
+export type CustomLens = string;
+
+/**
+ * Any valid lens name: either a built-in `ReviewLens` (excluding "all")
+ * or a `CustomLens` discovered from the user's prompts directory.
+ * Use this type in call-sites that need to accept both built-in and
+ * custom lenses.
+ */
+export type AnyLens = Exclude<ReviewLens, "all"> | CustomLens;
+
+/** Set of built-in reviewable lens names for runtime membership tests. */
+export const BUILT_IN_LENS_SET: ReadonlySet<string> = new Set<string>(
+	LENS_NAMES,
+);
+
+/** Returns true when `value` is a built-in (non-"all") lens name. */
+export function isBuiltInLens(
+	value: string,
+): value is Exclude<ReviewLens, "all"> {
+	return BUILT_IN_LENS_SET.has(value);
+}
+
+/**
+ * Returns true when `value` is a valid individual lens name (either a built-in
+ * reviewable lens or a potential custom lens). Excludes `"all"` since that is a
+ * meta-name that means "run all lenses", not an individual lens to target.
+ */
+export function isAnyLens(value: unknown): value is AnyLens {
+	return typeof value === "string" && value.length > 0 && value !== "all";
+}
 
 export type Severity = "critical" | "high" | "medium" | "low" | "nit";
 
@@ -98,7 +134,7 @@ export interface Finding {
 	readonly source?: string;
 	readonly fixability?: "quick-fix" | "guided" | "manual";
 	readonly confidence?: "confirmed" | "likely" | "suspect";
-	readonly lens?: ReviewLens;
+	readonly lens?: AnyLens;
 	/**
 	 * Risk code from the project's RISK_CODES list. Used by config
 	 * (Phase 2: disable/severity/ignore/focus). Optional until Phase 2
@@ -150,7 +186,7 @@ export interface Finding {
 	 * `clusterAndFlatten`. Empty for singletons.
 	 * Not part of the LLM output contract.
 	 */
-	readonly _bucketLenses?: ReviewLens[];
+	readonly _bucketLenses?: AnyLens[];
 	/**
 	 * Internal marker set by the validator stage (see
 	 * `./validator.ts`). Reflects whether an independent LLM pass tried
@@ -314,7 +350,7 @@ export interface EditedFile {
  * legacy data and makes the validator's "must be non-empty" rule
  * meaningful.
  */
-export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
+export function mapRawToFinding(raw: any, lens?: AnyLens): Finding {
 	if (raw === null || raw === undefined || typeof raw !== "object") {
 		return {
 			file: "unknown",
@@ -362,7 +398,7 @@ export function mapRawToFinding(raw: any, lens?: ReviewLens): Finding {
  * Parse a JSON array of findings from LLM output.
  * Returns empty array on failure (does not throw).
  */
-export function parseFindingsArray(raw: unknown, lens?: ReviewLens): Finding[] {
+export function parseFindingsArray(raw: unknown, lens?: AnyLens): Finding[] {
 	if (!Array.isArray(raw)) return [];
 	return raw.map((f) => mapRawToFinding(f, lens));
 }

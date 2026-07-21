@@ -18,7 +18,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelSmart } from "./llm.js";
-import type { ReviewLens } from "./types.js";
+import type { AnyLens } from "./types.js";
 import { extractAssistantText } from "./content-utils.js";
 import { LENS_DISPLAY_NAMES, LOG_PREFIX } from "./constants.js";
 
@@ -142,9 +142,9 @@ export async function resolveModel(
  */
 export async function resolveAllModels(
 	ctx: ExtensionContext,
-	lenses: ReviewLens[],
-): Promise<Map<ReviewLens, Model<Api>>> {
-	const resolved = new Map<ReviewLens, Model<Api>>();
+	lenses: AnyLens[],
+): Promise<Map<AnyLens, Model<Api>>> {
+	const resolved = new Map<AnyLens, Model<Api>>();
 	for (const lens of lenses) {
 		resolved.set(lens, await resolveModel(ctx, lens));
 	}

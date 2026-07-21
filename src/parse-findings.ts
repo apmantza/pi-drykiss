@@ -1,6 +1,6 @@
 import { extractBalancedJson } from "./json-extract.js";
 import { lenientJsonParse, sanitizeJsonString } from "./json-utils.js";
-import { parseFindingsArray, type Finding, type ReviewLens } from "./types.js";
+import { parseFindingsArray, type Finding, type AnyLens } from "./types.js";
 
 export interface ParseFindingsResult {
 	readonly findings: Finding[];
@@ -86,7 +86,7 @@ function looksLikeFinding(obj: Record<string, unknown>): boolean {
 
 export function parseFindingsJson(
 	raw: string,
-	lens?: ReviewLens,
+	lens?: AnyLens,
 ): ParseFindingsResult {
 	try {
 		// Repair unescaped quotes / newlines inside string values FIRST, so the

@@ -14,7 +14,7 @@ import { toErrorMessage } from "./error-utils.js";
 import { assertPathInRoot } from "./path-utils.js";
 import { isPlainObject } from "./json-utils.js";
 import { VALID_RISK_CODES } from "./prompts/risk-codes.js";
-import { LENS_NAMES, type ReviewLens } from "./types.js";
+import { LENS_NAMES, type ReviewLens, type AnyLens, isAnyLens } from "./types.js";
 import type { FindingBudget } from "./finding-budget.js";
 
 // ── Suppression types (Phase 3) ─────────────────────────────────────────
@@ -68,7 +68,8 @@ export type IgnorePattern = string;
 export interface ReviewPathInstruction {
 	readonly glob: string;
 	readonly instruction: string;
-	readonly lenses?: readonly ReviewLens[];
+	/** Built-in or custom lens names this instruction applies to. When absent, applies to all lenses. */
+	readonly lenses?: readonly AnyLens[];
 }
 
 export interface ReviewPathFilters {
@@ -135,16 +136,8 @@ export interface DrykissAutoreviewConfig {
 	mode?: "local" | "staged" | "branch" | "full" | "files";
 	/** Base ref for branch-mode autoreviews. */
 	base?: string;
-	/** Lens subset to run. Defaults to all lenses. */
-	lenses?: Array<
-		| "simplicity"
-		| "deduplication"
-		| "clarity"
-		| "resilience"
-		| "architecture"
-		| "tests"
-		| "security"
-	>;
+	/** Lens subset to run. Defaults to all lenses. May include custom lens names. */
+	lenses?: Array<AnyLens>;
 	/** Maximum files reviewed per autoreview run. Defaults to 40. */
 	maxFiles?: number;
 	/** Override context mode for automatic reviews. */
@@ -160,6 +153,15 @@ export interface DrykissAutoreviewConfig {
 export interface DrykissConfig {
 	/** Default model for all lenses when not specified */
 	defaultModel?: string;
+	/**
+	 * When true, automatically post review findings back to the GitHub PR as
+	 * a pull-request review after a PR-mode (`mode: "pr"`) review completes.
+	 * Requires the `gh` CLI to be authenticated. The verdict (approve /
+	 * request_changes / comment) is derived from the synthesis result.
+	 *
+	 * Default: false.
+	 */
+	postToPr?: boolean;
 	/** Per-lens model overrides, including the scout pre-flight stage. */
 	lensModels?: {
 		simplicity?: string;
@@ -252,6 +254,22 @@ export interface DrykissConfig {
 	 * simultaneous API calls. Must be between 1 and 10. Default: 3.
 	 */
 	concurrency?: number;
+	/**
+	 * Lenses that run in Bugbot-style deep mode (multi-pass adversarial +
+	 * validator) instead of the standard single-pass flow. Defaults to
+	 * `["security"]` when omitted. Set to `[]` or use `deep: false` to
+	 * disable deep mode entirely.
+	 *
+	 * Valid values are the named DRYKISS lens names (excluding "all").
+	 */
+	deepLenses?: Exclude<ReviewLens, "all">[];
+	/**
+	 * Master on/off switch for the deep-review pipeline. When `false`,
+	 * all lenses run as standard single-pass reviews regardless of
+	 * `deepLenses`. Equivalent to passing `--no-deep` at the CLI.
+	 * Defaults to `true`.
+	 */
+	deep?: boolean;
 }
 
 function getConfigPath(): string {
@@ -418,6 +436,11 @@ export async function loadEffectiveConfig(
 	const cleanedReview = cleanReviewPolicy(config.review);
 	const cleanedScout = cleanScoutConfig(config.scout);
 	const cleanedConcurrency = cleanConcurrency(config.concurrency, warnings);
+	const { cleanedDeepLenses, cleanedDeep } = cleanDeepConfig(
+		config.deepLenses,
+		config.deep,
+		warnings,
+	);
 
 	return {
 		config: {
@@ -447,6 +470,10 @@ export async function loadEffectiveConfig(
 			...(cleanedConcurrency !== undefined
 				? { concurrency: cleanedConcurrency }
 				: {}),
+			...(cleanedDeepLenses !== undefined
+				? { deepLenses: cleanedDeepLenses }
+				: {}),
+			...(cleanedDeep !== undefined ? { deep: cleanedDeep } : {}),
 		},
 		warnings,
 	};
@@ -475,7 +502,7 @@ function cleanReviewPolicy(value: unknown): ReviewPolicyConfig | undefined {
 			continue;
 		}
 		const lenses = Array.isArray(raw.lenses)
-			? raw.lenses.filter(isReviewLens)
+			? raw.lenses.filter(isAnyLens)
 			: undefined;
 		pathInstructions.push({
 			glob: raw.glob,
@@ -550,6 +577,56 @@ function cleanConcurrency(
 		return undefined;
 	}
 	return value;
+}
+
+/** Validate `deepLenses` and `deep` config fields.
+ *  - `deepLenses`: filter out non-lens-name values and warn.
+ *  - `deep`: must be boolean; non-boolean is ignored with a warning.
+ *  Returns `undefined` for each field if it should be omitted from the
+ *  cleaned config (i.e. the field was absent or entirely invalid). */
+function cleanDeepConfig(
+	deepLenses: unknown,
+	deep: unknown,
+	warnings: string[],
+): {
+	cleanedDeepLenses: Exclude<ReviewLens, "all">[] | undefined;
+	cleanedDeep: boolean | undefined;
+} {
+	let cleanedDeepLenses: Exclude<ReviewLens, "all">[] | undefined;
+	if (deepLenses !== undefined) {
+		if (!Array.isArray(deepLenses)) {
+			warnings.push(
+				`Invalid deepLenses value; must be an array of lens names. Using default (["security"]).`,
+			);
+		} else {
+			const valid: Exclude<ReviewLens, "all">[] = [];
+			for (const item of deepLenses) {
+				// isReviewLens checks against LENS_NAMES (which excludes "all"),
+				// so items that pass are safely Exclude<ReviewLens, "all">.
+				if (isReviewLens(item)) {
+					valid.push(item as Exclude<ReviewLens, "all">);
+				} else {
+					warnings.push(
+						`Unknown lens name "${String(item)}" in deepLenses; ignoring.`,
+					);
+				}
+			}
+			cleanedDeepLenses = valid;
+		}
+	}
+
+	let cleanedDeep: boolean | undefined;
+	if (deep !== undefined) {
+		if (typeof deep !== "boolean") {
+			warnings.push(
+				`Invalid deep value "${String(deep)}"; must be a boolean. Ignoring.`,
+			);
+		} else {
+			cleanedDeep = deep;
+		}
+	}
+
+	return { cleanedDeepLenses, cleanedDeep };
 }
 
 function cleanPathFilters(value: unknown): ReviewPathFilters | undefined {

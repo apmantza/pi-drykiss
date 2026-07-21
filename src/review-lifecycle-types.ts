@@ -3,7 +3,7 @@ import type {
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api, Usage } from "@earendil-works/pi-ai";
-import type { ReviewLens, SynthesisResult } from "./types.js";
+import type { ReviewLens, AnyLens, SynthesisResult } from "./types.js";
 
 export type LensStatus = "queued" | "running" | "done" | "error";
 
@@ -31,8 +31,8 @@ export interface ReviewValidationIssue {
 export interface ReviewJobState {
 	id: string;
 	files: string[];
-	lenses: ReviewLens[];
-	states: Map<ReviewLens, LensState>;
+	lenses: AnyLens[];
+	states: Map<AnyLens, LensState>;
 	synthesisStatus: "idle" | "running" | "done" | "error";
 	synthesisResult?: SynthesisResult;
 	synthesisStartedAt?: number;
@@ -58,7 +58,7 @@ export interface SubagentResult {
 
 export interface LensExecutionTask {
 	readonly jobId: string;
-	readonly lens: ReviewLens;
+	readonly lens: AnyLens;
 	readonly model: Model<Api>;
 	readonly systemPrompt: string;
 	readonly userPrompt: string;

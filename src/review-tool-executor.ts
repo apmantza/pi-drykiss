@@ -2,7 +2,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { ReviewLens } from "./types.js";
+import type { AnyLens } from "./types.js";
 import type { DrykissConfig } from "./config.js";
 import type { ReviewJob, ReviewManager } from "./review-manager.js";
 import type { ReviewResult } from "./review-result.js";
@@ -15,13 +15,19 @@ interface FlatReviewExecution {
 	readonly manager: ReviewManager;
 	readonly scope: ReviewScope;
 	readonly config: DrykissConfig;
-	readonly lenses: readonly ReviewLens[];
+	readonly lenses: readonly AnyLens[];
 	readonly activeConstraints: string;
 	readonly suppressions: DrykissConfig["suppressions"];
 	readonly model?: string;
 	readonly validate?: boolean;
 	readonly signal?: AbortSignal;
 	readonly onProgress?: (job: ReviewJob) => void;
+	/**
+	 * Pre-seeded findings JSON (serialised Finding[]) for lenses already
+	 * executed via the deep-review pipeline. These lenses skip the subagent
+	 * task and feed their findings directly into synthesis.
+	 */
+	readonly preSeedLensOutputs?: Map<AnyLens, string>;
 }
 
 /** Run the standard flat review and record its final result. */
@@ -41,6 +47,7 @@ export async function executeFlatReview(
 		validate,
 		signal,
 		onProgress,
+		preSeedLensOutputs,
 	} = execution;
 	const result = await manager.runReview(
 		ctx,
@@ -70,6 +77,7 @@ export async function executeFlatReview(
 			findingBudget: config.review?.findingBudget,
 			preparationErrors: scope.preparationErrors,
 			onProgress,
+			preSeedLensOutputs,
 		},
 		signal,
 	);

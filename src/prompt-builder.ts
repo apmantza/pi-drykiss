@@ -12,7 +12,7 @@
  */
 
 import { join } from "node:path";
-import type { ChangedFile, Finding, ReviewLens } from "./types.js";
+import type { ChangedFile, Finding, ReviewLens, AnyLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
 import type { ProjectIndexEntry } from "./git-diff.js";
 import { userPromptsDir } from "./prompt-loader.js";
@@ -35,7 +35,7 @@ export { ensureDefaultPrompts, resetPrompts } from "./prompt-seed.js";
 
 /** Compose a lens system prompt. Delegates to the composer (P0.5). */
 export async function loadLensSystemPrompt(
-	lens: Exclude<ReviewLens, "all">,
+	lens: AnyLens,
 	activeConstraints?: string,
 ): Promise<string> {
 	return composeLensPrompt(lens, { activeConstraints });
@@ -54,7 +54,7 @@ export async function loadSynthesisSystemPrompt(
  * instead of a pre-formatted string.
  */
 export async function loadLensSystemPromptWithConfig(
-	lens: Exclude<ReviewLens, "all">,
+	lens: AnyLens,
 	rt: import("./config.js").RiskTargeting | undefined,
 ): Promise<string> {
 	const { buildActiveConstraints } = await import("./active-constraints.js");
@@ -148,7 +148,7 @@ const EXAMINE_CONTEXT_INSTRUCTION =
 // ── Public API ──────────────────────────────────────────────────────────
 
 export interface ReviewPrompt {
-	readonly lens: ReviewLens;
+	readonly lens: AnyLens;
 	readonly systemPrompt: string;
 	readonly userPrompt: string;
 }
@@ -169,7 +169,7 @@ export async function buildReviewPrompts(
 	cwd: string,
 	files: ChangedFile[],
 	diffs: Map<string, string>,
-	lens: ReviewLens,
+	lens: ReviewLens | AnyLens,
 	options?: {
 		contents?: Map<
 			string,
@@ -214,7 +214,7 @@ export async function buildReviewPrompts(
 		: "";
 
 	function buildUserPrompt(
-		currentLens: Exclude<ReviewLens, "all">,
+		currentLens: AnyLens,
 		includeIndex: boolean,
 	): string {
 		let prompt = EXAMINE_CONTEXT_INSTRUCTION;

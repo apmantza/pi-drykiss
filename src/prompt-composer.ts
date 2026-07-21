@@ -23,7 +23,7 @@
  */
 
 import { loadPromptBody } from "./prompt-loader.js";
-import type { ReviewLens } from "./types.js";
+import type { ReviewLens, AnyLens } from "./types.js";
 import { logAutoreviewEvent } from "./logger.js";
 
 export type LensName = Exclude<ReviewLens, "all"> | "synthesis";
@@ -46,9 +46,13 @@ function substitute(template: string, vars: Record<string, string>): string {
 
 /**
  * Compose a lens system prompt.
+ * Accepts both built-in lenses (`Exclude<ReviewLens, "all">`) and custom
+ * lenses discovered from the user's prompts directory (`AnyLens`).
+ * Custom lenses receive the same shared fragments (iron-law, json-output,
+ * grounding-rules) as built-in lenses so their output format is consistent.
  */
 export async function composeLensPrompt(
-	lens: Exclude<ReviewLens, "all">,
+	lens: AnyLens,
 	options: ComposeOptions = {},
 ): Promise<string> {
 	const [ironLaw, lensBody, jsonOutput, grounding, activeTemplate] =

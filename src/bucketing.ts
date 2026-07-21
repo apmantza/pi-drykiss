@@ -34,7 +34,7 @@
  * pi-drykiss's `Finding` shape and made pure.
  */
 
-import type { Finding, ReviewLens } from "./types.js";
+import type { Finding, AnyLens } from "./types.js";
 import {
 	CO_LOCATED_JACCARD_THRESHOLD,
 	CO_LOCATED_LINE_WINDOW,
@@ -52,7 +52,7 @@ export interface FindingBucket {
 	/** Number of DISTINCT lenses that contributed. */
 	readonly votes: number;
 	/** Distinct lens names that contributed, sorted for determinism. */
-	readonly contributingLenses: ReviewLens[];
+	readonly contributingLenses: AnyLens[];
 	/** File shared by all members. */
 	readonly file: string;
 	/** Tightened line (the first defined value, then the cluster mean — single anchor is fine). */
@@ -77,7 +77,7 @@ interface InternalBucket {
 	severities: Finding["severity"][];
 	messages: string[];
 	members: Finding[];
-	lenses: Set<ReviewLens>;
+	lenses: Set<AnyLens>;
 }
 
 /**

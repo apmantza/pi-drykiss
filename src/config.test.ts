@@ -275,7 +275,7 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 		]);
 	});
 
-	it("retains only reviewable lens names in path instructions", async () => {
+	it("retains built-in and custom lens names in path instructions, drops only 'all'", async () => {
 		vi.mocked(readFile).mockResolvedValue(
 			JSON.stringify({
 				review: {
@@ -283,6 +283,8 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 						{
 							glob: "src/auth/**",
 							instruction: "Check authorization.",
+							// "all" is a meta-name and must be dropped.
+							// "unknown" is treated as a valid custom lens name and kept.
 							lenses: ["security", "docs", "all", "unknown"],
 						},
 					],
@@ -297,7 +299,7 @@ describe("loadEffectiveConfig — Phase 2 validation", () => {
 			{
 				glob: "src/auth/**",
 				instruction: "Check authorization.",
-				lenses: ["security", "docs"],
+				lenses: ["security", "docs", "unknown"],
 			},
 		]);
 	});

@@ -2,9 +2,9 @@
  * GitHub PR integration — fetches PR diffs and file contents via `gh` CLI.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import type { ChangedFile } from "./types.js";
+import type { ChangedFile, Finding } from "./types.js";
 import { detectLanguage } from "./git-diff.js";
 
 /**
@@ -392,3 +392,227 @@ export function isPrReference(input: string): boolean {
 		/^\d+$/.test(trimmed)
 	);
 }
+
+// ── PR review posting ────────────────────────────────────────────────────
+
+/**
+ * The verdict passed to GitHub's pull request review API.
+ *
+ * - "APPROVE"          → marks the PR as approved.
+ * - "REQUEST_CHANGES"  → requests changes from the author.
+ * - "COMMENT"          → leaves a comment-only review (no approval action).
+ */
+export type PrReviewVerdict = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+
+/** Result returned by `postPrReview`. */
+export interface PostPrReviewResult {
+	/** Whether the API call succeeded. */
+	readonly success: boolean;
+	/** GitHub HTML URL of the created review, when available. */
+	readonly reviewUrl?: string;
+	/** Human-readable error message on failure. */
+	readonly error?: string;
+}
+
+/**
+ * Map a DRYKISS synthesis verdict to a GitHub PR review event.
+ *
+ * "Approve"                → APPROVE
+ * "Request changes"        → REQUEST_CHANGES
+ * "Needs security review"  → REQUEST_CHANGES (security issues warrant changes)
+ */
+export function verdictToGitHubEvent(
+	verdict: string,
+): PrReviewVerdict {
+	switch (verdict) {
+		case "Approve":
+			return "APPROVE";
+		case "Request changes":
+		case "Needs security review":
+			return "REQUEST_CHANGES";
+		default:
+			return "COMMENT";
+	}
+}
+
+/**
+ * Format a single Finding into a Markdown body suitable for a PR review
+ * inline comment.
+ */
+function formatFindingBody(finding: Finding): string {
+	const severityEmoji: Record<string, string> = {
+		critical: "🔴",
+		high: "🟠",
+		medium: "🟡",
+		low: "🔵",
+		nit: "⚪",
+	};
+	const icon = severityEmoji[finding.severity] ?? "⚫";
+	const lines: string[] = [
+		`${icon} **[${finding.severity.toUpperCase()}]** ${finding.summary}`,
+	];
+	if (finding.detail && finding.detail !== finding.summary) {
+		lines.push("", finding.detail);
+	}
+	if (finding.suggestion) {
+		lines.push("", `**Suggestion:** ${finding.suggestion}`);
+	}
+	if (finding.consequence) {
+		lines.push("", `**Consequence:** ${finding.consequence}`);
+	}
+	if (finding.category) {
+		lines.push("", `_Category: ${finding.category}_`);
+	}
+	return lines.join("\n");
+}
+
+/**
+ * A single inline comment for the GitHub PR review API.
+ */
+interface GitHubReviewComment {
+	path: string;
+	line?: number;
+	body: string;
+}
+
+/**
+ * Post a PR review via `gh api` with findings mapped to inline comments.
+ *
+ * Findings that have a `line` number become inline comments on the specific
+ * file + line. Findings without a line number are rolled up into the top-level
+ * review body instead (GitHub does not allow inline comments without a line).
+ *
+ * @param cwd       - Working directory (for gh auth context).
+ * @param owner     - GitHub repository owner.
+ * @param repo      - GitHub repository name.
+ * @param prNumber  - Pull request number.
+ * @param findings  - Review findings to post.
+ * @param verdict   - GitHub review event ("APPROVE", "REQUEST_CHANGES", or "COMMENT").
+ * @param summary   - Optional overall review summary used as the review body.
+ * @returns         - Success flag, review URL, and error details when applicable.
+ */
+export async function postPrReview(
+	cwd: string,
+	owner: string,
+	repo: string,
+	prNumber: number,
+	findings: readonly Finding[],
+	verdict: PrReviewVerdict,
+	summary?: string,
+): Promise<PostPrReviewResult> {
+	// Separate findings into inline (have a line) vs. body-only (no line).
+	const inlineFindings = findings.filter(
+		(f) => f.line !== undefined && f.line > 0,
+	);
+	const bodyFindings = findings.filter(
+		(f) => f.line === undefined || f.line <= 0,
+	);
+
+	// Build inline comment objects.
+	const comments: GitHubReviewComment[] = inlineFindings.map((f) => ({
+		path: f.file,
+		line: f.line as number,
+		body: formatFindingBody(f),
+	}));
+
+	// Build the top-level review body.
+	const bodyParts: string[] = [];
+	if (summary) {
+		bodyParts.push(summary);
+	}
+	if (bodyFindings.length > 0) {
+		if (bodyParts.length > 0) bodyParts.push("");
+		bodyParts.push("## Additional findings (no specific line)");
+		for (const f of bodyFindings) {
+			bodyParts.push("", `**\`${f.file}\`**`);
+			bodyParts.push(formatFindingBody(f));
+		}
+	}
+	// When there are no findings at all and no summary, provide a minimal body
+	// so the API call always sends a non-empty body.
+	if (bodyParts.length === 0) {
+		bodyParts.push("DRYKISS automated review — no findings.");
+	}
+	const body = bodyParts.join("\n");
+
+	// Construct the JSON payload for `gh api --input -`.
+	const payload = {
+		event: verdict,
+		body,
+		comments,
+	};
+
+	// Use spawn so we can pipe the JSON payload via stdin without embedding
+	// it in shell args (avoids OS argument-length limits and process listings).
+	const stdout = await new Promise<string>((resolve, reject) => {
+		const child = spawn(
+			"gh",
+			[
+				"api",
+				`repos/${safeRepoRef(owner, repo)}/pulls/${prNumber}/reviews`,
+				"--method",
+				"POST",
+				"--input",
+				"-",
+			],
+			{ cwd, stdio: ["pipe", "pipe", "pipe"] },
+		);
+
+		const stdoutChunks: Buffer[] = [];
+		const stderrChunks: Buffer[] = [];
+
+		child.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+		child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+		child.on("error", reject);
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve(Buffer.concat(stdoutChunks).toString("utf-8"));
+			} else {
+				const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
+				reject(new Error(stderr || `gh api exited with code ${code}`));
+			}
+		});
+
+		const payloadJson = JSON.stringify(payload);
+		child.stdin?.end(payloadJson, "utf-8");
+	});
+
+	let reviewUrl: string | undefined;
+	try {
+		const parsed = JSON.parse(stdout) as unknown;
+		if (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			"html_url" in parsed &&
+			typeof (parsed as Record<string, unknown>).html_url === "string"
+		) {
+			reviewUrl = (parsed as Record<string, unknown>).html_url as string;
+		}
+	} catch {
+		// Non-JSON response — ignore, the post was still successful.
+	}
+
+	return { success: true, reviewUrl };
+}
+
+/**
+ * Internal wrapper that runs `postPrReview` and returns a `PostPrReviewResult`
+ * rather than throwing. This exists so callers can `await` a single expression
+ * that always resolves (never rejects).
+ */
+async function safePostPrReview(
+	...args: Parameters<typeof postPrReview>
+): Promise<PostPrReviewResult> {
+	try {
+		return await postPrReview(...args);
+	} catch (err) {
+		return {
+			success: false,
+			error: err instanceof Error ? err.message : String(err),
+		};
+	}
+}
+
+// Re-export so review-command.ts can use the safe variant if preferred.
+export { safePostPrReview };

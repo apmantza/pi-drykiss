@@ -5,6 +5,8 @@ import {
 	formatReviewWorkingMessage,
 	pickVerdict,
 	formatFinding,
+	groupFindingsByRiskCode,
+	formatFindingsGrouped,
 } from "./review-widget.js";
 import type { LensState, ReviewJob } from "./review-manager.js";
 import type { ReviewLens, Finding } from "./types.js";
@@ -482,5 +484,193 @@ describe("pickVerdict", () => {
 		expect(pickVerdict(42, false)).toBe("Request changes");
 		expect(pickVerdict({ verdict: "Approve" }, false)).toBe("Request changes");
 		expect(pickVerdict(true, false)).toBe("Request changes");
+	});
+});
+
+describe("groupFindingsByRiskCode", () => {
+	function makeFinding(overrides: Partial<Finding> = {}): Finding {
+		return {
+			file: "src/a.ts",
+			severity: "high",
+			category: "Cat",
+			summary: "sum",
+			detail: "det",
+			suggestion: "sug",
+			...overrides,
+		};
+	}
+
+	it("returns an empty array for no findings", () => {
+		expect(groupFindingsByRiskCode([])).toEqual([]);
+	});
+
+	it("places findings without riskCode into an Other bucket", () => {
+		const f = makeFinding();
+		const groups = groupFindingsByRiskCode([f]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].riskCode).toBeNull();
+		expect(groups[0].name).toBe("Other");
+		expect(groups[0].findings).toEqual([f]);
+	});
+
+	it("omits the Other bucket when all findings have a riskCode", () => {
+		const f = makeFinding({ riskCode: "K1" });
+		const groups = groupFindingsByRiskCode([f]);
+		expect(groups.every((g) => g.riskCode !== null)).toBe(true);
+	});
+
+	it("resolves known risk codes to their catalogue name", () => {
+		const f = makeFinding({ riskCode: "K1" });
+		const groups = groupFindingsByRiskCode([f]);
+		expect(groups[0].riskCode).toBe("K1");
+		expect(groups[0].name).toBe("KISS violation");
+	});
+
+	it("falls back to the raw code when the code is not in the catalogue", () => {
+		const f = makeFinding({ riskCode: "ZZ99" });
+		const groups = groupFindingsByRiskCode([f]);
+		expect(groups[0].riskCode).toBe("ZZ99");
+		expect(groups[0].name).toBe("ZZ99");
+	});
+
+	it("groups multiple findings under the same code", () => {
+		const f1 = makeFinding({ riskCode: "R1" });
+		const f2 = makeFinding({ riskCode: "R1", file: "src/b.ts" });
+		const groups = groupFindingsByRiskCode([f1, f2]);
+		expect(groups).toHaveLength(1);
+		expect(groups[0].findings).toHaveLength(2);
+	});
+
+	it("preserves first-seen order for risk codes", () => {
+		const fK1 = makeFinding({ riskCode: "K1" });
+		const fR1 = makeFinding({ riskCode: "R1" });
+		const fD1 = makeFinding({ riskCode: "D1" });
+		const groups = groupFindingsByRiskCode([fK1, fR1, fD1]);
+		expect(groups.map((g) => g.riskCode)).toEqual(["K1", "R1", "D1"]);
+	});
+
+	it("puts the Other bucket last when mixed findings are present", () => {
+		const fCoded = makeFinding({ riskCode: "S1" });
+		const fNone = makeFinding();
+		const groups = groupFindingsByRiskCode([fCoded, fNone]);
+		expect(groups[groups.length - 1].riskCode).toBeNull();
+	});
+});
+
+describe("formatFindingsGrouped", () => {
+	function makeFinding(overrides: Partial<Finding> = {}): Finding {
+		return {
+			file: "src/a.ts",
+			severity: "high",
+			category: "Cat",
+			summary: "sum",
+			detail: "det",
+			suggestion: "sug",
+			lens: "simplicity",
+			...overrides,
+		};
+	}
+
+	it("returns an empty string for no findings", () => {
+		expect(formatFindingsGrouped([])).toBe("");
+	});
+
+	it("renders a severity header for each non-empty bucket", () => {
+		const f = makeFinding({ severity: "critical" });
+		const out = formatFindingsGrouped([f]);
+		expect(out).toContain("── Critical (1) ──");
+	});
+
+	it("omits severity buckets that have no findings", () => {
+		const f = makeFinding({ severity: "medium" });
+		const out = formatFindingsGrouped([f]);
+		expect(out).not.toContain("Critical");
+		expect(out).not.toContain("High");
+		expect(out).toContain("Medium");
+	});
+
+	it("renders severity groups in canonical order (critical first)", () => {
+		const fLow = makeFinding({ severity: "low" });
+		const fCrit = makeFinding({ severity: "critical" });
+		const out = formatFindingsGrouped([fLow, fCrit]);
+		expect(out.indexOf("Critical")).toBeLessThan(out.indexOf("Low"));
+	});
+
+	it("auto-enables risk-code sub-groups when any finding has a riskCode", () => {
+		const f = makeFinding({ riskCode: "K1" });
+		const out = formatFindingsGrouped([f]);
+		expect(out).toContain("[K1] KISS violation");
+	});
+
+	it("does not render risk-code sub-groups when no finding has a riskCode", () => {
+		const f = makeFinding();
+		const out = formatFindingsGrouped([f]);
+		// severity header present, but no sub-group badge line (e.g. "[K1] ..." or "Other (N)")
+		expect(out).toContain("── High (1) ──");
+		expect(out).not.toMatch(/^\s+\[/m); // no indented badge line
+		expect(out).not.toContain("Other (");
+	});
+
+	it("shows the finding count in the sub-group header", () => {
+		const f1 = makeFinding({ riskCode: "R1" });
+		const f2 = makeFinding({ riskCode: "R1", file: "src/b.ts" });
+		const out = formatFindingsGrouped([f1, f2]);
+		expect(out).toContain("[R1] Divergent change (2)");
+	});
+
+	it("renders an Other sub-group for findings without riskCode", () => {
+		const fCoded = makeFinding({ riskCode: "K1" });
+		const fNone = makeFinding({ riskCode: undefined });
+		const out = formatFindingsGrouped([fCoded, fNone]);
+		expect(out).toContain("Other (1)");
+	});
+
+	it("force-disables risk-code sub-groups when groupByRiskCode is false", () => {
+		const f = makeFinding({ riskCode: "K1" });
+		const out = formatFindingsGrouped([f], undefined, {
+			groupByRiskCode: false,
+		});
+		expect(out).not.toContain("[K1]");
+	});
+
+	it("force-enables risk-code sub-groups when groupByRiskCode is true even without riskCodes", () => {
+		const f = makeFinding({ riskCode: undefined });
+		const out = formatFindingsGrouped([f], undefined, {
+			groupByRiskCode: true,
+		});
+		// With no risk codes and forced grouping, falls into "Other" bucket
+		expect(out).toContain("Other (1)");
+	});
+
+	it("indents finding lines under the sub-group header", () => {
+		const f = makeFinding({ riskCode: "K1" });
+		const out = formatFindingsGrouped([f]);
+		// Each finding line should be indented by 2 spaces
+		const findingLines = out
+			.split("\n")
+			.filter((line) => line.includes("🟠"));
+		expect(findingLines.length).toBeGreaterThan(0);
+		for (const line of findingLines) {
+			expect(line.startsWith("  ")).toBe(true);
+		}
+	});
+
+	it("uses the provided theme for bold and fg colouring", () => {
+		const log: string[] = [];
+		const theme = {
+			fg: (color: string, text: string) => {
+				log.push(`fg:${color}`);
+				return text;
+			},
+			bold: (text: string) => {
+				log.push("bold");
+				return text;
+			},
+			dim: (_text: string) => _text,
+		};
+		const f = makeFinding({ riskCode: "D1" });
+		formatFindingsGrouped([f], theme);
+		expect(log).toContain("bold"); // severity header
+		expect(log).toContain("fg:accent"); // sub-group badge
 	});
 });

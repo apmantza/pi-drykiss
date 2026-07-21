@@ -5,7 +5,7 @@ import type {
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { ReviewLens, ChangedFile } from "./types.js";
+import type { ReviewLens, AnyLens, ChangedFile } from "./types.js";
 import { LENS_NAMES, createFallbackSynthesis } from "./types.js";
 import { buildReviewPrompts } from "./prompt-builder.js";
 import { appendHistory, loadHistory } from "./persist.js";
@@ -109,7 +109,7 @@ export class ReviewManager {
 	/** Queue of lens review tasks waiting for a slot. */
 	private taskQueue: {
 		jobId: string;
-		lens: ReviewLens;
+		lens: AnyLens;
 		model: Model<Api>;
 		systemPrompt: string;
 		userPrompt: string;
@@ -202,7 +202,7 @@ export class ReviewManager {
 		projectIndex: import("./git-diff.js").ProjectIndexEntry[] | undefined,
 		options: {
 			model?: string;
-			lenses?: ReviewLens[];
+			lenses?: AnyLens[];
 			activeConstraints?: string;
 			commands?: { test?: string; lint?: string };
 			pathInstructions?: readonly import("./config.js").ReviewPathInstruction[];
@@ -210,10 +210,18 @@ export class ReviewManager {
 			mode?: string;
 			/** Human-readable scope label injected into the posture block. */
 			scopeLabel?: string;
+			/**
+			 * Pre-seeded findings JSON for lenses already run externally (e.g. via
+			 * the deep-review pipeline). When a lens has an entry here, its state is
+			 * initialised as "done" with the provided rawOutput and no subagent task
+			 * is queued for it. The findings are fed into synthesis alongside
+			 * single-pass lens results.
+			 */
+			preSeedLensOutputs?: Map<AnyLens, string>;
 		},
 	): Promise<string> {
 		const id = randomUUID().slice(0, 12);
-		const lenses: ReviewLens[] = options.lenses ?? [...LENS_NAMES];
+		const lenses: AnyLens[] = options.lenses ?? [...LENS_NAMES];
 		logAutoreviewEvent("review.job_start", {
 			jobId: id,
 			cwd,
@@ -264,17 +272,33 @@ export class ReviewManager {
 		});
 
 		// Initialize job
-		const states = new Map<ReviewLens, LensState>();
+		const states = new Map<AnyLens, LensState>();
+		const preSeed = options.preSeedLensOutputs;
 		for (const lens of lenses) {
 			const m = modelMap.get(lens);
-			states.set(lens, {
-				status: "queued",
-				modelName: m?.name ?? "unknown",
-				provider: m?.provider,
-				durationMs: 0,
-				findingsCount: 0,
-				rawOutput: "[]",
-			});
+			const preSeeded = preSeed?.get(lens);
+			if (preSeeded !== undefined) {
+				// Lens was already run via deep-review; mark done immediately so
+				// synthesis can pick up the findings without a subagent task.
+				const { parseFindingsJson } = await import("./parse-findings.js");
+				const { findings } = parseFindingsJson(preSeeded, lens);
+				states.set(lens, {
+					status: "done",
+					modelName: "deep-review",
+					durationMs: 0,
+					findingsCount: findings.length,
+					rawOutput: JSON.stringify(findings, null, 2),
+				});
+			} else {
+				states.set(lens, {
+					status: "queued",
+					modelName: m?.name ?? "unknown",
+					provider: m?.provider,
+					durationMs: 0,
+					findingsCount: 0,
+					rawOutput: "[]",
+				});
+			}
 		}
 
 		const job: ReviewJob = {
@@ -309,8 +333,11 @@ export class ReviewManager {
 		this.abortControllers.set(id, abortController);
 
 		try {
-			// Queue all lens tasks
+			// Queue all lens tasks (skip lenses already satisfied by preSeedLensOutputs)
 			for (const lens of lenses) {
+				// Pre-seeded lenses are already "done"; no subagent needed.
+				if (preSeed?.has(lens)) continue;
+
 				const prompt = promptMap.get(lens);
 				const model = modelMap.get(lens);
 				if (!prompt || !model) {
@@ -339,10 +366,25 @@ export class ReviewManager {
 				});
 			}
 
-			// Start draining
-			this.drain(ctx, pi, cwd).catch((err) =>
-				this.logDrainFailure(err, ctx, pi, cwd),
-			);
+			// If every lens was pre-seeded, skip draining and go directly to
+			// synthesis (no tasks will ever complete to trigger onAllLensesDone).
+			const allPreSeeded =
+				preSeed !== undefined && lenses.every((l) => preSeed.has(l));
+			if (allPreSeeded) {
+				// Fire synthesis asynchronously, mirroring what drain→runLens does.
+				this.handleAllLensesDone(ctx, cwd, job).catch((err) => {
+					console.warn(
+						"%s All-pre-seeded synthesis failed: %o",
+						LOG_PREFIX,
+						err,
+					);
+				});
+			} else {
+				// Start draining
+				this.drain(ctx, pi, cwd).catch((err) =>
+					this.logDrainFailure(err, ctx, pi, cwd),
+				);
+			}
 			return id;
 		} catch (err) {
 			logAutoreviewError("review.job_setup_error", err, { jobId: id });
@@ -547,7 +589,7 @@ export class ReviewManager {
 		options: {
 			model?: string;
 			validatorModelHint?: string;
-			lenses?: ReviewLens[];
+			lenses?: AnyLens[];
 			target?: ReviewResultTarget;
 			onProgress?: (job: ReviewJob) => void;
 			progressIntervalMs?: number;
@@ -578,6 +620,11 @@ export class ReviewManager {
 			findingBudget?: import("./finding-budget.js").FindingBudget;
 			/** Scope-preparation failures collected before lens execution. */
 			preparationErrors?: readonly string[];
+			/**
+			 * Pre-seeded findings JSON for lenses already executed via the deep
+			 * review pipeline. Passed straight through to `startReview`.
+			 */
+			preSeedLensOutputs?: Map<AnyLens, string>;
 		},
 		signal?: AbortSignal,
 	): Promise<ReviewResult> {
@@ -603,6 +650,7 @@ export class ReviewManager {
 				activeConstraints: options.activeConstraints,
 				mode: options.target?.mode,
 				scopeLabel: options.target?.label,
+				preSeedLensOutputs: options.preSeedLensOutputs,
 			},
 		);
 		const started = this.jobs.get(jobId);

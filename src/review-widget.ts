@@ -3,6 +3,7 @@ import { LENS_DISPLAY_NAMES } from "./constants.js";
 import { stripAnsi } from "./content-utils.js";
 import { logAutoreviewError } from "./logger.js";
 import type { Finding, Severity } from "./types.js";
+import { RISK_CODES } from "./prompts/risk-codes.js";
 
 /**
  * Format a millisecond duration as a compact elapsed-time string. */
@@ -216,6 +217,143 @@ const defaultTheme: FindingTheme = {
 	bold: (t) => t,
 	dim: (t) => t,
 };
+
+/** Severity order for consistent group rendering (critical first, nit last). */
+const SEVERITY_ORDER: Severity[] = [
+	"critical",
+	"high",
+	"medium",
+	"low",
+	"nit",
+];
+
+/**
+ * Group a list of findings by their `riskCode` field.
+ *
+ * Returns an ordered array of `[riskCode | null, findings[]]` pairs:
+ *   - Named groups (e.g. "R1", "K1") appear in the order they are first
+ *     encountered, with the catalogue name resolved from RISK_CODES.
+ *   - A final `null` bucket collects findings that have no `riskCode`.
+ *
+ * The null bucket is omitted when it would be empty.
+ */
+export function groupFindingsByRiskCode(
+	findings: readonly Finding[],
+): Array<{ riskCode: string | null; name: string; findings: Finding[] }> {
+	const codeOrder: string[] = [];
+	const byCode = new Map<string, Finding[]>();
+	const noCode: Finding[] = [];
+
+	for (const f of findings) {
+		if (f.riskCode) {
+			if (!byCode.has(f.riskCode)) {
+				byCode.set(f.riskCode, []);
+				codeOrder.push(f.riskCode);
+			}
+			byCode.get(f.riskCode)!.push(f);
+		} else {
+			noCode.push(f);
+		}
+	}
+
+	const groups: Array<{
+		riskCode: string | null;
+		name: string;
+		findings: Finding[];
+	}> = [];
+
+	for (const code of codeOrder) {
+		const codeDef = (RISK_CODES as Record<string, { name: string } | undefined>)[
+			code
+		];
+		const name = codeDef ? codeDef.name : code;
+		groups.push({ riskCode: code, name, findings: byCode.get(code)! });
+	}
+
+	if (noCode.length > 0) {
+		groups.push({ riskCode: null, name: "Other", findings: noCode });
+	}
+
+	return groups;
+}
+
+/**
+ * Format a severity-then-risk-code grouped block of findings as a
+ * human-readable multi-line string.
+ *
+ * Grouping behaviour:
+ *   - Findings are first partitioned by severity in canonical order
+ *     (critical → high → medium → low → nit). Empty severity buckets
+ *     are skipped.
+ *   - Within each severity bucket, findings are sub-grouped by
+ *     `riskCode`. This secondary grouping is applied when
+ *     `options.groupByRiskCode` is `true`, OR when at least one finding
+ *     in the input set carries a non-empty `riskCode` (opt-in by
+ *     presence). Pass `options.groupByRiskCode = false` to force-disable
+ *     the sub-grouping even when risk codes are present.
+ *   - Sub-group headers look like: `  [K1] KISS violations (3)`
+ *   - Findings without a riskCode go into an "Other" sub-group rendered
+ *     last within their severity bucket.
+ *
+ * @param findings - Full list of findings to render (all severities).
+ * @param theme    - Colour theme injected by the caller (defaults to no-op).
+ * @param options  - Optional rendering flags.
+ */
+export function formatFindingsGrouped(
+	findings: readonly Finding[],
+	theme: FindingTheme = defaultTheme,
+	options: { groupByRiskCode?: boolean } = {},
+): string {
+	if (findings.length === 0) return "";
+
+	// Determine whether to apply risk-code sub-grouping.
+	const hasAnyriskCode = findings.some((f) => f.riskCode);
+	const useRiskCodeGroups =
+		options.groupByRiskCode !== undefined
+			? options.groupByRiskCode
+			: hasAnyriskCode;
+
+	const sections: string[] = [];
+
+	for (const sev of SEVERITY_ORDER) {
+		const bucket = findings.filter((f) => f.severity === sev);
+		if (bucket.length === 0) continue;
+
+		const sevLabel =
+			sev.charAt(0).toUpperCase() + sev.slice(1);
+		sections.push(
+			theme.bold(`── ${sevLabel} (${bucket.length}) ──`),
+		);
+
+		if (useRiskCodeGroups) {
+			const riskGroups = groupFindingsByRiskCode(bucket);
+			for (const group of riskGroups) {
+				const badge =
+					group.riskCode !== null
+						? `[${group.riskCode}] ${group.name}`
+						: "Other";
+				sections.push(
+					`  ${theme.fg("accent", badge)} (${group.findings.length})`,
+				);
+				for (const f of group.findings) {
+					// Indent each finding line by two extra spaces to nest
+					// visually under the sub-group header.
+					const rendered = formatFinding(f, theme)
+						.split("\n")
+						.map((line) => `  ${line}`)
+						.join("\n");
+					sections.push(rendered);
+				}
+			}
+		} else {
+			for (const f of bucket) {
+				sections.push(formatFinding(f, theme));
+			}
+		}
+	}
+
+	return sections.join("\n");
+}
 
 type Theme = {
 	fg(color: string, text: string): string;

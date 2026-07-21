@@ -11,8 +11,9 @@ import { loadEffectiveConfig } from "./config.js";
 import { buildActiveConstraints } from "./active-constraints.js";
 import { runDeepAutoreview } from "./deep-review-command.js";
 import { executeFlatReview } from "./review-tool-executor.js";
-import type { ReviewLens } from "./types.js";
+import type { ReviewLens, AnyLens } from "./types.js";
 import { LENS_NAMES } from "./types.js";
+import { discoverCustomLenses } from "./prompt-loader.js";
 import { runScout, type ScoutResult, type ScoutStatus } from "./scout.js";
 import {
 	resolveReviewScope,
@@ -30,8 +31,21 @@ import {
 	startBackgroundReview,
 	type BackgroundReviewRecord,
 } from "./background-review.js";
+import {
+	safePostPrReview,
+	verdictToGitHubEvent,
+	type PrInfo,
+} from "./github-pr.js";
 
 const MAX_FILES = 40;
+
+/**
+ * Default set of lenses that use the Bugbot-style deep-review pipeline
+ * (multi-pass adversarial + validator) instead of a single-pass subagent.
+ * Security findings have the highest value and benefit most from multi-pass
+ * coverage, so this is the default when no `deepLenses` config is set.
+ */
+const DEFAULT_DEEP_LENSES: readonly Exclude<ReviewLens, "all">[] = ["security"];
 
 function safeOnUpdate(
 	onUpdate:
@@ -55,7 +69,11 @@ function safeOnUpdate(
 
 // ── Tool parameter schema ─────────────────────────────────
 
-/** Shared TypeBox union of the eight DRYKISS lens names (no "all"). */
+/**
+ * Shared TypeBox schema for a single lens name.
+ * Accepts the eight built-in DRYKISS lens names OR any non-empty string
+ * (for custom lenses loaded from `~/.pi/drykiss/prompts/`).
+ */
 const LensNameParam = Type.Union(
 	[
 		Type.Literal("simplicity"),
@@ -66,9 +84,11 @@ const LensNameParam = Type.Union(
 		Type.Literal("tests"),
 		Type.Literal("security"),
 		Type.Literal("docs"),
+		Type.String({ minLength: 1, description: "Custom user-defined lens name" }),
 	],
 	{
-		description: "A single DRYKISS lens name",
+		description:
+			"A DRYKISS lens name (built-in or custom from ~/.pi/drykiss/prompts/)",
 	},
 );
 
@@ -149,6 +169,13 @@ export const DrykissAutoreviewParams = Type.Object({
 	// ── Output (rare override) ──
 	format: Type.Optional(
 		Type.Union([Type.Literal("compact"), Type.Literal("structured")]),
+	),
+	// ── PR integration ──
+	postToPr: Type.Optional(
+		Type.Boolean({
+			description:
+				"When true, post the review findings back to the GitHub PR as an inline review after the review completes. Only effective when mode=pr. Requires `gh` CLI to be authenticated. Overrides config.postToPr.",
+		}),
 	),
 });
 
@@ -251,8 +278,8 @@ async function runStandaloneScout(
 
 type AutoreviewRequest = {
 	mode?: ReviewMode;
-	lens?: "all" | "scout" | Exclude<ReviewLens, "all">;
-	lenses?: "all" | Exclude<ReviewLens, "all">[];
+	lens?: "all" | "scout" | AnyLens;
+	lenses?: "all" | AnyLens[];
 };
 
 function isLongReview(params: AutoreviewRequest): boolean {
@@ -282,8 +309,8 @@ export async function executeDrykissAutoreviewTool(
 		base?: string;
 		commit?: string;
 		pr?: string;
-		lens?: "all" | "scout" | Exclude<ReviewLens, "all">;
-		lenses?: "all" | Exclude<ReviewLens, "all">[];
+		lens?: "all" | "scout" | AnyLens;
+		lenses?: "all" | AnyLens[];
 		/**
 		 * Internal-only: callers (deep-mode pipeline, tests) may pass
 		 * a model hint. The LLM-facing tool schema (DrykissAutoreviewParams)
@@ -311,12 +338,27 @@ export async function executeDrykissAutoreviewTool(
 		/** When false, skip the deep-mode validator pass. Default true. */
 		deepValidate?: boolean;
 		/**
+		 * Disable automatic deep-mode for lenses configured in `deepLenses`.
+		 * When true, all lenses run as standard single-pass reviews regardless
+		 * of the `deepLenses` config setting. Equivalent to `deep: false` in
+		 * config. Default: false (deep mode is enabled by default for lenses in
+		 * `deepLenses`, which defaults to `["security"]`).
+		 */
+		noDeep?: boolean;
+		/**
 		 * Output format for the tool's text content. See schema doc
 		 * above. Default "compact".
 		 */
 		format?: "compact" | "structured";
 		/** Return immediately, or use "auto" for full all-lens reviews only. */
 		background?: boolean | "auto";
+		/**
+		 * When true, post the review findings back to the GitHub PR as a
+		 * pull-request review after the review completes (PR scope only).
+		 * Overrides `config.postToPr` when explicitly set. Requires the
+		 * `gh` CLI to be authenticated.
+		 */
+		postToPr?: boolean;
 	},
 	ctx: ExtensionContext,
 	pi: ExtensionAPI,
@@ -532,6 +574,77 @@ export async function executeDrykissAutoreviewTool(
 		);
 	}
 
+	// ── Deep-lens pre-run ─────────────────────────────────────────────────
+	// When a lens is listed in `deepLenses` (default: ["security"]) and deep
+	// mode is not globally disabled, run it through the Bugbot-style pipeline
+	// before the flat flow. Its findings are pre-seeded into the manager so
+	// synthesis sees them alongside single-pass lens results.
+	const deepEnabled =
+		!params.noDeep && effectiveConfig.deep !== false;
+	const configuredDeepLenses: readonly Exclude<ReviewLens, "all">[] =
+		effectiveConfig.deepLenses ?? DEFAULT_DEEP_LENSES;
+	// Compute the intersection: lenses that are both requested AND deep-enabled.
+	// Only named DRYKISS lenses (not custom lenses) can run in deep mode.
+	const deepLensSet = new Set<string>(configuredDeepLenses);
+	const lensesToRunDeep = deepEnabled
+		? (lenses.filter((l) => deepLensSet.has(l)) as Exclude<ReviewLens, "all">[])
+		: [];
+
+	const preSeedLensOutputs = new Map<AnyLens, string>();
+	if (lensesToRunDeep.length > 0) {
+		logAutoreviewEvent("autoreview.deep_lenses_start", {
+			lenses: lensesToRunDeep,
+			files: cappedScope.files.length,
+		});
+		safeOnUpdate(
+			onUpdate,
+			`DRYKISS autoreview: running deep-review for ${lensesToRunDeep.join(", ")} lens(es) (${cappedScope.files.length} file(s))${capNote}...`,
+		);
+		for (const deepLens of lensesToRunDeep) {
+			try {
+				safeOnUpdate(
+					onUpdate,
+					`DRYKISS deep-${deepLens}: starting multi-pass adversarial review...`,
+				);
+				const deepResult = await runDeepAutoreview(
+					ctx,
+					cappedScope,
+					{
+						deep: deepLens,
+						model: params.model,
+						format: params.format,
+					},
+					onUpdate,
+					signal,
+				);
+				// Serialize the deep findings as a JSON array so the manager's
+				// parseFindingsJson can deserialise them into the lens state.
+				const deepFindings = deepResult.details.result.findings;
+				preSeedLensOutputs.set(deepLens, JSON.stringify(deepFindings));
+				logAutoreviewEvent("autoreview.deep_lens_complete", {
+					lens: deepLens,
+					findings: deepFindings.length,
+				});
+			} catch (err) {
+				// Fail-open: if deep review errors, fall back to single-pass for
+				// this lens so the overall review still completes.
+				const msg = err instanceof Error ? err.message : String(err);
+				console.warn(
+					`${LOG_PREFIX} Deep review for ${deepLens} failed, falling back to single-pass: ${msg}`,
+				);
+				logAutoreviewEvent("autoreview.deep_lens_fallback", {
+					lens: deepLens,
+					error: msg,
+				});
+				safeOnUpdate(
+					onUpdate,
+					`${LOG_PREFIX} Deep review for ${deepLens} failed; using single-pass fallback.`,
+				);
+			}
+		}
+	}
+	// ── End deep-lens pre-run ──────────────────────────────────────────────
+
 	safeOnUpdate(
 		onUpdate,
 		`DRYKISS autoreview progress: [${"░".repeat(10)}] 0/${lenses.length} lens(es) complete · starting ${cappedScope.label} (${cappedScope.files.length} file(s))${capNote}`,
@@ -564,6 +677,7 @@ export async function executeDrykissAutoreviewTool(
 		onProgress: onUpdate
 			? (job) => safeOnUpdate(onUpdate, formatReviewProgress(job))
 			: undefined,
+		preSeedLensOutputs: preSeedLensOutputs.size > 0 ? preSeedLensOutputs : undefined,
 	});
 	const formatMode = params.format ?? "compact";
 	const jobs =
@@ -580,6 +694,49 @@ export async function executeDrykissAutoreviewTool(
 		verdict: finalResult.verdict,
 		healthScore: finalResult.healthScore,
 	});
+
+	// ── Post findings to the GitHub PR (optional) ──────────────────────────
+	// Post when the scope is a PR review AND either:
+	//   a) the config has `postToPr: true`, or
+	//   b) the --post-to-pr flag was passed (params.postToPr === true).
+	let prPostNote = "";
+	if (
+		cappedScope.mode === "pr" &&
+		(effectiveConfig.postToPr === true || params.postToPr === true)
+	) {
+		const prMeta = cappedScope.metadata.pr as PrInfo | undefined;
+		if (prMeta?.owner && prMeta?.repo && prMeta?.number) {
+			const ghVerdict = verdictToGitHubEvent(finalResult.verdict);
+			const postResult = await safePostPrReview(
+				ctx.cwd,
+				prMeta.owner,
+				prMeta.repo,
+				prMeta.number,
+				finalResult.findings,
+				ghVerdict,
+				finalResult.summary,
+			);
+			if (postResult.success) {
+				prPostNote = postResult.reviewUrl
+					? `\nDRYKISS PR review posted: ${postResult.reviewUrl}`
+					: "\nDRYKISS PR review posted successfully.";
+				logAutoreviewEvent("autoreview.pr_post_success", {
+					jobId: finalResult.jobId,
+					reviewUrl: postResult.reviewUrl,
+				});
+			} else {
+				prPostNote = `\nDRYKISS: Failed to post PR review — ${postResult.error ?? "unknown error"}`;
+				console.warn(
+					`${LOG_PREFIX} Failed to post PR review: ${postResult.error}`,
+				);
+				logAutoreviewEvent("autoreview.pr_post_failed", {
+					jobId: finalResult.jobId,
+					error: postResult.error,
+				});
+			}
+		}
+	}
+
 	const text =
 		progressLine +
 		(scoutNote ? `${scoutNote}\n` : "") +
@@ -589,7 +746,8 @@ export async function executeDrykissAutoreviewTool(
 				})
 			: formatReviewResultForTool(finalResult, {
 					qualityGateThreshold: effectiveConfig.qualityGate,
-				}));
+				})) +
+		prPostNote;
 
 	return {
 		content: [{ type: "text", text }],
@@ -629,9 +787,9 @@ function buildScoutNote(scope: ReviewScope): string {
 }
 
 function resolveLenses(
-	single: "all" | Exclude<ReviewLens, "all"> | undefined,
-	multi: "all" | Exclude<ReviewLens, "all">[] | undefined,
-): Exclude<ReviewLens, "all">[] {
+	single: "all" | AnyLens | undefined,
+	multi: "all" | AnyLens[] | undefined,
+): AnyLens[] {
 	if (single) {
 		if (single === "all") return [...LENS_NAMES];
 		return [single];
@@ -720,7 +878,7 @@ function formatReviewProgress(job: ReviewJob): string {
 	// review is making progress and which provider/model is doing work. When
 	// no lens is active (including the final persisted tool output), keep a
 	// compact model summary so the bar remains visible after completion.
-	const formatLensModel = (lens: ReviewLens): string => {
+	const formatLensModel = (lens: AnyLens): string => {
 		const state = job.states.get(lens);
 		const modelName = state?.modelName ?? "unknown";
 		const provider = state?.provider ? `${state.provider}/` : "";

@@ -4,7 +4,7 @@ import type {
 	ExtensionContext,
 	AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { ReviewLens } from "./types.js";
+import type { AnyLens } from "./types.js";
 import { parseFindingsJson } from "./parse-findings.js";
 import { saveSessionLog } from "./persist.js";
 import { runLensSubagent } from "./subagent-runner.js";
@@ -41,7 +41,7 @@ interface LensRunnerOptions {
 function applySuccessfulOutput(
 	state: LensState,
 	text: string,
-	lens: ReviewLens,
+	lens: AnyLens,
 ): void {
 	state.status = "done";
 	const rawOutput = text || "[]";
@@ -74,7 +74,7 @@ function notify(
 async function saveLog(
 	job: ReviewJobState,
 	state: LensState,
-	lens: ReviewLens,
+	lens: AnyLens,
 	session: AgentSession | undefined,
 ): Promise<void> {
 	try {

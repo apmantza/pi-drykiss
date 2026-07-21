@@ -13,12 +13,13 @@
  * Composition is the job of `prompt-composer.ts`.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { getGlobalBaseDir } from "./constants.js";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { logAutoreviewEvent, logAutoreviewError } from "./logger.js";
+import { BUILT_IN_LENS_SET } from "./types.js";
 
 export interface PromptSource {
 	/** Where to read prompts from. */
@@ -160,4 +161,61 @@ export async function loadPromptBody(
 	}
 
 	throw lastErr;
+}
+
+/**
+ * Scan the user's prompts directory (`~/.pi/drykiss/prompts/`) for `.md`
+ * files that do not match any built-in lens name (or the special shared
+ * fragments inside `_shared/`). Returns the discovered lens names (without
+ * the `.md` extension) sorted alphabetically.
+ *
+ * This function is fail-open: if the directory does not exist or cannot be
+ * read, it returns an empty array rather than throwing.
+ */
+export async function discoverCustomLenses(): Promise<string[]> {
+	const env = process.env.DRYKISS_PROMPTS_DIR;
+	const dir =
+		env && env.trim().length > 0
+			? isAbsolute(env)
+				? env
+				: join(process.cwd(), env)
+			: userPromptsDir();
+
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch {
+		// Directory does not exist or is unreadable — no custom lenses.
+		return [];
+	}
+
+	const custom: string[] = [];
+	for (const entry of entries) {
+		if (!entry.endsWith(".md")) continue;
+		const name = entry.slice(0, -3); // strip ".md"
+		// Skip built-in lenses and shared fragments (prefixed with "_").
+		if (BUILT_IN_LENS_SET.has(name)) continue;
+		if (name.startsWith("_")) continue;
+		// Skip meta names used by built-in shared fragments and synthesis.
+		const reserved = new Set([
+			"synthesis",
+			"iron-law",
+			"json-output",
+			"json-output-synthesis",
+			"grounding-rules",
+			"grounding-rules-synthesis",
+			"active-constraints",
+		]);
+		if (reserved.has(name)) continue;
+		custom.push(name);
+	}
+
+	custom.sort();
+	if (custom.length > 0) {
+		logAutoreviewEvent("prompt.custom_lenses_discovered", {
+			dir,
+			lenses: custom,
+		});
+	}
+	return custom;
 }

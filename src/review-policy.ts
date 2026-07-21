@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ReviewPathInstruction } from "./config.js";
 import { matchesAnyGlob } from "./glob-utils.js";
-import type { ChangedFile, ReviewLens } from "./types.js";
+import type { ChangedFile, ReviewLens, AnyLens } from "./types.js";
 import { getNodeErrorCode, LOG_PREFIX } from "./constants.js";
 
 export interface LoadedReviewPolicy {
@@ -40,7 +40,7 @@ export async function loadProjectReviewPolicy(
 
 export function selectPathInstructions(
 	files: readonly ChangedFile[],
-	lens: ReviewLens,
+	lens: AnyLens,
 	instructions: readonly ReviewPathInstruction[] | undefined,
 ): string[] {
 	if (!instructions || instructions.length === 0) return [];
