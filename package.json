@@ -65,5 +65,9 @@
     "tsx": "^4.23.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.6"
+  },
+  "overrides": {
+    "brace-expansion": ">=5.0.7",
+    "protobufjs": ">=7.6.5"
   }
 }
